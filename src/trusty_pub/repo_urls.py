@@ -6,7 +6,7 @@ from .defaults import resolve_package_listing, resolve_pypi_metadata
 
 # _GITHUB_RE = r"(https?://github\.com/[^\s,]+)"
 # Do not take the entire URL, only up to the GitHub repo name part of the URL
-_GITHUB_RE = r"(https?://github\.com/[^/\s,]+/[^/\s,]+)"
+_GITHUB_RE = r"(https?://github\.com/[^/\s,#]+/[^/\s,#]+)"
 
 
 def _extract_github_url(df: pl.DataFrame) -> pl.DataFrame:
@@ -59,7 +59,9 @@ def fetch_repo_urls(
 
     packages = (
         pl.read_csv(listing_csv)
+        .with_row_index("rank", offset=1)
         .select(
+            "rank",
             pl.col("project").alias("name"),
         )
         .with_columns(_normalise_name())
