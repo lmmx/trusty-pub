@@ -17,3 +17,11 @@ def resolve_package_listing(name: str | None = None) -> dict:
         # Pick the first key in TOML — canonical
         name = next(iter(listings))
     return listings[name]  # KeyError if not found
+
+
+def resolve_pypi_metadata(name: str | None = None) -> dict:
+    raw = tomllib.loads(_TOML.read_text())
+    sources = raw["data"]["pypi_metadata"]
+    if name is None:
+        name = next(iter(sources))
+    return sources[name]

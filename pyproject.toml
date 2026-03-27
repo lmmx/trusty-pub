@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 trusty-pub = "trusty_pub:main"
 tp-refresh-pkgs = "trusty_pub.source_listings:fetch_package_listing"
+tp-repo-urls = "trusty_pub.repo_urls:fetch_repo_urls"
 
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]
