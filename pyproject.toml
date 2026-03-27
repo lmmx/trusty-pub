@@ -1,0 +1,19 @@
+[project]
+name = "trusty-pub"
+version = "0.1.0"
+description = "Indexing support for Trusted Publishing on PyPI"
+readme = "README.md"
+authors = [
+    { name = "Louis Maddox", email = "louismmx@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "polars>=1.39.3",
+]
+
+[project.scripts]
+trusty-pub = "trusty_pub:main"
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
