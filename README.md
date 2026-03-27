@@ -11,7 +11,8 @@ To re-run, call the package entrypoint `pub-up`.
 
 ## Trusted Publishing detection
 
-We use [grepow][grepow] to pull down the GitHub repos in sparse mode,
+We use [grepow][grepow] to pull down the GitHub repos in sparse mode (we only need the
+`.github/workflows` subdir),
 after having acquired the repo names from package metadata on PyPI.
 
 [grepow]: https://github.com/lmmx/grepow
