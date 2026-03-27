@@ -7,7 +7,9 @@ Indexing support for Trusted Publishing on PyPI
 This repo contains a reproducible analysis with a cached directory of the `.github/workflows`
 subdirs of Python packages on the Python package registry _PyPI_.
 
-To re-run, call the package entrypoint `pub-up`.
+To re-run, call the package entrypoint `trusty-pub`.
+
+- To just refresh Hugo VK's PyPI package listings, run `tp-refresh-pkgs`
 
 ## Trusted Publishing detection
 

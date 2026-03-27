@@ -8,11 +8,13 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "grepow>=0.1.1",
     "polars>=1.39.3",
 ]
 
 [project.scripts]
 trusty-pub = "trusty_pub:main"
+tp-refresh-pkgs = "trusty_pub.source_listings:fetch_package_listing"
 
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]

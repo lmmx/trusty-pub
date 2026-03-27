@@ -1,0 +1,2 @@
+[data.top_pypi_packages]
+last_30_days = { repo = "hugovk/top-pypi-packages", path = "top-pypi-packages-30-days.min.json" }
