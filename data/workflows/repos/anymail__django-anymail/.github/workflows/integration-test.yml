@@ -1,0 +1,121 @@
+name: integration-test
+
+on:
+  pull_request:
+  push:
+    branches: ["main", "v[0-9]*"]
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+  schedule:
+    # Weekly test (on branch main) every Thursday at 12:15 UTC.
+    # (Used to monitor compatibility with ESP API changes.)
+    - cron: "15 12 * * 4" # zizmor: ignore[cache-poisoning] not used for publishing
+
+permissions: {}
+
+jobs:
+  skip_duplicate_runs:
+    # Avoid running the live integration tests twice on the same code
+    # (to conserve limited sending quotas in the live ESP test accounts)
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        # uses: fkirc/skip-duplicate-actions@v5.3.1
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf
+        with:
+          concurrent_skipping: "same_content_newer"
+          cancel_others: "true"
+
+  test:
+    name: ${{ matrix.config.tox }} ${{ matrix.config.options }}
+    runs-on: ubuntu-22.04
+    needs: skip_duplicate_runs
+    permissions:
+      contents: read
+    if: needs.skip_duplicate_runs.outputs.should_skip != 'true'
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Live API integration tests are run on only one representative Python/Django version
+        # combination, to avoid rapidly consuming the testing accounts' entire send allotments.
+        config:
+          - { tox: django60-py314-amazon_ses, python: "3.14" }
+          - { tox: django60-py314-brevo, python: "3.14" }
+          - { tox: django60-py314-mailersend, python: "3.14" }
+          - { tox: django60-py314-mailgun, python: "3.14" }
+          - { tox: django60-py314-mailjet, python: "3.14" }
+          - { tox: django60-py314-mailtrap, python: "3.14" }
+          - { tox: django60-py314-mandrill, python: "3.14" }
+          - { tox: django60-py314-postal, python: "3.14" }
+          - { tox: django60-py314-postmark, python: "3.14" }
+          - { tox: django60-py314-resend, python: "3.14" }
+          - { tox: django60-py314-scaleway, python: "3.14" }
+          # - { tox: django60-py314-sendgrid, python: "3.14" }
+          - { tox: django60-py314-sparkpost, python: "3.14" }
+          - { tox: django60-py314-unisender_go, python: "3.14" }
+
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Setup Python ${{ matrix.config.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.config.python }}
+          cache: "pip"
+      - name: Install tox
+        run: |
+          set -x
+          python --version
+          pip install 'tox<4'
+          tox --version
+      - name: Test ${{ matrix.config.tox }}
+        run: |
+          tox -e ${{ matrix.config.tox }}
+        continue-on-error: ${{ contains( matrix.config.options, 'allow-failures' ) }}
+        env:
+          CONTINUOUS_INTEGRATION: true
+          TOX_FORCE_IGNORE_OUTCOME: false
+          ANYMAIL_RUN_LIVE_TESTS: true
+          ANYMAIL_TEST_AMAZON_SES_ACCESS_KEY_ID: ${{ secrets.ANYMAIL_TEST_AMAZON_SES_ACCESS_KEY_ID }}
+          ANYMAIL_TEST_AMAZON_SES_DOMAIN: ${{ secrets.ANYMAIL_TEST_AMAZON_SES_DOMAIN }}
+          ANYMAIL_TEST_AMAZON_SES_REGION_NAME: ${{ secrets.ANYMAIL_TEST_AMAZON_SES_REGION_NAME }}
+          ANYMAIL_TEST_AMAZON_SES_SECRET_ACCESS_KEY: ${{ secrets.ANYMAIL_TEST_AMAZON_SES_SECRET_ACCESS_KEY }}
+          ANYMAIL_TEST_BREVO_API_KEY: ${{ secrets.ANYMAIL_TEST_BREVO_API_KEY }}
+          ANYMAIL_TEST_BREVO_DOMAIN: ${{ vars.ANYMAIL_TEST_BREVO_DOMAIN }}
+          ANYMAIL_TEST_MAILERSEND_API_TOKEN: ${{ secrets.ANYMAIL_TEST_MAILERSEND_API_TOKEN }}
+          ANYMAIL_TEST_MAILERSEND_DOMAIN: ${{ secrets.ANYMAIL_TEST_MAILERSEND_DOMAIN }}
+          ANYMAIL_TEST_MAILGUN_API_KEY: ${{ secrets.ANYMAIL_TEST_MAILGUN_API_KEY }}
+          ANYMAIL_TEST_MAILGUN_DOMAIN: ${{ secrets.ANYMAIL_TEST_MAILGUN_DOMAIN }}
+          ANYMAIL_TEST_MAILJET_API_KEY: ${{ secrets.ANYMAIL_TEST_MAILJET_API_KEY }}
+          ANYMAIL_TEST_MAILJET_DOMAIN: ${{ vars.ANYMAIL_TEST_MAILJET_DOMAIN }}
+          ANYMAIL_TEST_MAILJET_SECRET_KEY: ${{ secrets.ANYMAIL_TEST_MAILJET_SECRET_KEY }}
+          ANYMAIL_TEST_MAILJET_TEMPLATE_ID: ${{ vars.ANYMAIL_TEST_MAILJET_TEMPLATE_ID }}
+          ANYMAIL_TEST_MAILTRAP_API_TOKEN: ${{ secrets.ANYMAIL_TEST_MAILTRAP_API_TOKEN }}
+          ANYMAIL_TEST_MAILTRAP_DOMAIN: ${{ vars.ANYMAIL_TEST_MAILTRAP_DOMAIN }}
+          ANYMAIL_TEST_MAILTRAP_SANDBOX_ID: ${{ vars.ANYMAIL_TEST_MAILTRAP_SANDBOX_ID }}
+          ANYMAIL_TEST_MAILTRAP_TEMPLATE_UUID: ${{ vars.ANYMAIL_TEST_MAILTRAP_TEMPLATE_UUID }}
+          ANYMAIL_TEST_MANDRILL_API_KEY: ${{ secrets.ANYMAIL_TEST_MANDRILL_API_KEY }}
+          ANYMAIL_TEST_MANDRILL_DOMAIN: ${{ secrets.ANYMAIL_TEST_MANDRILL_DOMAIN }}
+          ANYMAIL_TEST_POSTMARK_DOMAIN: ${{ secrets.ANYMAIL_TEST_POSTMARK_DOMAIN }}
+          ANYMAIL_TEST_POSTMARK_SERVER_TOKEN: ${{ secrets.ANYMAIL_TEST_POSTMARK_SERVER_TOKEN }}
+          ANYMAIL_TEST_POSTMARK_TEMPLATE_ID: ${{ secrets.ANYMAIL_TEST_POSTMARK_TEMPLATE_ID }}
+          ANYMAIL_TEST_RESEND_API_KEY: ${{ secrets.ANYMAIL_TEST_RESEND_API_KEY }}
+          ANYMAIL_TEST_RESEND_DOMAIN: ${{ secrets.ANYMAIL_TEST_RESEND_DOMAIN }}
+          ANYMAIL_TEST_SCALEWAY_DOMAIN: ${{ vars.ANYMAIL_TEST_SCALEWAY_DOMAIN }}
+          ANYMAIL_TEST_SCALEWAY_PROJECT_ID: ${{ secrets.ANYMAIL_TEST_SCALEWAY_PROJECT_ID }}
+          ANYMAIL_TEST_SCALEWAY_SECRET_KEY: ${{ secrets.ANYMAIL_TEST_SCALEWAY_SECRET_KEY }}
+          ANYMAIL_TEST_SENDGRID_API_KEY: ${{ secrets.ANYMAIL_TEST_SENDGRID_API_KEY }}
+          ANYMAIL_TEST_SENDGRID_DOMAIN: ${{ vars.ANYMAIL_TEST_SENDGRID_DOMAIN }}
+          ANYMAIL_TEST_SENDGRID_TEMPLATE_ID: ${{ secrets.ANYMAIL_TEST_SENDGRID_TEMPLATE_ID }}
+          ANYMAIL_TEST_SPARKPOST_API_KEY: ${{ secrets.ANYMAIL_TEST_SPARKPOST_API_KEY }}
+          ANYMAIL_TEST_SPARKPOST_DOMAIN: ${{ secrets.ANYMAIL_TEST_SPARKPOST_DOMAIN }}
+          ANYMAIL_TEST_UNISENDER_GO_API_KEY: ${{ secrets.ANYMAIL_TEST_UNISENDER_GO_API_KEY }}
+          ANYMAIL_TEST_UNISENDER_GO_API_URL: ${{ vars.ANYMAIL_TEST_UNISENDER_GO_API_URL }}
+          ANYMAIL_TEST_UNISENDER_GO_DOMAIN: ${{ vars.ANYMAIL_TEST_UNISENDER_GO_DOMAIN }}
+          ANYMAIL_TEST_UNISENDER_GO_TEMPLATE_ID: ${{ vars.ANYMAIL_TEST_UNISENDER_GO_TEMPLATE_ID }}

@@ -1,0 +1,55 @@
+#
+# GitHub Actions workflow configuration.
+#
+# https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions
+#
+
+# Use the Slack-provided GitHub Action to send flattened GitHub webhook payloads to Slack workflow webhooks.
+#
+# https://tools.slack.dev/slack-github-action
+name: Slack
+on:
+  discussion:
+    types:
+      - created
+  issues:
+    types:
+      - opened
+      - reopened
+jobs:
+  discussion-created:
+    name: Discussion Created
+    if: ${{ github.event_name == 'discussion' && github.event.action == 'created' }}
+    environment: Slack
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: slackapi/slack-github-action@v2
+        with:
+          payload-delimiter: _
+          webhook: ${{ secrets.DISCUSSION_CREATED_WEBHOOK_URL }}
+          webhook-type: webhook-trigger
+  issue-opened:
+    name: Issue Opened
+    if: ${{ github.event_name == 'issues' && github.event.action == 'opened' }}
+    environment: Slack
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: slackapi/slack-github-action@v2
+        with:
+          payload-delimiter: _
+          webhook: ${{ secrets.ISSUE_OPENED_WEBHOOK_URL }}
+          webhook-type: webhook-trigger
+  issue-reopened:
+    name: Issue Reopened
+    if: ${{ github.event_name == 'issues' && github.event.action == 'reopened' }}
+    environment: Slack
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: slackapi/slack-github-action@v2
+        with:
+          payload-delimiter: _
+          webhook: ${{ secrets.ISSUE_REOPENED_WEBHOOK_URL }}
+          webhook-type: webhook-trigger

@@ -1,0 +1,218 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+env:
+  CARGO_TERM_COLOR: always
+  WASM_PACK_VERSION: "v0.10.3"
+
+jobs:
+  test:
+    name: Test
+    runs-on: ${{matrix.os}}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: false
+          - build: macos
+            os: macos-latest
+            target: x86_64-apple-darwin
+            cross: false
+
+          - build: freebsd
+            os: ubuntu-latest
+            target: x86_64-unknown-freebsd
+            cross: true
+          - build: windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup
+            target
+          key: ${{ runner.os }}-min165
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Nightly Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: ${{ matrix.target }}
+          override: true
+          default: true
+          components: rustfmt, clippy, rust-src
+
+      - name: Set up python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # NOTE: ^this strategy leaves older python versions intentionally
+          # without test coverage to keep CI fast.
+
+      - name: Check versions
+        run: |
+          cargo --version
+          rustc --version
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: ${{env.WASM_PACK_VERSION}}
+
+      - name: Build WASM
+        working-directory: ./pagefind_web
+        run: ./local_build.sh
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: beta
+          target: ${{ matrix.target }}
+          override: true
+          default: true
+          components: rustfmt, clippy
+
+      - name: Check versions
+        run: |
+          cargo --version
+          rustc --version
+
+      - name: Build Coupled JS
+        working-directory: ./pagefind_web_js
+        run: npm i && npm run build-coupled
+
+      - name: Build UI
+        working-directory: ./pagefind_ui/default
+        run: npm i && npm run build
+
+      - name: Build Modular UI
+        working-directory: ./pagefind_ui/modular
+        run: npm i && npm run build
+
+      - name: Build Component UI
+        working-directory: ./pagefind_ui/component
+        run: npm i && npm run build
+
+      - name: Typecheck Component UI
+        working-directory: ./pagefind_ui/component
+        run: npm run typecheck
+
+      - name: Build Playground
+        working-directory: ./pagefind_playground
+        run: npm i && npm run build
+
+      - name: Test Web
+        working-directory: ./pagefind_web
+        run: cargo test --release
+
+      - name: Build Testing Binary
+        if: matrix.build != 'freebsd'
+        working-directory: ./pagefind
+        run: cargo build --release --features extended
+
+      - name: Install Cross (for FreeBSD compilation)
+        if: matrix.cross == true
+        run: cargo install cross
+
+      - name: Build FreeBSD Test Binary
+        working-directory: ./pagefind
+        if: matrix.build == 'freebsd'
+        run: cross build --release --target ${{matrix.target}} --features extended
+
+      - name: Upload Testing Binary
+        if: matrix.build!= 'freebsd'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pagefind-${{ matrix.target }}
+          path: target/release/pagefind${{ matrix.build == 'windows' && '.exe' || '' }}
+      
+      - name: Upload Testing Binary (FreeBSD)
+        uses: actions/upload-artifact@v4
+        if: matrix.build == 'freebsd'
+        with:
+          name: pagefind-${{ matrix.target }}
+          path: target/${{matrix.target}}/release/pagefind
+
+      - name: Test 
+        if: matrix.build != 'freebsd'
+        working-directory: ./pagefind
+        run: cargo test --release --lib --features extended
+
+      - name: Test CLI
+        if: matrix.build!= 'freebsd'
+        run: npx -y toolproof@latest -s -c 1 --timeout 45
+
+      - name: Set up uv
+        if: matrix.build != 'freebsd'
+        run: ./wrappers/python/scripts/ci/github/setup_uv.sh
+
+      - name: cache venv
+        if: matrix.build != 'freebsd'
+        uses: actions/cache@v4
+        with:
+          path: wrappers/python/.venv
+          key: ${{ runner.os }}-uv-3.12-${{ hashFiles('**/uv.lock') }}
+
+      - name: Install dev dependencies
+        if: matrix.build != 'freebsd'
+        run: ./wrappers/python/scripts/ci/github/install_dev_dependencies.sh
+
+      - name: activate venv
+        if: matrix.build != 'freebsd'
+        run: ./wrappers/python/scripts/ci/github/activate_venv.sh
+
+      - name: debug python paths
+        if: matrix.build != 'freebsd'
+        run: ./wrappers/python/scripts/ci/github/debug_python_paths.sh
+
+      - name: Lint python
+        if: runner.os == 'Linux' && matrix.build != 'freebsd'
+        working-directory: ./wrappers/python
+        run: ./scripts/ci/python_lints.sh
+
+      - name: ensure cog up-to-date
+        if: runner.os == 'Linux' && matrix.build != 'freebsd'
+        working-directory: ./wrappers/python
+        run: ./scripts/ci/cog/check.sh
+
+      - name: set PYTHONPATH
+        if: matrix.build != 'freebsd'
+        shell: bash
+        working-directory: ./wrappers/python
+        run: python ./scripts/ci/github/add_src_to_pythonpath.py
+
+      - name: add target/release to windows PATH
+        if: matrix.build != 'freebsd'
+        shell: bash
+        run: echo $PWD/target/release >> "$GITHUB_PATH"
+
+      - name: Test python API
+        if: matrix.build != 'freebsd'
+        timeout-minutes: 1
+        run: ./wrappers/python/scripts/ci/github/integration_tests.sh

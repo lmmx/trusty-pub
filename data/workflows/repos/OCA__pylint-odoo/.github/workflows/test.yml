@@ -1,0 +1,81 @@
+name: build
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+env:
+  CACHE_VERSION: 1
+  PRE_COMMIT_CACHE: ~/.cache/pre-commit
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        tox_env: [py-multi]
+        include:
+          - python: '3.14'
+            os: ubuntu-latest
+            tox_env: 'lint'
+          - python: '3.14'
+            os: ubuntu-latest
+            tox_env: 'update-readme'
+          - python: '3.14'
+            os: ubuntu-latest
+            tox_env: 'build'
+        exclude:
+          # macos-14 AKA macos-latest has switched to being an ARM runner, only supporting newer versions of Python
+          # https://github.com/actions/setup-python/issues/825#issuecomment-2096792396
+          - python: '3.10'
+            os: macos-latest
+
+    steps:
+    - name: Set git to not change EoL
+      if: runner.os == 'Windows'
+      run: |
+        git config --global core.autocrlf false
+    - name: Cache pre-commit packages
+      id: cache-pre-commit
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.PRE_COMMIT_CACHE }}
+        key: ${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}-pre-commit
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+        architecture: 'x64'
+        cache: 'pip'
+    - name: install dependencies
+      run: |
+        python -mpip install --progress-bar=off -r test-requirements.txt
+        pip --version
+        pip list --format=freeze
+    - name: Test
+      run: tox -e ${{ matrix.tox_env }} -v
+    # TODO: Publish package only for signed tags
+    - name: Publish package
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags') && contains(matrix.tox_env, 'build')
+      run: |
+        ls -lah dist/*
+        python -m twine upload --verbose -u __token__ -p ${{ secrets.PYPI_API_TOKEN }} --repository-url https://upload.pypi.org/legacy/ dist/*
+    #TODO: Add GITHUB_RUN_ID.GITHUB_RUN_ATTEMPT.GITHUB_RUN_NUMBER to bumpversion to avoid duplicating upload versions or even the git sha
+    - name: codecov
+      if: startsWith(matrix.tox_env, 'py')  # only coveralls in python tests
+      uses: codecov/codecov-action@v5
+      with:
+        fail_ci_if_error: true
+        verbose: true
+        token: ${{ secrets.CODECOV_TOKEN }}

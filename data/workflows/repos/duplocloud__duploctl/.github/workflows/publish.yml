@@ -1,0 +1,147 @@
+name: Publish Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: patch
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+      push:
+        description: Push tags to remote
+        required: false
+        default: false
+        type: boolean
+      run_e2e:
+        description: Run end to end tests
+        required: false
+        default: false
+        type: boolean
+      e2e_environment:
+        description: GHA environment for integration tests (e.g. qa-aws)
+        required: false
+        default: qa-aws
+        type: environment
+
+jobs:
+
+  quality:
+    name: Test
+    uses: ./.github/workflows/quality.yml
+    secrets: inherit
+
+  unit_test:
+    name: Test
+    uses: ./.github/workflows/test_unit.yml
+    secrets: inherit
+
+  integration_aws:
+    name: Integration Tests
+    uses: ./.github/workflows/test_integration.yml
+    secrets: inherit
+    with:
+      environment: ${{ inputs.e2e_environment }}
+      enabled: ${{ inputs.run_e2e && 'true' || 'false' }}
+      suite: aws
+
+  integration_k8s:
+    name: Integration Tests
+    uses: ./.github/workflows/test_integration.yml
+    secrets: inherit
+    with:
+      environment: ${{ inputs.e2e_environment }}
+      enabled: ${{ inputs.run_e2e && 'true' || 'false' }}
+      suite: k8s
+
+  integration_ecs:
+    name: Integration Tests
+    uses: ./.github/workflows/test_integration.yml
+    secrets: inherit
+    with:
+      environment: ${{ inputs.e2e_environment }}
+      enabled: ${{ inputs.run_e2e && 'true' || 'false' }}
+      suite: ecs
+
+  version:
+    name: Version
+    uses: ./.github/workflows/version.yml
+    secrets: inherit
+    needs:
+    - quality
+    - unit_test
+    - integration_aws
+    - integration_k8s
+    - integration_ecs
+    with:
+      action: ${{ inputs.action }}
+      push: ${{ inputs.push }}
+
+  package:
+    name: Publish
+    uses: ./.github/workflows/package.yml
+    secrets: inherit
+    needs: 
+    - version
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      push: ${{ inputs.push }}
+
+  image:
+    name: Publish
+    uses: ./.github/workflows/image.yml
+    secrets: inherit
+    needs: 
+    - version
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      push: ${{ inputs.push }}
+
+  installer:
+    name: Publish
+    uses: ./.github/workflows/installer.yml
+    secrets: inherit
+    needs: 
+    - version
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      push: true # just pushes to artifacts
+
+  docs:
+    name: Docs
+    uses: ./.github/workflows/docs.yml
+    secrets: inherit
+    needs: 
+    - version
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      push: ${{ inputs.push }}
+  
+  release:
+    name: Release
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+    needs: 
+    - version
+    - package
+    - installer
+    - image
+    - docs
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      push: ${{ inputs.push }}
+
+  homebrew:
+    name: Release
+    uses: ./.github/workflows/homebrew.yml
+    secrets: inherit
+    needs: 
+    - version
+    - release
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      push: ${{ inputs.push }}

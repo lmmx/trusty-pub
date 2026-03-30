@@ -1,0 +1,53 @@
+name: Build & publish all SDKs
+
+on:
+  push:
+    # TODO(jergus): we need to check that the GH tag matches
+    # the version(s) in the Cargo.toml to avoid running unhealthy builds
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        type: boolean
+        description: "Publish release to registries"
+        default: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      tests: true
+    secrets: inherit
+
+  python:
+    needs: [ci]
+    uses: ./.github/workflows/publish_python.yml
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+    with:
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
+
+  js:
+    needs: [ci]
+    uses: ./.github/workflows/publish_js.yml
+    secrets: inherit
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
+
+  test-runner:
+    needs: [ci]
+    uses: ./.github/workflows/publish_test_runner.yml
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+    with:
+      publish: ${{ github.event_name == 'push' || inputs.publish }}

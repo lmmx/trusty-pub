@@ -1,0 +1,83 @@
+name: PyPI Tests
+
+on:
+  push:
+    branches: ['main']
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+concurrency:
+  group: 'pypi-tests-${{ github.head_ref || github.run_id }}'
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    runs-on: ${{matrix.platform}}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+    - name: setup Python ${{matrix.python-version}}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{matrix.python-version}}
+    - name: install
+      run: |
+        python3 -m pip install --upgrade pip wheel
+        python3 -m pip install -v --no-cache-dir -e .[test]
+        python3 -m pip install git+https://github.com/dask-contrib/dask-awkward
+        python3 -m pip list
+    - name: test
+      env: {"DASK_DATAFRAME__QUERY_PLANNING": "False"}
+      run: |
+        python3 -m pytest
+
+  doctest:
+    runs-on: "ubuntu-latest"
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v6
+
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+
+    - name: Install
+      run: |
+        python3 -m pip install --upgrade pip wheel
+        python3 -m pip install -q --no-cache-dir -e .[dev]
+        python3 -m pip list
+
+    - name: Run doctests
+      shell: bash -l {0}
+      run: |
+        python3 -m pytest -v --doctest-modules --ignore-glob='tests/test_*.py' src docs/examples.rst
+
+  mindeps:
+    runs-on: "ubuntu-latest"
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v6
+
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.10"
+
+    - name: Install
+      run: |
+        python3 -m pip install --upgrade pip wheel pytest
+        python3 -m pip install -q --no-cache-dir -e .
+        python3 -m pip list
+
+    - name: Run tests
+      shell: bash -l {0}
+      run: |
+        python3 -m pytest

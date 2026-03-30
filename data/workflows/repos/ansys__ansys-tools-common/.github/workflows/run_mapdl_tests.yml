@@ -1,0 +1,64 @@
+name: MAPDL dependent tests for paths tool
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    tags:
+      - '*'
+    branches:
+      - main
+
+env:
+  PACKAGE_NAME: ansys-tools-common
+  MAIN_PYTHON_VERSION: 3.14
+
+permissions:
+  contents: read # required to read files
+  packages: read # required to pull container images
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build-tests:
+    name: Build tests
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ansys/mapdl:v22.2-ubuntu@sha256:024c587f4a8190e99cc3f08a2dc231583032e784a8ef7d7659f8dd9748116697
+      options: -u=0:0 --entrypoint /bin/bash
+      credentials:
+        username: ${{ secrets.GH_USERNAME }}
+        password: ${{ secrets.GH_TOKEN }}
+    env:
+      ANSYS_LOCAL: true
+      ON_UBUNTU: true
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # 7.6.0
+        with:
+          python-version: ${{ env.MAIN_PYTHON_VERSION }}
+          enable-cache: false
+
+      - name: Install project dependencies
+        run: |
+          uv sync --no-dev --group tests --frozen
+
+      - name: Install test package containing entrypoint
+        run: |
+          uv pip install tests/launcher/pkg_with_entrypoint
+
+      - name: Run tests
+        env:
+          PACKAGE_NAMESPACE: ${{ env.PACKAGE_NAMESPACE }}
+        run: |
+          uv run --no-sync pytest \
+            -vx \
+            --cov=${PACKAGE_NAMESPACE} --cov-report=term --cov-report=xml:.cov/coverage.xml --cov-report=html:.cov/html

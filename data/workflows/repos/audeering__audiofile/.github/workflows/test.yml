@@ -1,0 +1,85 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+
+    # Make sure .bashrc is read by shell for micromamba,
+    # see https://github.com/mamba-org/setup-micromamba#about-login-shells
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macOS-latest, windows-latest ]
+        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
+        sox: [ sox, no-sox ]  # sox binary present or not
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }} with Micromamba
+      uses: mamba-org/setup-micromamba@v1
+      with:
+        cache-environment: true
+        environment-name: venv
+        create-args: >-
+          pip
+          python=${{ matrix.python-version }}
+
+    - name: Activate Python virtual environment
+      run: micromamba activate venv
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@3259c6206f993105e3a61b142c2d97bf4b9ef83d
+
+    - name: Install sox with Micromamba
+      run: micromamba install sox
+      if: matrix.sox == 'sox'
+
+    - name: Ubuntu - install libsndfile
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libsndfile1
+      if: matrix.os == 'ubuntu-latest' && matrix.sox == 'no-sox'
+
+    - name: Ubuntu - install ffmpeg/mediainfo
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg mediainfo
+      if: matrix.os == 'ubuntu-latest'
+
+    - name: OSX - install ffmpeg/mediainfo
+      run: |
+        brew install ffmpeg
+        brew install media-info
+      if: matrix.os == 'macOS-latest'
+
+    - name: Windows - install ffmpeg/mediainfo
+      run: choco install ffmpeg mediainfo-cli
+      if: matrix.os == 'windows-latest'
+
+    - name: Sync Python environment
+      run: uv sync
+
+    # TESTS
+    - name: Show sox version
+      run: |
+        if $(which sox >/dev/null); then sox --version; else echo "No sox installed"; fi
+
+    - name: Test with pytest
+      run: uv run pytest
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./coverage.xml
+      if: matrix.os == 'ubuntu-latest'

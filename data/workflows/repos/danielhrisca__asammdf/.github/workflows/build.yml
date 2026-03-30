@@ -1,0 +1,47 @@
+name: pyinstaller_build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install linux libraries
+        shell: bash
+        if: ${{ matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm' }}
+        run: |
+          sudo apt update
+          sudo apt install libegl1 libopengl0 libevent-2.1-7 libopus0 libminizip1 libpulse0 \
+          libxcb-icccm4 libxcb-image0 libxcb-cursor0 libxcb-keysyms1 libxcb-xkb1 libxcb-shape0 \
+          libxkbcommon-x11-0 libxcb-render-util0
+
+      - name: Install Python packages
+        run: |
+          pip install tox
+
+      - name: Build the executable
+        run: |
+          tox -e pyinstaller -- --distpath dist/${{ matrix.os }} --noconfirm --clean
+
+      # see: https://docs.github.com/en/actions/advanced-guides/storing-workflow-data-as-artifacts
+      - name: Archive dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyinstaller-${{ matrix.os }}
+          path: dist/${{ matrix.os }}/**
+          if-no-files-found: error

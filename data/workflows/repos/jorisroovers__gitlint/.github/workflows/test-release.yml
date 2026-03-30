@@ -1,0 +1,81 @@
+name: Test Release
+run-name: "Test Release (${{ inputs.gitlint_version }}, environment=${{ inputs.environment }}, repo_test_ref=${{ inputs.repo_test_ref }})"
+on:
+  workflow_call:
+    inputs:
+      gitlint_version:
+        description: "Gitlint version to test"
+        required: true
+        default: "0.18.0"
+        type: string
+      environment:
+        description: 'Gitlint package environment'
+        type: string
+        required: true
+      repo_test_ref:
+        description: "Git reference to checkout for integration tests"
+        default: "main"
+        type: string
+  workflow_dispatch:
+    inputs:
+      gitlint_version:
+        description: "Gitlint version to test"
+        required: true
+        default: "0.18.0"
+      environment:
+        description: 'Gitlint package environment'
+        type: environment
+        required: true
+      repo_test_ref:
+        description: "Git reference to checkout for integration tests"
+        default: "main"
+
+jobs:
+  test-release:
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        python-version: ["3.7", "3.8", "3.9", "3.10", "3.11", pypy-3.9]
+        os: ["macos-latest", "ubuntu-latest", "windows-latest"]
+    steps:
+      - name: Setup python
+        uses: actions/setup-python@v4.7.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Hatch
+        run: python -m pip install hatch==1.7.0
+
+      - name: Install gitlint
+        # We need to add the --extra-index-url to the pip install command to deal with PYPI_TARGET=https://test.pypi.org/legacy,
+        # because gitlint's dependencies are not available on Test PyPI
+        run: |
+          python -m pip install --no-cache-dir -i ${{ vars.PYPI_TARGET }} --extra-index-url https://pypi.org/simple gitlint==${{ inputs.gitlint_version }}
+
+      - name: gitlint --version
+        run: |
+          gitlint --version
+          [ "$(gitlint --version)" == "gitlint, version ${{ inputs.gitlint_version }}" ]
+
+      - uses: actions/checkout@v3.3.0
+        with:
+          ref: ${{ inputs.repo_test_ref }}
+
+      - name: Integration tests
+        run: |
+          hatch run qa:integration-tests
+        if: matrix.os != 'windows-latest'
+
+      - name: Integration tests (GITLINT_QA_USE_SH_LIB=0)
+        run: |
+          hatch run qa:integration-tests -k "not(test_commit_hook_continue or test_commit_hook_abort or test_commit_hook_edit)" qa
+        env:
+          GITLINT_QA_USE_SH_LIB: 0
+        if: matrix.os != 'windows-latest'
+
+      - name: Integration tests (Windows)
+        run: |
+          hatch run qa:integration-tests -k "not (test_commit_hook_continue or test_commit_hook_abort or test_commit_hook_edit or test_lint_staged_stdin or test_stdin_file or test_stdin_pipe_empty)" qa
+        if: matrix.os == 'windows-latest'

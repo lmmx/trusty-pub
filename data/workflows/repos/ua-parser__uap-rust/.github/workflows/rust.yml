@@ -1,0 +1,49 @@
+name: Rust
+
+on:
+  pull_request:
+  push:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  rust-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        persist-credentials: false
+    - run: cargo fmt --check
+    - if: always()
+      run: cargo clippy
+
+  rust-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        submodules: true
+        persist-credentials: false
+    - run: cargo check
+    - run: cargo test -r --verbose
+
+  rust-latest-deps:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        submodules: true
+        persist-credentials: false
+    - run: cargo update --verbose
+    - run: cargo test -r --verbose

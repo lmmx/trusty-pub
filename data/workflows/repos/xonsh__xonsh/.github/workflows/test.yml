@@ -1,0 +1,65 @@
+name: CI Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tmate_debug_enabled:
+        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'
+        required: false
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ${{ matrix.os }}
+    env:
+      UV_SYSTEM_PYTHON: 1
+      DEFAULT_PYTHON_VERSION: 3.12
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macOS-latest
+          - windows-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    name: Test Python ${{ matrix.python-version }} ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv pip install --system -e ".[test]"
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tmate_debug_enabled }}
+        timeout-minutes: 15
+      - name: Run tests
+        if: ${{ !startsWith(matrix.python-version, env.DEFAULT_PYTHON_VERSION) }}
+        run: |
+          python -m xonsh run-tests.xsh test -- --timeout=240
+      - name: Run tests with coverage
+        if: ${{ startsWith(matrix.python-version, env.DEFAULT_PYTHON_VERSION) }}
+        run: |
+          python -m xonsh run-tests.xsh test --report-coverage -- --timeout=240

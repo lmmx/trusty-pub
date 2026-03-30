@@ -1,0 +1,73 @@
+name: Update the Agent changelog
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  update_agent_changelog:
+    name: Update the Agent Changelog
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: master
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: 3.13
+    - name: Install ddev from local folder
+      run: |-
+        pip install -e ./datadog_checks_dev[cli]
+        pip install -e ./ddev
+    - name: Configure ddev
+      run: |-
+        ddev config set upgrade_check false
+        ddev config set repos.core .
+        ddev config set repo core
+    - name: Update the Agent changelog
+      run: |-
+        ddev release agent changelog --write --force
+    - name: Update the Agent integrations file
+      run: |-
+        ddev release agent integrations --write --force
+    - name: Update the integration changelogs
+      run: |-
+        ddev release agent integrations-changelog --write
+    - name: Create token
+      uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+      id: token-generator
+      with:
+        app-id: ${{ secrets.DD_AGENT_INTEGRATIONS_BOT_APP_ID }}
+        private-key: ${{ secrets.DD_AGENT_INTEGRATIONS_BOT_PRIVATE_KEY }}
+        repositories: integrations-core
+    - name: Create Pull Request
+      id: cpr
+      uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+      with:
+        token: ${{ steps.token-generator.outputs.token }}
+        commit-message: Finalize Agent release ${{ env.AGENT_VERSION }}
+        body: |
+          ### What does this PR do?
+          Finalize Agent release ${{ env.AGENT_VERSION }} updating the changelog files.
+
+          ### Motivation
+
+          Agent ${{ env.AGENT_VERSION }} has been released.
+
+          ### Additional Notes
+          <!-- Anything else we should know when reviewing? -->
+
+          This PR was automatically generated.
+        title: Finalize Agent release ${{ env.AGENT_VERSION }}
+        branch: bot/update-agent-changelog-${{ env.AGENT_VERSION }}
+        branch-suffix: timestamp
+        delete-branch: true
+        base: master
+        labels: bot,qa/skip-qa
+        draft: false
+      env:
+        AGENT_VERSION: ${{ github.ref_name }}

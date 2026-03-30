@@ -1,0 +1,30 @@
+name: KFP SDK Isort Test
+
+on:
+  push:
+    branches: [master]
+
+  pull_request:
+    paths:
+      - 'api/**'
+      - 'sdk/python/**'
+      - 'test/presubmit-isort-sdk.sh'
+      - '.github/workflows/sdk-isort.yml'
+      - '!**/*.md'
+      - '!**/OWNERS'
+
+jobs:
+  test-isort-kfp-sdk:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.9
+          cache: 'pip'
+
+      - name: Run isort tests
+        run: ./test/presubmit-isort-sdk.sh

@@ -1,0 +1,89 @@
+name: E2E Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'The hash value of the commit.'
+        required: false
+      python-version:
+        description: 'Specify Python version to use'
+        required: false
+      run-eol-python-version:
+        description: 'Run EOL python version?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      test_report_upload:
+        description: 'Indicates whether to upload the test report to object storage. Defaults to "false"'
+        type: choice
+        required: false
+        default: 'false'
+        options:
+          - 'true'
+          - 'false'
+  push:
+    branches:
+      - main
+      - dev
+
+env:
+  DEFAULT_PYTHON_VERSION: "3.10"
+  EOL_PYTHON_VERSION: "3.9"
+  EXIT_STATUS: 0
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit_sha || inputs.sha }}
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: setup python 3
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.run-eol-python-version == 'true' && env.EOL_PYTHON_VERSION || inputs.python-version || env.DEFAULT_PYTHON_VERSION }}
+
+      - name: install or update Python build system
+        run: python3 -m pip install -U wheel setuptools certifi pip boto3
+
+      - name: install test dependencies
+        run: make test-deps
+
+      - name: generate local SSH key
+        run: ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+
+      - name: run int-test test
+        run: |
+          make int-test
+        env:
+          CLEANUP_TEST_LINODE_INSTANCE: true
+          LINODE_TOKEN: ${{ secrets.DX_LINODE_TOKEN }}
+
+      - name: Copy report.xml from hack directory to root directory
+        if: always()
+        run: |
+          ls -l hack/
+          cp hack/*_py_metadata_test_report.xml .
+
+      - name: Add variables and upload test results
+        if: always() && github.repository == 'linode/py-metadata' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.test_report_upload == 'true'))
+        run: |
+          filename=$(ls | grep -E '^[0-9]{12}_py_metadata_test_report\.xml$')
+          python3 e2e_scripts/tod_scripts/xml_to_obj_storage/scripts/add_gha_info_to_xml.py \
+          --branch_name "${GITHUB_REF#refs/*/}" \
+          --gha_run_id "$GITHUB_RUN_ID" \
+          --gha_run_number "$GITHUB_RUN_NUMBER" \
+          --xmlfile "${filename}"
+          sync
+          python3 e2e_scripts/tod_scripts/xml_to_obj_storage/scripts/xml_to_obj.py "${filename}"
+        env:
+          LINODE_CLI_OBJ_ACCESS_KEY: ${{ secrets.LINODE_CLI_OBJ_ACCESS_KEY }}
+          LINODE_CLI_OBJ_SECRET_KEY: ${{ secrets.LINODE_CLI_OBJ_SECRET_KEY }}

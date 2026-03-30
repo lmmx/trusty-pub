@@ -1,0 +1,47 @@
+name: Check links & references
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Run once a week on Sundays
+    - cron: "0 9 * * 0"
+
+jobs:
+  links-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔀 Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Cache lychee results
+        if: github.event_name == 'pull_request'
+        uses: actions/cache@v4
+        with:
+          path: .lycheecache
+          key: cache-lychee-${{ github.event.pull_request.number }}-${{ github.sha }}
+          restore-keys: |
+            cache-lychee-${{ github.event.pull_request.number }}-
+            cache-lychee-
+
+      - name: 🔗 Link Checker
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # default args: "--verbose --no-progress './**/*.md' './**/*.html' './**/*.rst'"
+          args: |
+            --verbose
+            --no-progress
+            --cache
+            --max-cache-age 1d
+            './**/*.md'
+            './**/*.rst'
+            './**/*.py'
+            './**/*.yml'
+            './**/*.yaml'
+            './**/*.toml'
+            --include-verbatim
+            --exclude https://github.com/YOUR-USERNAME/pyDeprecate.git
+            --exclude https://codecov.io/validate
+            --exclude https://medium.com/codex/mastering-api-deprecation-in-python-the-pain-points-and-how-pydeprecate-can-help-1dbfd90e2b62
+          fail: true

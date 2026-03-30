@@ -1,0 +1,95 @@
+name: Chellow
+
+on:
+  push:
+    branches: [main, test]
+  pull_request:
+    branches: [main, test]
+
+jobs:
+  # Label of the container job
+  test:
+    runs-on: ubuntu-latest
+    container: python:3.11
+
+    services:
+      postgres:
+        image: postgres:12
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install tox
+      - name: Run Tox
+        run: |
+          tox
+        env:
+          PGHOST: postgres
+          PGPORT: 5432
+
+  build:
+    runs-on: ubuntu-latest
+    container: python:3.11
+    needs: test
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build
+    - name: Build a binary wheel and a source tarball
+      run: |
+        echo "__version__ = \"$(date +%s).0.0\"" > VERSION
+        python -m build 
+    - name: Store the distribution packages
+      uses: actions/upload-artifact@v6
+      with:
+        name: python-package-distributions
+        path: dist/
+
+  deploy_main:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/chellow
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v8
+      with:
+        name: python-package-distributions
+        path: dist/
+    - name: Publish distribution to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+  deploy_test:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write
+    if: github.ref == 'refs/heads/test'
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/chellow
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v8
+      with:
+        name: python-package-distributions
+        path: dist/
+    - name: Publish distribution to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/

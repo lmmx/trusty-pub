@@ -1,0 +1,82 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  run-tests:
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.flaky }}
+    strategy:
+      matrix:
+        pixi_task: [testmatrix, testtensor]
+        pixi_environment: [testpyold, testpynew]
+        os: [ubuntu-latest]
+        flaky: [false]
+
+        include:
+        - os: macos-latest
+          pixi_task: testmatrix
+          pixi_environment: testpymid
+          flaky: true
+
+        - os: macos-latest
+          pixi_task: testtensor
+          pixi_environment: testpymid
+          flaky: false
+
+        - os: windows-latest
+          pixi_task: testmatrix
+          pixi_environment: testpymid
+          flaky: false
+          env:
+            KMP_DUPLICATE_LIB_OK: "True"
+
+        - os: windows-latest
+          pixi_task: testtensor
+          pixi_environment: testpymid
+          flaky: false
+          env:
+            KMP_DUPLICATE_LIB_OK: "True"
+
+        - pixi_environment: testtorch
+          pixi_task: testtensor
+          os: ubuntu-latest
+          flaky: false
+
+        - pixi_environment: testjax
+          pixi_task: testtensor
+          os: ubuntu-latest
+          flaky: false
+
+        - pixi_environment: testtensorflow
+          pixi_task: testtensor
+          os: ubuntu-latest
+          flaky: false
+
+        - pixi_environment: testslepc
+          pixi_task: testmatrix
+          os: ubuntu-latest
+          flaky: false
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup pixi
+      uses: prefix-dev/setup-pixi@v0.9.3
+      with:
+        environments: ${{ matrix.pixi_environment }}
+
+    - name: Test with pytest
+      run: pixi run -e ${{ matrix.pixi_environment }} ${{ matrix.pixi_task }}
+
+    - name: Report to codecov
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}

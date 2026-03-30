@@ -1,0 +1,104 @@
+name: Run Tests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+concurrency:
+  # github.workflow will be the name of the workflow, e.g. "Run Tests"
+  # github.ref will be the branch or tag ref, e.g. "refs/heads/main" or, for a PR, "refs/pull/123/merge"
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# yamllint disable rule:line-length
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pre-commit
+        run: pip install pre-commit
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  tests:
+    needs: lint
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        torch-version: [2.2.0, "2.*"]
+    container:
+      image: nvidia/cuda:12.6.1-cudnn-devel-ubuntu24.04
+      options: ${{ github.event.repository.private && '--gpus all' || ' ' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python and create venv
+        run: |
+          apt update && apt install -y python3 python3-pip python3-venv git
+          python3 -m venv /opt/venv
+          echo "/opt/venv/bin" >> $GITHUB_PATH
+      - name: Check Python version
+        run: |
+          python3 --version
+          which python3
+      - name: Disable pip cache
+        run: |
+          echo "PIP_NO_CACHE_DIR=1" >> $GITHUB_ENV
+          echo "PIP_NO_CACHE=1" >> $GITHUB_ENV
+      - name: Configure torch cache directories
+        run: |
+          echo "TORCH_EXTENSIONS_DIR=/tmp/torch_extensions_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" >> $GITHUB_ENV
+          echo "TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" >> $GITHUB_ENV
+          echo "TRITON_CACHE_DIR=/tmp/triton_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" >> $GITHUB_ENV
+      - name: Clone NequIP packages
+        uses: mir-group/nequip-gh-actions/clone@main
+        with:
+          package_names: "nequip"
+          ssh_keys: "${{ secrets.NEQUIP }}"
+          private_flag: ${{ github.event.repository.private}}
+          branch: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name}}
+      - name: Install PyTorch
+        env:
+          TORCH: "${{ matrix.torch-version }}"
+        run: |
+          # use CPU only on GH runner
+          if [ "${{ github.event.repository.private }}" = "true" ]; then
+              pip install torch==${TORCH} --upgrade
+          else
+              pip install torch==${TORCH} --index-url https://download.pytorch.org/whl/cpu --upgrade
+          fi
+      - name: Install Test Dependencies
+        run: |
+          pip install setuptools wheel pytest pytest-xdist[psutil]
+          # Pin numpy<2 and matscipy 1.1.1 for torch 2.2 to avoid compatibility issues
+          if [ "${{ matrix.torch-version }}" = "2.2.0" ]; then
+            pip install "numpy<2" "matscipy==1.1.1"
+          fi
+          # install nequip packages
+          pip install --upgrade-strategy only-if-needed ./nequip
+          pip install --upgrade-strategy only-if-needed .
+          if python3 -c "import torch; exit(0 if torch.cuda.is_available() else 1)"; then
+            echo "Installing CuEquivariance (CUDA available)"
+            pip install cuequivariance-torch cuequivariance-ops-torch-cu12
+          else
+            echo "Skipping CuEquivariance installation (CUDA not available)"
+          fi
+      - name: Run tests
+        run: |
+          # See https://github.com/pytest-dev/pytest/issues/1075 for why we need to set PYTHONHASHSEED
+          PYTHONHASHSEED=0 pytest -n auto tests/
+      - name: Clean up temporary files
+        if: always()
+        run: |
+          rm -rf ./allegro
+# yamllint enable

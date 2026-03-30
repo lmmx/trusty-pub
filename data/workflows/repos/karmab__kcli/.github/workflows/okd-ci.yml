@@ -1,0 +1,51 @@
+name: OKD-CI
+on:
+  workflow_dispatch:
+    inputs:
+      PLAN:
+        description: 'Plan Name'
+        required: true
+        default: ci-okd
+      PARAMFILE:
+        description: 'paramfile'
+        required: false
+        default: openshift-ci-paramfiles/okd.yml
+      EXTRAPARAMS:
+        description: 'Extra params'
+        default: ''
+      PULLSECRET:
+        description: 'Pull Secret'
+        required: false
+        default: /root/openshift_pull.json
+      NETWORK:
+        description: 'network'
+        required: false
+        default: okd-network
+      NETWORK_CIDR:
+        description: 'network_cidr'
+        required: false
+        default: 192.168.131.0/24
+
+env:
+ HOME: /root
+ PYTHONUNBUFFERED: true
+ PLAN: ${{github.event.inputs.PLAN}}
+ INPUTFILE: ${{github.event.inputs.INPUTFILE}}
+ PARAMFILE: ${{github.event.inputs.PARAMFILE}}
+ EXTRAPARAMS: ${{github.event.inputs.EXTRAPARAMS}}
+ PULLSECRET: ${{github.event.inputs.PULLSECRET}}
+ NETWORK: ${{github.event.inputs.NETWORK}}
+ NETWORK_CIDR: ${{github.event.inputs.NETWORK_CIDR}}
+
+jobs:
+    deploy-okd:
+      runs-on: u08
+      steps:
+       - uses: actions/checkout@v2
+       - run: git pull origin ${GITHUB_REF##*/}
+       - name: Install kcli
+         run: curl https://raw.githubusercontent.com/karmab/kcli/main/install.sh | bash
+       - name: Deploy network if needed
+         run: kcli create network -c $NETWORK_CIDR $NETWORK || true
+       - name: Deploy OKD on libvirt
+         run: kcli create cluster openshift --paramfile $PARAMFILE -P pull_secret=$PULLSECRET $EXTRAPARAMS $PLAN --force

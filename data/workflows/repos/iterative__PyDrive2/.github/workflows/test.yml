@@ -1,0 +1,45 @@
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+
+name: Tests
+
+jobs:
+  authorize:
+    environment:
+      ${{ (github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name != github.repository) &&
+      'external' || 'internal' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ✓
+  test:
+    needs: authorize
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        pyv: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # NOTE: needed for pull_request_target to use PR code
+        ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.pyv }}
+
+    - name: Install dependencies
+      run: python -m pip install -e '.[fsspec, tests]'
+
+    - name: Test
+      run: python -m pytest -m "not manual"
+      env:
+        GDRIVE_USER_CREDENTIALS_DATA: ${{ secrets.GDRIVE_USER_CREDENTIALS_DATA }}

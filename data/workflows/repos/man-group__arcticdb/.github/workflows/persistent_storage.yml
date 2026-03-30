@@ -1,0 +1,135 @@
+name: __persistent_storage_seed
+on:
+  workflow_call:
+    inputs:
+      job_type:          {required: true, type: string, description: Selects the steps to enable}
+      matrix:            {type: string, description: JSON string to feed into the matrix}
+      python_deps_ids:   {default: '[""]', type: string, description: Follower test matrix parameter. JSON string.}
+      python3:           {default: -1, type: number, description: Python 3 minor version}
+      arcticdb_version:  {default: "", type: string, description: The version of ArcticDB that will be installed and used for seed/verify }
+      persistent_storage: {required: true, default: "no", type: string, description: Specifies whether the python tests should tests against real storages e.g. AWS S3  }
+
+jobs:
+  setup:
+    if: inputs.job_type != 'cleanup'
+    strategy:
+      matrix:
+        # Declaring the dummy fields here to aid the Github Actions linting in VSCode and to provide documentation
+        os: [0] # Decouples the steps from any distro version changes
+        distro: [0]
+        cmake_preset_prefix: [0]
+        cibw_build_suffix: [0]
+        envs: [0]
+        build_dir: [0] # Must be an absolute path
+        symbols: [0] # Glob for symbol symbol files. Used for including in follower builds and exclusion on others.
+        do_not_archive: [0]
+        test_services: [0] # Github service containers to spin up for the pytest run
+        exclude:
+            - os: 0
+        include:
+            - ${{fromJSON(inputs.matrix)[0]}} # The items after 0 are for tests only
+    runs-on: ${{matrix.distro}}
+    env:
+      python_impl_name: ${{inputs.python3 > 0 && format('cp3{0}', inputs.python3) || 'default'}}
+    defaults:
+      run: {shell: bash}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3.3.0
+
+      # The latest version of arcticdb will no longer publish wheels for Python 3.6
+      # So we skip the seed if we are testing the latest version with Python 3.6
+      - name: Skip if unsupported
+        if: inputs.arcticdb_version == 'latest' && inputs.python3 == '6'
+        run: exit 0
+
+      - name: Select Python (Linux)
+        if: matrix.os == 'linux'
+        run: echo /opt/python/${{env.python_impl_name}}*/bin >> $GITHUB_PATH
+
+      - name: Select Python (Windows and Mac)
+        if: matrix.os == 'windows' || matrix.os == 'macos'
+        uses: actions/setup-python@v4.7.1
+        with:
+          python-version: "3.${{inputs.python3}}"
+
+      - name: Install latest release
+        if: inputs.arcticdb_version == 'latest'
+        run: |
+          pip install pytest arcticdb "protobuf<5" "pytz" "pandas<3"
+      
+      # Currently, the oldest "supported" release is 3.0.0 for windows and linux, 6.5.0 for mac
+      # For gcpxml, the release needs to be >= v5.3.0
+      # We use this version to test forwards/barwards compatibility 
+      # So we expect that libs written by the version that we are build to be readable by arcticdb>=3.0.0 and vice-versa
+      # Change this value, if we need to support a newer one in the future
+      - name: Install oldest supported release (Windows and Linux)
+        if: matrix.os == 'windows' || matrix.os == 'linux'
+        run: |
+          pip install "protobuf<5" "numpy<2" "pandas<3" "pytz" "pytest"
+          if [ "${{ inputs.persistent_storage }}" == "GCPXML" ]; then
+            pip install arcticdb=="5.3.0" "protobuf<5"
+          else
+            pip install arcticdb=="3.0.0" "protobuf<5"
+          fi
+
+      - name: Install oldest supported release (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          pip install pytest arcticdb=="6.5.0" "protobuf<5" "numpy<2" "pandas<3" "pytz"
+
+      - name: Set persistent storage variables
+        uses: ./.github/actions/set_persistent_storage_env_vars
+        with:
+          aws_access_key: "${{ secrets.AWS_S3_ACCESS_KEY }}"
+          aws_secret_key: "${{ secrets.AWS_S3_SECRET_KEY }}"
+          gcp_access_key: "${{ secrets.GCP_S3_ACCESS_KEY }}"
+          gcp_secret_key: "${{ secrets.GCP_S3_SECRET_KEY }}"
+          azure_container: "githubblob"
+          azure_connection_string: "${{ secrets.AZURE_CONNECTION_STRING }}"
+          strategy_branch: "${{matrix.os}}_${{env.python_impl_name}}"
+          persistent_storage: ${{ inputs.persistent_storage }}
+        
+      - name: Seed the storage
+        if: inputs.job_type == 'seed'
+        run: |
+          echo "Running seed on ${{matrix.os}}_${{env.python_impl_name}}"
+          python python/tests/util/storage_test.py --type seed --version ${{inputs.arcticdb_version}}
+
+      - name: Verify the storage
+        if: inputs.job_type == 'verify'
+        run: |
+          echo "Running verify for ${{ github.ref_name }} on ${{matrix.os}}_${{env.python_impl_name}}"
+          python python/tests/util/storage_test.py --type verify
+        
+  cleanup:
+    if: inputs.job_type == 'cleanup'
+    runs-on: ubuntu-22.04
+    defaults:
+      run: {shell: bash}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3.3.0
+
+      - name: Select Python (Linux)
+        run: echo /opt/python/${{env.python_impl_name}}*/bin >> $GITHUB_PATH
+
+      - name: Install latest release
+        run: |
+          pip install pytest arcticdb "protobuf<5" "pandas<3" "pytz"
+
+      - name: Set persistent storage variables
+        uses: ./.github/actions/set_persistent_storage_env_vars
+        with:
+          aws_access_key: "${{ secrets.AWS_S3_ACCESS_KEY }}"
+          aws_secret_key: "${{ secrets.AWS_S3_SECRET_KEY }}"
+          gcp_access_key: "${{ secrets.GCP_S3_ACCESS_KEY }}"
+          gcp_secret_key: "${{ secrets.GCP_S3_SECRET_KEY }}"
+          azure_container: "githubblob"
+          azure_connection_string: "${{ secrets.AZURE_CONNECTION_STRING }}"
+          persistent_storage: ${{ inputs.persistent_storage }}
+
+      - name: Clean the storage
+        run: |
+          echo "Running cleanup for ${{ github.ref_name }}"
+          python python/tests/util/storage_test.py --type cleanup

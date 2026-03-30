@@ -1,0 +1,221 @@
+name: Release
+
+# Dynamic run name that appears in the GitHub UI
+run-name: Release version ${{ github.ref_name }} of the SDK
+
+on:
+  # no explicit inputs for tag_name; rely on the selected reference from the UI
+  workflow_dispatch:
+
+# ensures only a single instance of this release workflow is running at any one time
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  PACKAGE_NAME: "xai-sdk"
+  TEST_PYPI_URL: "https://test.pypi.org/pypi"
+  PYPI_URL: "https://pypi.org/pypi"
+
+jobs:
+  get_tag_details:
+    name: Get Tag Details
+    runs-on: xai-sdk-python-runner
+    outputs:
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      new_version: ${{ steps.release.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # fetch all history
+
+      - name: Check if a tag is selected
+        run: |
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "Error: Workflow must be triggered with a tag selected. Current ref_type is ${{ github.ref_type }}."
+            exit 1
+          fi
+          TAG_NAME=${{ github.ref_name }}
+          echo "Selected tag is $TAG_NAME"
+
+      - name: Extract version from tag
+        id: release
+        run: |
+          TAG_NAME=${{ github.ref_name }}
+          # Validate tag format
+          if [[ ! $TAG_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+(a[0-9]+|b[0-9]+|rc[0-9]+)?$ ]]; then
+            echo "Invalid tag format. Tag must be in the format vX.Y.Z, vX.Y.ZaN, vX.Y.ZbN, or vX.Y.ZrcN."
+            exit 1
+          fi
+          NEW_VERSION=${TAG_NAME#v}
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag name is $TAG_NAME"
+          echo "Version is $NEW_VERSION"
+
+  check_package_version:
+    name: Check Package Version
+    needs: [get_tag_details]
+    runs-on: xai-sdk-python-runner
+    outputs:
+      package_version: ${{ steps.package_version.outputs.package_version }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c7f87aa956e4c323abf06d5dec078e358f6b4d04 # v6
+        with:
+          version: "0.7.3"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Get package version
+        id: package_version
+        run: |
+          PACKAGE_VERSION=$(uv run hatch version)
+          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version is $PACKAGE_VERSION"
+
+      - name: Check if tag version matches package version
+        run: |
+          TAG_VERSION=${{ needs.get_tag_details.outputs.new_version }}
+          PACKAGE_VERSION=${{ steps.package_version.outputs.package_version }}
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag version $TAG_VERSION does not match package version $PACKAGE_VERSION in pyproject.toml"
+            exit 1
+          fi
+          echo "Tag version matches package version: $PACKAGE_VERSION"
+
+  check_pypi:
+    name: Check PyPI Version
+    needs: [check_package_version]
+    runs-on: xai-sdk-python-runner
+    outputs:
+      pypi_version: ${{ steps.get_pypi_version.outputs.pypi_version }}
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c7f87aa956e4c323abf06d5dec078e358f6b4d04 # v6
+        with:
+          version: "0.7.3"
+
+      - name: Get latest version published on PyPI
+        id: get_pypi_version
+        run: |
+          response=$(curl -s ${{ env.PYPI_URL }}/${{ env.PACKAGE_NAME }}/json || echo "{}")
+          pypi_version=$(echo $response | jq --raw-output "select(.releases != null) | .releases | keys_unsorted | last")
+          if [ -z "$pypi_version" ]; then
+            echo "Package not found on PyPI."
+            pypi_version="0.0.0"
+          fi
+          echo "Latest version on PyPI: $pypi_version"
+          echo "pypi_version=$pypi_version" >> "$GITHUB_OUTPUT"
+
+      - name: Compare versions and exit if not newer
+        run: |
+          NEW_VERSION=${{ needs.check_package_version.outputs.package_version }}
+          LATEST_VERSION=${{ steps.get_pypi_version.outputs.pypi_version }}
+
+          export NEW_VERSION=$NEW_VERSION
+          export LATEST_VERSION=$LATEST_VERSION
+
+          echo "NEW_VERSION=$NEW_VERSION"
+          echo "LATEST_VERSION=$LATEST_VERSION"
+
+          uv run --with packaging python -c "
+          import os
+          from packaging import version
+
+          new_version = os.environ['NEW_VERSION']
+          latest_version = os.environ['LATEST_VERSION']
+
+          new_ver = version.parse(new_version)
+          latest_ver = version.parse(latest_version)
+
+          if new_ver <= latest_ver:
+              print(f'Error: New version {new_version} is not greater than latest version {latest_version}')
+              exit(1)
+          else:
+              print('New version is greater than latest version.')
+          "
+
+  setup_build_and_publish:
+    name: Build Package and Publish to PyPI
+    needs: [check_pypi]
+    runs-on: xai-sdk-python-runner
+    permissions:
+      contents: read
+      id-token: write # Required for trusted publishing to PyPI
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c7f87aa956e4c323abf06d5dec078e358f6b4d04 # v6
+        with:
+          version: "0.7.3"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run tests
+        run: uv run pytest -n auto -v
+
+      - name: Build source and wheel distribution
+        run: |
+          uv build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish to PyPI
+        run: uv publish
+
+  github_release:
+    name: Create GitHub Release
+    needs: [get_tag_details, setup_build_and_publish]
+    runs-on: xai-sdk-python-runner
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create GitHub Release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ needs.get_tag_details.outputs.tag_name }} dist/* --title ${{ needs.get_tag_details.outputs.tag_name }} --generate-notes

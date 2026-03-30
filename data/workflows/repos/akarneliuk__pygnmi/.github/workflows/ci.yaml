@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PYGNMI_HOST: ${{ secrets.PYGNMI_HOST }}
+      PYGNMI_NAME: ${{ secrets.PYGNMI_NAME }}
+      PYGNMI_PORT: ${{ secrets.PYGNMI_PORT }}
+      PYGNMI_CERT: ${{ secrets.PYGNMI_CERT }}
+      PYGNMI_USER: ${{ secrets.PYGNMI_USER }}
+      PYGNMI_PASS: ${{ secrets.PYGNMI_PASS }}
+      PYGNMI_CERT_CONTENT: ${{ secrets.PYGNMI_CERT_CONTENT }}
+      PYGNMI_FAKE_NAME: ${{ secrets.PYGNMI_FAKE_NAME }}
+    steps:
+      - name: Syncronise GitHub repository with the container
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: 3.8
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-new.txt
+
+      - name: Perform linting validation
+        continue-on-error: true
+        run: |
+          pylint pygnmi
+
+      - name: Create certificate
+        run: |
+          echo "${{ secrets.PYGNMI_CERT_CONTENT }}" > "${{ secrets.PYGNMI_CERT }}"
+
+      - name: Amend /etc/hosts
+        run: |
+          sudo echo "${{ secrets.PYGNMI_HOST }} ${{ secrets.PYGNMI_NAME }}" | sudo tee -a /etc/hosts
+          sudo echo "${{ secrets.PYGNMI_HOST }} ${{ secrets.PYGNMI_FAKE_NAME }}" | sudo tee -a /etc/hosts
+
+      - name: Perform unit testing
+        run: |
+          coverage run --branch --source pygnmi -m pytest
+          coverage report --fail-under 60

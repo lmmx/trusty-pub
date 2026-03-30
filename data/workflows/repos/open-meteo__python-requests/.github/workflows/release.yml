@@ -1,0 +1,46 @@
+# Release system depends on:
+# - .releaserc.json (make sure to select the right branch)
+# - .github/workflows/semantic-pr-check.yml
+
+name: Release
+
+#on:
+#  push:
+#    branches:
+#      - main
+
+# Only run releases manually
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.11
+      - name: Install semantic-release
+        run: |
+          npm install --no-save semantic-release @semantic-release/git conventional-changelog-conventionalcommits semantic-release-pypi
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PYPI_TOKEN: ${{ secrets.PYPI_PASSWORD }}
+        run: npx semantic-release

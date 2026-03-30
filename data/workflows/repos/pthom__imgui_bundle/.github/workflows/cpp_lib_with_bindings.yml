@@ -1,0 +1,54 @@
+name: "CppLib_WithBindings"
+
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+
+env:
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+jobs:
+  build:
+    name: CppLib_WithBindings
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: install xorg-dev on ubuntu
+      run: ./ci_scripts/install_xorg_dev.sh
+
+#    - name: Setup interactive tmate session
+#      uses: mxschmitt/action-tmate@v3
+
+    - name: Build and install (*nixes)
+      if: ${{ matrix.platform != 'windows-latest' }}
+      shell: bash
+      run: |
+        python3 -m venv venv
+        source venv/bin/activate
+        pip install nanobind
+        pip install pybind11
+        mkdir build && cd build
+        cmake .. -DIMGUI_BUNDLE_BUILD_PYTHON=ON -DCMAKE_BUILD_TYPE=Release
+        cmake --build . --config Release -j 3
+
+    - name: Build and install (Windows)
+      if: ${{ matrix.platform == 'windows-latest' }}
+      shell: bash
+      run: |
+        python3 -m venv venv
+        source venv/Scripts/activate # only difference from *nixes...
+        pip install nanobind
+        pip install pybind11
+        mkdir build && cd build
+        cmake .. -DIMGUI_BUNDLE_BUILD_PYTHON=ON -DCMAKE_BUILD_TYPE=Release
+        cmake --build . --config Release -j 3

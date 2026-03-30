@@ -1,0 +1,38 @@
+name: Deploy API Docs
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+# 添加权限配置
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin jinja2 markdown numpy pandas graphviz IPython
+          pip install -e .
+      
+      - name: Generate documentation
+        run: |
+          python docs_generator.py
+      
+      - name: Deploy to GitHub Pages
+        # 更新到较新的版本
+        uses: JamesIves/github-pages-deploy-action@v4.4.3
+        with:
+          branch: gh-pages
+          folder: docs

@@ -1,0 +1,114 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Reusable workflow for running tests
+# This ensures the same tests run for both debug (PRs) and release (main/tags) builds
+
+name: Test
+
+on:
+  workflow_call:
+
+jobs:
+  test-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+        toolchain:
+          - "stable"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo
+          key: cargo-cache-${{ matrix.toolchain }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install dependencies
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+        with:
+          enable-cache: true
+
+      # Download the Linux wheel built in the build workflow
+      - name: Download pre-built Linux wheel
+        uses: actions/download-artifact@v7
+        with:
+          name: dist-manylinux-x86_64
+          path: wheels/
+
+      # Download the FFI test wheel
+      - name: Download pre-built FFI test wheel
+        uses: actions/download-artifact@v7
+        with:
+          name: test-ffi-manylinux-x86_64
+          path: wheels/
+
+      # Install from the pre-built wheels
+      - name: Install from pre-built wheels
+        run: |
+          set -x
+          uv venv
+          # Install development dependencies
+          uv sync --dev --no-install-package datafusion
+          # Install all pre-built wheels
+          WHEELS=$(find wheels/ -name "*.whl")
+          if [ -n "$WHEELS" ]; then
+            echo "Installing wheels:"
+            echo "$WHEELS"
+            uv pip install wheels/*.whl
+          else
+            echo "ERROR: No wheels found!"
+            exit 1
+          fi
+
+      - name: Run tests
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          git submodule update --init
+          uv run --no-project pytest -v --import-mode=importlib
+
+      - name: FFI unit tests
+        run: |
+          cd examples/datafusion-ffi-example
+          uv run --no-project pytest python/tests/_test*.py
+
+      - name: Run tpchgen-cli to create 1 Gb dataset
+        run: |
+          mkdir examples/tpch/data
+          cd examples/tpch/data
+          uv pip install tpchgen-cli
+          uv run --no-project tpchgen-cli -s 1 --format=parquet
+
+      - name: Run TPC-H examples
+        run: |
+          cd examples/tpch
+          uv run --no-project pytest _tests.py

@@ -1,0 +1,34 @@
+---
+# cspell:ignore anthropics
+name: tox
+
+on:
+  merge_group:
+    branches:
+      - "main"
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_call:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  tox:
+    uses: ansible/team-devtools/.github/workflows/tox.yml@main
+    secrets: inherit
+    with:
+      min_python: "3.10"
+      default_python: "3.13"
+      max_python: "3.13"
+      other_names: |
+        pkg
+        lint
+        docs
+        py314-devel

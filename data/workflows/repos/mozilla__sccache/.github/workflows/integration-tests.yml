@@ -1,0 +1,340 @@
+name: integration-tests
+on: [ push, pull_request ]
+# If you want to add integration tests for linux-based binary,
+# please, use the following files:
+# - tests/integration/Makefile
+# - tests/integration/docker-compose.yml
+# - tests/integration/scripts/*.sh
+
+env:
+  RUST_BACKTRACE: full
+  RUST_LOG: debug
+  SCCACHE_PATH: /home/runner/.cargo/bin/sccache
+  ACTIONS_CACHE_SERVICE_V2: on
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: ./.github/actions/rust-toolchain
+        with:
+          toolchain: "stable"
+
+      - name: Build
+        run: |
+          cargo build --all-features
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: integration-tests
+          path: ./target/debug/sccache
+
+  integration-tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        type: [backends, tools]
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v5
+
+      - name: Test
+        run: cd tests/integration && WITH_COVERAGE=1 make test-${{ matrix.type }}
+
+      - name: Build report
+        run: |
+          cd tests/integration
+          WITH_COVERAGE=1 make coverage-report
+          echo "Coverage files:"
+          ls ../../target/integration-coverage/profraw -l
+          echo "Coverage report:"
+          ls ../../target/integration-coverage/reports/lcov.info -l
+
+      - name: Upload coverage results (to Codecov.io)
+        uses: codecov/codecov-action@v5
+        with:
+          files: target/integration-coverage/reports/lcov.info
+          name: codecov-umbrella-integration-${{ matrix.type }}
+          fail_ci_if_error: true
+          # verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  gha:
+    runs-on: ubuntu-24.04
+    needs: build
+
+    env:
+      SCCACHE_GHA_ENABLED: "on"
+      RUSTC_WRAPPER: /home/runner/.cargo/bin/sccache
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v5
+
+      - name: Configure Cache Env
+        uses: actions/github-script@v8
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Install rust
+        uses: ./.github/actions/rust-toolchain
+        with:
+          toolchain: "stable"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: integration-tests
+          path: /home/runner/.cargo/bin/
+      - name: Chmod for binary
+        run: chmod +x ${SCCACHE_PATH}
+
+      - name: Test
+        run: cargo clean && cargo build
+
+      - name: Output
+        run: |
+          ${SCCACHE_PATH} --show-stats
+
+          ${SCCACHE_PATH} --show-stats | grep gha
+
+      - name: Test Twice for Cache Read
+        run: cargo clean && cargo build
+
+      - name: Output
+        run: |
+          ${SCCACHE_PATH} --show-stats
+
+          ${SCCACHE_PATH} --show-stats | grep -e "Cache hits\s*[1-9]"
+
+  test-mock-msvc:
+    runs-on: windows-2022
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      SCCACHE_EXE: ${{ github.workspace }}\\target\\x86_64-pc-windows-msvc\\debug\\sccache.exe
+      SCCACHE_LOG: "debug"
+      SCCACHE_ERROR_LOG: "${{ github.workspace }}\\server_log.txt"
+
+    steps:
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Clone repository
+        uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: ./.github/actions/rust-toolchain
+        with:
+          toolchain: "stable"
+          target: $TARGET
+
+      - name: Build
+        run: cargo build --bin sccache --target $env:TARGET --features=vendored-openssl
+
+      - name: Compile MSVC (no cache)
+        shell: bash
+        working-directory: ./tests/integration/msvc
+        run: |
+          cl "@args.rsp"
+          test -e ./foo.o || { echo "No compiler output found"; exit -1; }
+
+      - name: Start Server
+        shell: bash
+        run: $SCCACHE_EXE --start-server
+
+      - name: Compile - Cache Miss
+        shell: bash
+        working-directory: ./tests/integration/msvc
+        run: |
+          rm ./foo.o || true
+          $SCCACHE_EXE "$(where cl.exe)" -c "@args.rsp"
+          $SCCACHE_EXE --show-stats
+          $SCCACHE_EXE --show-stats | grep -e "Cache misses\s*[1-9]"
+          test -e ./foo.o || { echo "No compiler output found"; exit -1; }
+          test -e ./foo.o.json || { echo "No dependency list found"; exit -1; }
+
+      - name: Compile - Cache Hit
+        shell: bash
+        working-directory: ./tests/integration/msvc
+        run: |
+          rm ./foo.o || true
+          $SCCACHE_EXE "$(where cl.exe)" -c "@args.rsp"
+          $SCCACHE_EXE --show-stats
+          $SCCACHE_EXE --show-stats | grep -e "Cache hits\s*[1-9]"
+          test -e ./foo.o || { echo "No compiler output found"; exit -1; }
+          test -e ./foo.o.json || { echo "No dependency list found"; exit -1; }
+
+      - name: Compile - Preprocessing Compiler Bug
+        shell: bash
+        working-directory: ./tests/integration/msvc-preprocessing
+        run: |
+          $SCCACHE_EXE "$(where cl.exe)" -c "@args.rsp"
+          $SCCACHE_EXE --show-stats
+
+      - name: Prepare - MSBuild support
+        shell: bash
+        working-directory: ./tests/msvc-msbuild
+        # Force stop server to drop compiler cache - need to test showInclude prefix detection
+        run: |
+          $SCCACHE_EXE --stop-server
+          mkdir -p compiler
+          cp $SCCACHE_EXE compiler/cl.exe
+
+      - name: Compile - MSBuild support
+        working-directory: ./tests/msvc-msbuild
+        run: msbuild MsbuildCpp.vcxproj -property:Configuration=Release -property:Platform=x64 "-property:SolutionDir=${{ github.workspace }}/tests/msvc-msbuild/"
+
+      - name: Stop Server
+        if: success() || failure()
+        shell: bash
+        run: $SCCACHE_EXE --stop-server
+
+      - name: Show Server Log
+        if: success() || failure()
+        shell: bash
+        run: cat "$SCCACHE_ERROR_LOG"
+
+  hip:
+    # Probably wouldn't matter anyway since we run in a container, but staying
+    # close to the version is better than not.
+    runs-on: ubuntu-24.04
+    needs: build
+    container:
+      image: rocm/dev-ubuntu-24.04:6.3
+
+    env:
+      # SCCACHE_GHA_ENABLED: "on"
+      ROCM_PATH: "/opt/rocm"
+      RANDOMIZE_READDIR_LOG: "/tmp/readdir.log"
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v5
+
+      # I don't want to break the cache during testing. Will turn on after I
+      # make sure it's working.
+      #
+      # - name: Configure Cache Env
+      #   uses: actions/github-script@v8
+      #   with:
+      #     script: |
+      #       core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+      #       core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '')
+
+      # - name: Configure ROCm Env
+      #   uses: actions/github-script@v8
+      #   with:
+      #     script: |
+      #       core.exportVariable('ROCM_PATH', process.env.ROCM_PATH || '');
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          ## Install dependencies
+          sudo apt-get update
+          sudo apt-get install -y cmake curl
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install rust
+        uses: ./.github/actions/rust-toolchain
+        with:
+          toolchain: "stable"
+
+      - name: Build & setup librandomize_readdir
+        run: |
+          cargo build -p randomize_readdir
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: integration-tests
+          path: /home/runner/.cargo/bin/
+      - name: Chmod for binary
+        run: chmod +x ${SCCACHE_PATH}
+
+      # Ensure that HIPCC isn't already borken
+      - name: Sanity Check
+        run: |
+          export LD_PRELOAD=$PWD/target/debug/librandomize_readdir.so
+          hipcc -o vectoradd_hip --offload-arch=gfx900 tests/integration/cmake-hip/vectoradd_hip.cpp
+
+      - name: Test
+        run: |
+          export LD_PRELOAD=$PWD/target/debug/librandomize_readdir.so
+          rm "$RANDOMIZE_READDIR_LOG".*
+          cmake -B build -S tests/integration/cmake-hip -DCMAKE_HIP_COMPILER_LAUNCHER=${SCCACHE_PATH} -DCMAKE_HIP_ARCHITECTURES=gfx900
+          cmake --build build
+          if ! grep -q bitcode "$RANDOMIZE_READDIR_LOG".*; then
+            echo "amdgcn bitcode not accessed, is librandomize_readdir properly set up?"
+            exit 1
+          fi
+
+      - name: Output
+        run: |
+          export LD_PRELOAD=$PWD/target/debug/librandomize_readdir.so
+          ${SCCACHE_PATH} --show-stats
+
+      - name: Test Twice for Cache Read
+        run: |
+          export LD_PRELOAD=$PWD/target/debug/librandomize_readdir.so
+          rm "$RANDOMIZE_READDIR_LOG".*
+          rm -rf build
+          cmake -B build -S tests/integration/cmake-hip -DCMAKE_HIP_COMPILER_LAUNCHER=${SCCACHE_PATH} -DCMAKE_HIP_ARCHITECTURES=gfx900
+          cmake --build build
+          if ! grep -q bitcode "$RANDOMIZE_READDIR_LOG".*; then
+            echo "amdgcn bitcode not accessed, is librandomize_readdir properly set up?"
+            exit 1
+          fi
+
+      - name: Output
+        run: |
+          export LD_PRELOAD=$PWD/target/debug/librandomize_readdir.so
+          ${SCCACHE_PATH} --show-stats
+          ${SCCACHE_PATH} --show-stats | grep -e "Cache hits\s*[1-9]"
+
+  xcode:
+    runs-on: macos-latest
+    env:
+      SCCACHE_PATH: target/debug/sccache
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: ./.github/actions/rust-toolchain
+        with:
+          toolchain: "stable"
+
+      - name: Build sccache
+        run: |
+          cargo build
+
+      - name: Start server
+        run: ${SCCACHE_PATH} --start-server
+
+      - name: Test compile xcode
+        working-directory: tests/integration/xcode
+        run: |
+          xcodebuild -version
+          xcodebuild -xcconfig sccache.xcconfig
+
+      - name: Output
+        run: |
+          ${SCCACHE_PATH} --show-stats
+
+      - name: Test compile xcode cached
+        working-directory: tests/integration/xcode
+        run: |
+          xcodebuild clean
+          xcodebuild -xcconfig sccache.xcconfig
+
+      - name: Output
+        run: |
+          ${SCCACHE_PATH} --show-stats
+          ${SCCACHE_PATH} --show-stats | grep -e "Cache hits\s*[1-9]"

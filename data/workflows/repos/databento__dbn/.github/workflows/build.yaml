@@ -1,0 +1,158 @@
+name: build
+
+# Build and test dbn
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  x86_64-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    name: build - Python ${{ matrix.python-version }} (x86_64 ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Rust
+        run: rustup toolchain add --profile minimal stable --component clippy,rustfmt
+
+      # Cargo setup
+      - name: Set up Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-x86_64-cargo-${{ hashFiles('Cargo.lock') }}
+
+      # Python setup
+      - name: Set up Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.arch }}
+
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist --manifest-path python/Cargo.toml --interpreter python${{ matrix.python-version }}
+
+      - name: Format
+        run: scripts/format.sh
+        shell: bash
+      - name: Build
+        run: scripts/build.sh
+        shell: bash
+      - name: Lint
+        run: scripts/lint.sh
+        shell: bash
+      - name: Test
+        run: scripts/test.sh
+        shell: bash
+
+  aarch64-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    name: build - Python ${{ matrix.python-version }} (aarch64 linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Rust
+        run: rustup toolchain add --profile minimal stable --component clippy,rustfmt
+
+      # Cargo setup
+      - name: Set up Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-aarch64-cargo-${{ hashFiles('Cargo.lock') }}
+
+      # Python setup
+      - name: Set up Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: aarch64
+          manylinux: auto
+          args: --release --out dist --manifest-path python/Cargo.toml --interpreter python${{ matrix.python-version }}
+
+      - name: Format
+        run: scripts/format.sh
+      - name: Build
+        run: scripts/build.sh
+      - name: Lint
+        run: scripts/lint.sh
+      - name: Test
+        run: scripts/test.sh
+
+  macos-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    name: build - Python ${{ matrix.python-version }} (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Rust
+        run: rustup toolchain add --profile minimal stable --component clippy,rustfmt
+
+      # Cargo setup
+      - name: Set up Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-x86_64-cargo-${{ hashFiles('Cargo.lock') }}
+
+      # Python setup
+      - name: Set up Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build wheels - x86_64
+        uses: messense/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist --manifest-path python/Cargo.toml --interpreter python${{ matrix.python-version }}
+
+      - name: Build wheels - universal2
+        uses: messense/maturin-action@v1
+        with:
+          args: --release --target universal2-apple-darwin --out dist --manifest-path python/Cargo.toml --interpreter python${{ matrix.python-version }}
+
+      - name: Format
+        run: scripts/format.sh
+      - name: Build
+        run: scripts/build.sh
+      - name: Lint
+        run: scripts/lint.sh
+      - name: Test
+        run: scripts/test.sh

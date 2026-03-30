@@ -1,0 +1,1568 @@
+name: General Checks
+run-name: "General Checks for: ${{ github.event.pull_request.title || github.ref }}"
+
+on:
+  merge_group:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && github.run_id || format('general-{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_INCREMENTAL: 0
+  FORCE_COLOR: 1
+  TENSORZERO_CLICKHOUSE_URL: "http://chuser:chpassword@localhost:8123/tensorzero"
+  SQLX_OFFLINE: 1
+  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+jobs:
+  detect-changes:
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      clickhouse-tests-merge-queue: ${{ steps.filter.outputs.clickhouse-tests-merge-queue || 'true' }}
+      clickhouse-tests-pr: ${{ steps.filter.outputs.clickhouse-tests-pr || 'true' }}
+      client-tests: ${{ steps.filter.outputs.client-tests || 'true' }}
+      code: ${{ steps.filter.outputs.code || 'true' }}
+      docs: ${{ steps.filter.outputs.docs || 'true' }}
+      live-tests: ${{ steps.filter.outputs.live-tests || 'true' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        if: github.event_name != 'pull_request'
+      - uses: dorny/paths-filter@668c092af3649c4b664c54e4b704aa46782f6f7c
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          predicate-quantifier: "every"
+          filters: |
+            clickhouse-tests-merge-queue:
+              - 'crates/**'
+            clickhouse-tests-pr:
+              - 'crates/tensorzero-core/src/db/**'
+            client-tests:
+              - '**'
+              - '!**/README.md'
+              - '!docs/**'
+              - '!examples/**'
+              - '!recipes/**'
+              - '!ui/**'
+            code:
+              - '**'
+              - '!**/README.md'
+              - '!docs/**'
+            docs:
+              - 'docs/**'
+            live-tests:
+              - '**'
+              - '!**/README.md'
+              - '!docs/**'
+              - '!examples/**'
+              - '!recipes/**'
+              - '!ui/**'
+
+  check-version-consistency:
+    needs: [detect-changes]
+    if: github.repository == 'tensorzero/tensorzero' && needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Check version consistency
+        run: ./ci/check-version-consistency.sh
+
+      - name: Check Rust version consistency in Dockerfiles
+        run: ./ci/check-rust-version-consistency.sh
+
+  # This checks for specific markers in the codebase that require multiple files to be edited together.
+  # Only runs on Pull Requests; merge queue jobs can't access the 'skip-if-edited-check' label so we
+  # always mark them as successful.
+  check-if-edited-then-edit:
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        if: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-if-edited-check') }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.10"
+
+      - name: Check coordinated edits
+        if: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-if-edited-check') }}
+        run: python3 ci/check_coordinated_edits.py
+
+      - name: Skip coordinated edits check
+        if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'skip-if-edited-check') }}
+        run: echo "Skipping coordinated edits check."
+
+  # Like `check-docker-compose-released`, but loads the freshly built `gateway` and `ui` container images first
+  # This checks that all of our docker-compose files work with the changes in the PR
+  check-docker-compose-commit:
+    needs: [build-gateway-container, build-ui-container]
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+
+    runs-on: ubuntu-latest
+    if: github.repository == 'tensorzero/tensorzero'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Login to DockerHub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          username: tensorzero
+          password: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+      - name: Pull and retag `gateway` and `ui` containers
+        run: |
+          ./ci/docker-pull-with-retry.sh \
+            tensorzero/gateway-dev:sha-${{ github.sha }} \
+            tensorzero/ui-dev:sha-${{ github.sha }}
+          docker tag tensorzero/gateway-dev:sha-${{ github.sha }} tensorzero/gateway:latest
+          docker tag tensorzero/ui-dev:sha-${{ github.sha }} tensorzero/ui:latest
+
+      - name: Create the `object_storage` directory for the multimodal-vision-finetuning example
+        run: |
+          mkdir -p examples/multimodal-vision-finetuning/object_storage
+          chmod 777 examples/multimodal-vision-finetuning/object_storage
+
+      - name: Apply Postgres migrations for the centralize-auth-rate-limits-and-more/auth example
+        # Note: In isolation, applying migrations should not require `OPENAI_API_KEY`, but Docker Compose will complain if it's not set given our docker-compose.yml file.
+        # Note: We must delete the Docker network because later we use `ci/internal-network.yml`
+        # Note: This uses relay-gateway instead of gateway, so it requires explicit handling here
+        run: |
+          cd examples/docs/guides/operations/centralize-auth-rate-limits-and-more/auth
+          OPENAI_API_KEY=dummy docker compose run --rm relay-gateway --run-postgres-migrations
+          OPENAI_API_KEY=dummy docker compose down
+
+      - name: Check latest docker-compose
+        run: ./ci/check-all-docker-compose.sh
+
+  # Checks our docker-compose files against the most recent published `gateway` and `ui` container images
+  # (not the ones built for this PR)
+  check-docker-compose-released:
+    needs: [detect-changes]
+    if: github.repository == 'tensorzero/tensorzero' && needs.detect-changes.outputs.code == 'true'
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Set DNS
+        run: echo "127.0.0.1 howdy.tensorzero.com" | sudo tee -a /etc/hosts
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # We allow the namespace builder setup to fail on Dependabot PRs and PRs from forks
+      # (where the oidc token is not available)
+
+      - name: Install Namespace CLI
+        uses: namespacelabs/nscloud-setup@f378676225212387f1283f4da878712af2c4cd60
+        continue-on-error: ${{ github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]' }}
+
+      - name: Configure Namespace-powered Buildx
+        uses: namespacelabs/nscloud-setup-buildx-action@91c2e6537780e3b092cb8476406be99a8f91bd5e
+        with:
+          wait-for-builder: true
+        continue-on-error: ${{ github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]' }}
+
+      - name: Create the `object_storage` directory for the multimodal-vision-finetuning example
+        run: |
+          mkdir -p examples/multimodal-vision-finetuning/object_storage
+          chmod 777 examples/multimodal-vision-finetuning/object_storage
+
+      - name: Apply Postgres migrations for the centralize-auth-rate-limits-and-more/auth example
+        # Note: In isolation, applying migrations should not require `OPENAI_API_KEY`, but Docker Compose will complain if it's not set given our docker-compose.yml file.
+        # Note: We must delete the Docker network because later we use `ci/internal-network.yml`
+        # Note: This uses relay-gateway instead of gateway, so it requires explicit handling here
+        run: |
+          cd examples/docs/guides/operations/centralize-auth-rate-limits-and-more/auth
+          OPENAI_API_KEY=dummy docker compose run --rm relay-gateway --run-postgres-migrations
+          OPENAI_API_KEY=dummy docker compose down
+
+      - name: Check all docker-compose.yml files
+        run: ./ci/check-all-docker-compose.sh
+
+  check-python-client-build:
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/python-client-build.yml
+
+  check-node-bindings:
+    needs: [detect-changes]
+    if: github.repository == 'tensorzero/tensorzero' && needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      # Permission to upload artifacts
+      actions: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Setup Node.js
+        uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: "24.13.0"
+
+      - name: Install pnpm
+        run: |
+          for attempt in 1 2 3; do
+            if npm install -g pnpm@10.15.0; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Install dependencies
+        working-directory: crates/tensorzero-node
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm install --frozen-lockfile; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm dependencies after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+
+      - name: Build Node.js bindings
+        working-directory: crates/tensorzero-node
+        run: pnpm build-bindings
+
+      - name: Check for git diff after building bindings
+        id: git_diff_check
+        run: git diff --exit-code
+
+      - name: Upload bindings artifact on diff failure
+        if: failure()
+        uses: namespace-actions/upload-artifact@9a78c62e083914789d908952f9773e42744b9f68
+        with:
+          name: node-bindings
+          path: crates/tensorzero-node/lib/bindings
+          retention-days: 7
+
+      - name: Check tensorzero-node bindings are properly exported
+        run: pnpm --filter=tensorzero-node run check-exports
+
+  check-python-schemas:
+    needs: [detect-changes]
+    if: github.repository == 'tensorzero/tensorzero' && needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Setup Node.js
+        uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: "24.13.0"
+
+      - name: Install pnpm
+        run: |
+          for attempt in 1 2 3; do
+            if npm install -g pnpm@10.15.0; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b
+        with:
+          version: "0.9.27"
+
+      - name: Generate Python schemas
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm generate-python-schemas; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to generate Python schemas after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+
+      - name: Check for git diff after generating schemas
+        id: git_diff_check
+        run: git diff --exit-code
+
+  build-windows:
+    needs: [detect-changes]
+    if: github.repository == 'tensorzero/tensorzero' && needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      # Permission for rust-cache to read/write cache
+      actions: read
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+        with:
+          cache-provider: "buildjet"
+          save-if: ${{ github.event_name == 'merge_group' }}
+          workspaces: "crates -> target"
+      - name: Install uv
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b
+        with:
+          version: "0.9.27"
+
+      - name: Install Python 3.10
+        run: |
+          for attempt in 1 2 3; do
+            if uv python install 3.10; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Python 3.10 after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Set PYO3_PYTHON
+        run: echo "PYO3_PYTHON=$(uv python find python3.10)" >> $GITHUB_ENV
+        shell: bash
+      - name: Build Rust
+        working-directory: crates
+        run: cargo build --workspace
+
+  lint-rust:
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      # Permission for rust-cache
+      actions: read
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Keep 'total_partitions' in sync with the number of entries in the 'partition' array
+        partition: [1, 2, 3, 4]
+        include:
+          - total_partitions: 4
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      # We install the latest rust when running lints, since we don't care if older rust versions lint successfully.
+      # This avoids the need to deal with linter bugs in older rust versions.
+      - name: Install Rust toolchain
+        run: |
+          for attempt in 1 2 3; do
+            if rustup toolchain install stable --component clippy && rustup default stable; then
+              break
+            fi
+          done
+        shell: bash
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+        with:
+          cache-provider: "buildjet"
+          shared-key: "lint-rust-cache"
+          save-if: ${{ github.event_name == 'merge_group' }}
+          workspaces: "crates -> target"
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787
+        with:
+          tool: cargo-hack
+
+      - name: Lint (Rust)
+        working-directory: crates
+        run: |
+          cargo hack --partition '${{ matrix.partition }}/${{ matrix.total_partitions }}' clippy --all-targets --each-feature -- -D warnings
+
+  validate-python:
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # rust-toolchain.toml pins our MSRV to ensure everything compiles with that version
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Print Rust version
+        run: rustc --version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b
+        with:
+          version: "0.9.27"
+
+      - name: Install Python 3.10
+        run: |
+          for attempt in 1 2 3; do
+            if uv python install 3.10; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Python 3.10 after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Lint (Python:ruff)
+        run: |
+          uvx ruff@0.14.0 check --output-format=github --extend-select I .
+          uvx ruff@0.14.0 format --check .
+
+      - name: "Python: Pyo3 Client: Build and install dependencies"
+        working-directory: crates/tensorzero-python
+        run: uv sync
+
+      - name: "Python: PyO3 Client: pyright"
+        working-directory: crates/tensorzero-python
+        run: |
+          uv pip install pyright==1.1.394
+          uv run pyright
+
+      - name: "Python: PyO3 Client: stubtest"
+        working-directory: crates/tensorzero-python
+        run: |
+          uv run stubtest tensorzero.tensorzero
+
+      - name: "Python: Recipes: Install dependencies"
+        working-directory: recipes
+        run: |
+          uv venv
+          uv sync
+
+      - name: "Python: Recipes: pyright"
+        working-directory: recipes
+        run: |
+          uv run pyright
+
+      - name: Compile / validate notebooks
+        run: ci/compile-check-notebooks.sh
+
+  validate-node:
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # rust-toolchain.toml pins our MSRV to ensure everything compiles with that version
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Print Rust version
+        run: rustc --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: "24.13.0"
+
+      - name: Install pnpm
+        run: |
+          for attempt in 1 2 3; do
+            if npm install -g pnpm@10.15.0; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Install JS dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm install --frozen-lockfile; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm dependencies after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+
+      - name: Build npm workspace
+        run: pnpm -r build
+
+      - name: Format tensorzero-node package
+        run: pnpm --filter=tensorzero-node run format:check
+
+      - name: Lint tensorzero-node package
+        run: pnpm --filter=tensorzero-node run lint:check
+
+      - name: Typecheck tensorzero-node package
+        run: pnpm --filter=tensorzero-node run typecheck
+
+      - name: Run oxlint + ESLint
+        run: pnpm --filter=tensorzero-ui run lint:check
+
+      - name: Run oxfmt
+        run: pnpm --filter=tensorzero-ui run format:check
+
+      - name: pnpm TypeScript type checking
+        run: pnpm --filter=tensorzero-ui run typecheck
+
+  rust-build:
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # rust-toolchain.toml pins our MSRV to ensure everything compiles with that version
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Install cargo-nextest, cargo-deny, and cargo-hack
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787
+        with:
+          tool: cargo-nextest,cargo-deny,cargo-hack
+
+      - name: Build (Rust)
+        working-directory: crates
+        run: cargo build --workspace --verbose
+
+      - name: Validate config
+        working-directory: crates
+        run: |
+          unset TENSORZERO_CLICKHOUSE_URL
+          cargo run-e2e --validate-and-exit
+
+  rust-test:
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # rust-toolchain.toml pins our MSRV to ensure everything compiles with that version
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Install cargo-nextest, cargo-deny, and cargo-hack
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787
+        with:
+          tool: cargo-nextest,cargo-deny,cargo-hack
+
+      - name: Test (Rust)
+        working-directory: crates
+        env:
+          # Write the exported bindings to somewhere we don't care about
+          TS_RS_EXPORT_DIR: /tmp/tensorzero-bindings
+        run: |
+          cargo test-unit ${{ vars.CARGO_NEXTEST_EXTRA_ARGS }}
+
+  validate:
+    needs: [detect-changes]
+    if: github.repository == 'tensorzero/tensorzero' && needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      # rust-toolchain.toml pins our MSRV to ensure everything compiles with that version
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Print Rust version
+        run: rustc --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: "24.13.0"
+
+      - name: Install pnpm
+        run: |
+          for attempt in 1 2 3; do
+            if npm install -g pnpm@10.15.0; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b
+        with:
+          version: "0.9.27"
+
+      - name: Install JS dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm install --frozen-lockfile; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm dependencies after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+
+      - name: Set up Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: "3.18.6" # Conservatively match the `Helm 3.2.0+` version specified in examples/production-deployment-k8s-helm/README.md
+
+      - name: Install helm-values-schema-json plugin
+        run: helm plugin install https://github.com/losisin/helm-values-schema-json.git
+
+      - name: check‑case‑conflict
+        run: uv run --with pre-commit pre-commit run check-case-conflict --all-files
+
+      - name: end-of-file-fixer
+        run: uv run --with pre-commit pre-commit run end-of-file-fixer --all-files
+
+      - name: check‑executables‑have‑shebangs
+        run: uv run --with pre-commit pre-commit run check-executables-have-shebangs --all-files
+
+      - name: check‑json
+        run: uv run --with pre-commit pre-commit run check-json --all-files
+
+      - name: check‑yaml
+        run: uv run --with pre-commit pre-commit run check-yaml --all-files
+
+      - name: check‑toml
+        run: uv run --with pre-commit pre-commit run check-toml --all-files
+
+      - name: check‑xml
+        run: uv run --with pre-commit pre-commit run check-xml --all-files
+
+      - name: check‑merge‑conflict
+        run: uv run --with pre-commit pre-commit run check-merge-conflict --all-files
+
+      - name: check‑symlinks
+        run: uv run --with pre-commit pre-commit run check-symlinks --all-files
+
+      - name: check‑vcs‑permalinks
+        run: uv run --with pre-commit pre-commit run check-vcs-permalinks --all-files
+
+      - name: detect‑private‑key
+        run: uv run --with pre-commit pre-commit run detect-private-key --all-files
+
+      - name: helm-values-schema
+        run: uv run --with pre-commit pre-commit run helm-schema --all-files
+
+      - name: Check helm schema sync
+        run: ./ci/check-helm-schema-sync.sh
+
+      - name: oxfmt-root
+        run: "uv run --with pre-commit pre-commit run 'oxfmt: root' --all-files"
+
+      # We don't run these two because we want to allow template files to have trailing whitespace
+      # TODO: how do we exclude minijinja files using pre-commit in GHA?
+      # - name: end‑of‑file‑fixer
+      #   run: uv run --with pre-commit pre-commit run end-of-file-fixer
+
+      # - name: trailing‑whitespace
+      #   run: uv run --with pre-commit pre-commit run trailing-whitespace
+
+      # TODO: Enable this if we can figure out the invocation
+      # - name: Run nb-clean
+      #   run: uv run --with nb-clean nb-clean check --remove-empty-cells
+
+      - name: Install cargo-nextest and cargo-hack
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787
+        with:
+          tool: cargo-nextest,cargo-hack
+
+      - name: Check durable dependencies
+        run: ./ci/check-durable-deps.sh
+
+      - name: Run cargo fmt
+        working-directory: crates
+        run: cargo fmt --all --check
+
+      - name: "Node.js: Install openai-node dependencies"
+        working-directory: clients/openai-node
+        run: pnpm install --frozen-lockfile
+
+      - name: "Node.js: Run oxfmt"
+        working-directory: clients/openai-node
+        run: pnpm run format
+
+      - name: "Node.js: OpenAI Client: typecheck"
+        working-directory: clients/openai-node
+        run: pnpm run typecheck
+
+      - name: "Node.js: OpenAI Client: lint"
+        working-directory: clients/openai-node
+        run: pnpm run lint
+
+      - name: Lint Helm charts
+        run: find . -name "Chart.yaml" -exec dirname {} \; | xargs -I {} helm lint {}
+
+      - name: Install kubeconform
+        run: |
+          curl -sSLo kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xzf kubeconform.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+          rm kubeconform.tar.gz
+
+      - name: Validate Helm templates with kubeconform (default values)
+        run: |
+          helm template test-release examples/production-deployment-k8s-helm/ \
+            | kubeconform -strict -summary -kubernetes-version 1.30.0 \
+              -ignore-missing-schemas
+
+      - name: Validate Helm templates with kubeconform (ingress + persistence + UI)
+        run: |
+          helm template test-release examples/production-deployment-k8s-helm/ \
+            --set gateway.ingress.enabled=true \
+            --set persistence.enabled=true \
+            --set ui.deploy=true \
+            --set ui.ingress.enabled=true \
+            | kubeconform -strict -summary -kubernetes-version 1.30.0 \
+              -ignore-missing-schemas
+
+      - name: Validate Helm templates with kubeconform (minimal - no UI, no ingress)
+        run: |
+          helm template test-release examples/production-deployment-k8s-helm/ \
+            --set gateway.ingress.enabled=false \
+            --set ui.deploy=false \
+            --set persistence.enabled=false \
+            | kubeconform -strict -summary -kubernetes-version 1.30.0 \
+              -ignore-missing-schemas
+
+      - name: Install helm-unittest plugin
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v0.7.2
+
+      - name: Run Helm unit tests
+        run: helm unittest examples/production-deployment-k8s-helm/
+
+  # This job is intentionally NOT included in check-all-general-jobs-passed
+  # It runs as an optional check that shows up in the PR but doesn't block merging
+  cargo-deny:
+    needs: [detect-changes]
+    if: github.repository == 'tensorzero/tensorzero' && needs.detect-changes.outputs.code == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787
+        with:
+          tool: cargo-deny
+
+      - name: Run cargo-deny
+        working-directory: crates
+        run: cargo deny check
+
+  clickhouse-tests:
+    needs:
+      [
+        detect-changes,
+        build-gateway-e2e-container,
+        build-mock-provider-api-container,
+        build-fixtures-container,
+      ]
+    if: >-
+      ${{
+        (
+          (github.event_name == 'merge_group' && needs.detect-changes.outputs.clickhouse-tests-merge-queue == 'true') ||
+          (github.event_name != 'merge_group' && needs.detect-changes.outputs.clickhouse-tests-pr == 'true')
+        ) &&
+        (github.event_name == 'merge_group' || (github.event.pull_request.head.repo.full_name == github.repository))
+      }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/clickhouse-tests.yml
+    with:
+      is_merge_group: ${{ github.event_name == 'merge_group' }}
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+  # Run Postgres tests
+  # Postgres does not have unit test coverage, because sqlx doesn't expose mocks. We include it here to get early CI signals.
+  postgres-tests:
+    name: "Postgres tests"
+    permissions:
+      contents: read
+      # Permission for rust-cache
+      actions: read
+    runs-on: ubuntu-latest
+    needs: [build-gateway-container, build-fixtures-container]
+    if: ${{ github.event_name == 'merge_group' || (github.event.pull_request.head.repo.full_name == github.repository) }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Cleanup disk space
+        run: bash ci/free-disk-space.sh
+
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+        with:
+          cache-provider: "buildjet"
+          shared-key: "build-gateway-cache"
+          save-if: false
+          workspaces: "crates -> target"
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787
+        with:
+          tool: cargo-nextest
+
+      - name: Login to DockerHub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          username: tensorzero
+          password: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+        continue-on-error: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
+
+      - name: Download container images
+        run: |
+          ./ci/docker-pull-with-retry.sh \
+            tensorzero/gateway-dev:sha-${{ github.sha }} \
+            tensorzero/fixtures:sha-${{ github.sha }}
+          docker tag tensorzero/gateway-dev:sha-${{ github.sha }} tensorzero/gateway:sha-${{ github.sha }}
+          docker tag tensorzero/fixtures:sha-${{ github.sha }} tensorzero/fixtures-postgres:sha-${{ github.sha }}
+        continue-on-error: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
+
+      - name: Set container image tags
+        run: |
+          echo "TENSORZERO_GATEWAY_TAG=sha-${{ github.sha }}" >> $GITHUB_ENV
+          echo "TENSORZERO_COMMIT_TAG=sha-${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Set environment variables for Postgres
+        run: |
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/tensorzero-e2e-tests" >> $GITHUB_ENV
+          echo "TENSORZERO_POSTGRES_URL=postgres://postgres:postgres@localhost:5432/tensorzero-e2e-tests" >> $GITHUB_ENV
+
+      - name: Launch Postgres
+        run: docker compose -f crates/tensorzero-core/tests/e2e/docker-compose.yml up --no-build postgres gateway-postgres-migrations fixtures-postgres -d --wait
+
+      - name: Test (Rust)
+        working-directory: crates
+        run: cargo nextest run --filterset 'test(db::) & test(postgres)'
+
+      - name: Print docker compose logs
+        if: always()
+        run: docker compose -f crates/tensorzero-core/tests/e2e/docker-compose.yml logs -t
+
+  # Run endpoint tests against both ClickHouse and Postgres backends
+  endpoint-tests:
+    name: "Endpoint tests (database: ${{ matrix.database }})"
+    permissions:
+      contents: read
+      actions: read
+    needs:
+      [
+        build-gateway-container,
+        build-mock-provider-api-container,
+        build-fixtures-container,
+      ]
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'merge_group' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [clickhouse, postgres]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Cleanup disk space
+        run: bash ci/free-disk-space.sh
+
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+        with:
+          cache-provider: "buildjet"
+          shared-key: "build-gateway-cache"
+          save-if: false
+          workspaces: "crates -> target"
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787
+        with:
+          tool: cargo-nextest
+
+      - name: Login to DockerHub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          username: tensorzero
+          password: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+        continue-on-error: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
+
+      - name: Download container images
+        run: |
+          ./ci/docker-pull-with-retry.sh \
+            tensorzero/gateway-dev:sha-${{ github.sha }} \
+            tensorzero/mock-provider-api:sha-${{ github.sha }} \
+            tensorzero/fixtures:sha-${{ github.sha }}
+          docker tag tensorzero/gateway-dev:sha-${{ github.sha }} tensorzero/gateway:sha-${{ github.sha }}
+          docker tag tensorzero/fixtures:sha-${{ github.sha }} tensorzero/fixtures-postgres:sha-${{ github.sha }}
+        continue-on-error: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
+
+      - name: Set environment variables
+        run: |
+          echo "TENSORZERO_CLICKHOUSE_URL=http://chuser:chpassword@localhost:8123/tensorzero_e2e_tests" >> $GITHUB_ENV
+          echo "TENSORZERO_POSTGRES_URL=postgres://postgres:postgres@localhost:5432/tensorzero-e2e-tests" >> $GITHUB_ENV
+          echo "TENSORZERO_COMMIT_TAG=sha-${{ github.sha }}" >> $GITHUB_ENV
+          echo "TENSORZERO_GATEWAY_TAG=sha-${{ github.sha }}" >> $GITHUB_ENV
+          echo "TENSORZERO_MOCK_PROVIDER_API_TAG=sha-${{ github.sha }}" >> $GITHUB_ENV
+          echo "TENSORZERO_SKIP_LARGE_FIXTURES=1" >> $GITHUB_ENV
+
+      - name: Set Postgres as primary datastore
+        if: matrix.database == 'postgres'
+        run: |
+          echo "TENSORZERO_INTERNAL_TEST_OBSERVABILITY_BACKEND=postgres" >> $GITHUB_ENV
+
+      - name: Launch dependency services
+        run: docker compose -f crates/tensorzero-core/tests/e2e/docker-compose.yml up --wait
+
+      - name: Build the gateway for E2E tests
+        working-directory: crates
+        run: cargo build-e2e
+
+      - name: Launch the gateway for E2E tests
+        working-directory: crates
+        run: |
+          if [ "${{ matrix.database }}" = "postgres" ]; then
+            cargo run-e2e-postgres > e2e_logs.txt 2>&1 &
+          else
+            cargo run-e2e > e2e_logs.txt 2>&1 &
+          fi
+          count=0
+          max_attempts=20
+          while ! curl http://localhost:3000/health; do
+            echo "Waiting for gateway to be healthy..."
+            sleep 1
+            count=$((count + 1))
+            if [ $count -ge $max_attempts ]; then
+              echo "Gateway failed to become healthy after $max_attempts attempts"
+              exit 1
+            fi
+          done
+
+      - name: Run endpoint tests
+        working-directory: crates
+        run: cargo test-endpoints
+
+      - name: Print docker compose logs
+        if: always()
+        run: docker compose -f crates/tensorzero-core/tests/e2e/docker-compose.yml logs -t
+
+      - name: Print e2e logs
+        if: always()
+        working-directory: crates
+        run: cat e2e_logs.txt
+
+  # Run 'cargo test-optimization' against mock-provider-api
+  mock-optimization-tests:
+    permissions:
+      contents: read
+      # Permission for rust-cache
+      actions: read
+    needs: [build-gateway-container, build-fixtures-container]
+    runs-on: ubuntu-latest
+    if: github.repository == 'tensorzero/tensorzero' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
+    env:
+      OPENAI_API_KEY: not_used
+      FIREWORKS_API_KEY: not_used
+      TOGETHER_API_KEY: not_used
+      TENSORZERO_INTERNAL_MOCK_PROVIDER_API: http://localhost:3030
+      TENSORZERO_SKIP_LARGE_FIXTURES: 1
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+        with:
+          cache-provider: "buildjet"
+          shared-key: "build-gateway-cache"
+          save-if: false
+          workspaces: "crates -> target"
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787
+        with:
+          tool: cargo-nextest
+
+      - name: Cleanup disk space
+        run: bash ci/free-disk-space.sh
+
+      - name: Login to DockerHub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          username: tensorzero
+          password: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+      - name: Download container images
+        run: |
+          ./ci/docker-pull-with-retry.sh \
+            tensorzero/gateway-dev:sha-${{ github.sha }} \
+            tensorzero/fixtures:sha-${{ github.sha }}
+          docker tag tensorzero/gateway-dev:sha-${{ github.sha }} tensorzero/gateway:sha-${{ github.sha }}
+          docker tag tensorzero/fixtures:sha-${{ github.sha }} tensorzero/fixtures-postgres:sha-${{ github.sha }}
+
+      - name: Set up TENSORZERO_CLICKHOUSE_URL for E2E tests
+        run: |
+          echo "TENSORZERO_CLICKHOUSE_URL=http://chuser:chpassword@localhost:8123/tensorzero_e2e_tests" >> $GITHUB_ENV
+          echo "TENSORZERO_COMMIT_TAG=sha-${{ github.sha }}" >> $GITHUB_ENV
+          echo "TENSORZERO_GATEWAY_TAG=sha-${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Make sure dependency services are up
+        run: docker compose -f crates/tensorzero-core/tests/e2e/docker-compose.yml up --wait
+
+      - name: Launch the gateway for E2E tests
+        working-directory: crates
+        run: |
+          cargo run-e2e > e2e_logs.txt 2>&1 &
+          GATEWAY_PID=$!
+          while ! curl -s http://localhost:3000/health; do
+            if ! kill -0 $GATEWAY_PID 2>/dev/null; then
+              echo "Gateway process died!"
+              exit 1
+            fi
+            echo "Waiting for gateway to be healthy..."
+            sleep 1
+          done
+
+      - name: Test (Rust)
+        working-directory: crates
+        run: cargo test-optimization-mock
+
+      - name: Print docker compose logs
+        if: always()
+        run: docker compose -f crates/tensorzero-core/tests/e2e/docker-compose.yml logs -t
+
+      - name: Print e2e logs
+        if: always()
+        working-directory: crates
+        run: cat e2e_logs.txt
+
+  build-gateway-e2e-container:
+    needs: [detect-changes]
+    if: ${{ github.event_name == 'merge_group' || (needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))) }}
+    uses: ./.github/workflows/build-gateway-e2e-container.yml
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+  build-provider-proxy-container:
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    uses: ./.github/workflows/build-provider-proxy-container.yml
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+  build-live-tests-container:
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    uses: ./.github/workflows/build-live-tests-container.yml
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+  build-gateway-container:
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    uses: ./.github/workflows/build-gateway-container.yml
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+  build-ui-container:
+    needs: [detect-changes]
+    if: ${{ github.event_name == 'merge_group' || (needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))) }}
+    uses: ./.github/workflows/build-ui-container.yml
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+  build-mock-provider-api-container:
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    uses: ./.github/workflows/build-mock-provider-api-container.yml
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+  build-fixtures-container:
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    uses: ./.github/workflows/build-fixtures-container.yml
+    permissions:
+      # Permission to checkout the repository
+      contents: read
+      # Permission to fetch GitHub OIDC token authentication
+      id-token: write
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+  ui-tests:
+    if: ${{ !(github.event_name == 'pull_request' && github.actor == 'dependabot[bot]') }}
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/ui-tests.yml
+    with:
+      is_merge_group: ${{ github.event_name == 'merge_group' }}
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    needs: [build-gateway-container, build-mock-provider-api-container]
+
+  ui-tests-e2e:
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/ui-tests-e2e.yml
+    with:
+      is_merge_group: ${{ github.event_name == 'merge_group' }}
+    needs:
+      [
+        build-gateway-container,
+        build-gateway-e2e-container,
+        build-ui-container,
+        build-mock-provider-api-container,
+        build-provider-proxy-container,
+        build-fixtures-container,
+      ]
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+      FIREWORKS_ACCOUNT_ID: ${{ secrets.FIREWORKS_ACCOUNT_ID }}
+      FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+      GCP_JWT_KEY: ${{ secrets.GCP_JWT_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      S3_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      S3_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+
+  check-production-deployment-docker-compose:
+    needs: [build-gateway-container]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    if: github.repository == 'tensorzero/tensorzero' && github.event_name == 'merge_group'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Login to DockerHub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          username: tensorzero
+          password: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+      - name: Pull and retag gateway container
+        run: |
+          ./ci/docker-pull-with-retry.sh \
+            tensorzero/gateway-dev:sha-${{ github.sha }}
+          docker tag tensorzero/gateway-dev:sha-${{ github.sha }} tensorzero/gateway:latest
+
+      - name: Launch ClickHouse container for E2E tests
+        run: |
+          docker compose -f crates/tensorzero-core/tests/e2e/docker-compose.yml up clickhouse -d --wait
+
+      - name: Set up .env file for production deployment tests
+        run: |
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > ci/check-production-deployment-docker-compose/.env
+          echo "TENSORZERO_CLICKHOUSE_URL=http://chuser:chpassword@host.docker.internal:8123/tensorzero" >> ci/check-production-deployment-docker-compose/.env
+          echo "TENSORZERO_DISABLE_PSEUDONYMOUS_USAGE_ANALYTICS=1" >> ci/check-production-deployment-docker-compose/.env
+
+      - name: Run docker compose for production deployment tests
+        run: docker compose -f ci/check-production-deployment-docker-compose/docker-compose.yml up -d --wait
+
+      - name: Run inference for production deployment tests
+        run: ci/check-production-deployment-docker-compose/run.sh
+
+      - name: Print Docker compose logs
+        if: always()
+        run: |
+          docker compose -f ci/check-production-deployment-docker-compose/docker-compose.yml logs -t
+
+      - name: Take down docker compose for production deployment tests
+        run: |
+          docker compose -f ci/check-production-deployment-docker-compose/docker-compose.yml down
+          docker compose -f crates/tensorzero-core/tests/e2e/docker-compose.yml down
+
+  live-tests:
+    if: ${{ needs.detect-changes.outputs.live-tests == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    needs:
+      [
+        detect-changes,
+        build-gateway-container,
+        build-gateway-e2e-container,
+        build-fixtures-container,
+        build-provider-proxy-container,
+        build-live-tests-container,
+      ]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/live-tests.yml
+    secrets: inherit
+
+  inference-cache-tests:
+    if: ${{ needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    needs:
+      [
+        detect-changes,
+        build-gateway-container,
+        build-live-tests-container,
+        build-provider-proxy-container,
+      ]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/inference-cache-tests.yml
+    secrets: inherit
+
+  client-tests:
+    if: ${{ needs.detect-changes.outputs.client-tests == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+    needs:
+      [
+        detect-changes,
+        build-gateway-container,
+        build-gateway-e2e-container,
+        build-mock-provider-api-container,
+        build-fixtures-container,
+        build-provider-proxy-container,
+      ]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/client-tests.yml
+    secrets: inherit
+
+  k3d:
+    needs: [build-gateway-container, build-ui-container]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/k3d.yml
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+  mocked-batch-tests:
+    permissions:
+      contents: read
+      actions: read
+    if: github.repository == 'tensorzero/tensorzero' && github.event_name == 'merge_group'
+    uses: ./.github/workflows/mocked-batch-test.yml
+    needs: [build-gateway-container, build-mock-provider-api-container]
+    secrets: inherit
+
+  autopilot-e2e:
+    permissions:
+      contents: read
+    if: needs.detect-changes.outputs.code == 'true' && github.repository == 'tensorzero/tensorzero' && github.event_name == 'merge_group'
+    needs: [detect-changes, build-gateway-e2e-container, build-ui-container]
+    uses: ./.github/workflows/dispatch-autopilot-e2e.yml
+    secrets:
+      AUTOPILOT_DISPATCH_APP_ID: ${{ secrets.AUTOPILOT_DISPATCH_APP_ID }}
+      AUTOPILOT_DISPATCH_PRIVATE_KEY: ${{ secrets.AUTOPILOT_DISPATCH_PRIVATE_KEY }}
+
+  check-docs-broken-links:
+    needs: [detect-changes]
+    if: github.repository == 'tensorzero/tensorzero' && needs.detect-changes.outputs.docs == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Setup Node.js
+        uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: "24.13.0"
+
+      - name: Install pnpm
+        run: |
+          for attempt in 1 2 3; do
+            if npm install -g pnpm@10.15.0; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+
+      - name: Install dependencies
+        working-directory: docs
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm install --frozen-lockfile; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install docs dependencies after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+
+      - name: Check for broken links
+        working-directory: docs
+        run: pnpm exec mint broken-links --check-anchors
+
+  # See 'ci/README.md' at the repository root for more details.
+  # This job queries the GitHub API for all jobs in this workflow run and asserts
+  # that they all passed, except for jobs in the ALLOWED_FAIL and ALLOWED_SKIP
+  # lists defined in ci/check-all-general-jobs-passed.sh.
+  # The `needs` list below is for scheduling only (so this job waits for others
+  # to finish). The actual pass/fail logic is in the script.
+  check-all-general-jobs-passed:
+    permissions:
+      actions: read
+      contents: read
+    if: always() && github.repository == 'tensorzero/tensorzero'
+    needs:
+      [
+        detect-changes,
+        autopilot-e2e,
+        build-gateway-container,
+        build-gateway-e2e-container,
+        build-live-tests-container,
+        build-mock-provider-api-container,
+        build-provider-proxy-container,
+        build-ui-container,
+        build-windows,
+        check-docker-compose-commit,
+        check-docker-compose-released,
+        check-docs-broken-links,
+        check-node-bindings,
+        check-production-deployment-docker-compose,
+        check-python-client-build,
+        check-python-schemas,
+        check-version-consistency,
+        clickhouse-tests,
+        client-tests,
+        endpoint-tests,
+        inference-cache-tests,
+        lint-rust,
+        live-tests,
+        k3d,
+        mock-optimization-tests,
+        mocked-batch-tests,
+        postgres-tests,
+        rust-build,
+        rust-test,
+        ui-tests,
+        ui-tests-e2e,
+        validate,
+        validate-node,
+        validate-python,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          sparse-checkout: ci/check-all-general-jobs-passed.sh
+          sparse-checkout-cone-mode: false
+      - name: Check all jobs passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./ci/check-all-general-jobs-passed.sh

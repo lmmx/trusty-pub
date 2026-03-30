@@ -1,0 +1,25 @@
+name: Generate Docs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up latest Python
+      uses: actions/setup-python@v5
+      with:
+        python-version-file: 'pyproject.toml'
+    - name: Build
+      run: |
+        sudo apt-get install graphviz pandoc
+        python -m pip install --upgrade pip
+        pip install -e .[dev]
+        make docs
+    - name: Deploy
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{secrets.GITHUB_TOKEN}}
+        publish_dir: docs/_build/html

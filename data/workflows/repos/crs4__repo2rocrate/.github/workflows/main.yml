@@ -1,0 +1,36 @@
+name: main
+
+on:
+  push:
+    branches-ignore:
+      - gh-pages
+  pull_request:
+    branches-ignore:
+      - gh-pages
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+    runs-on: 'ubuntu-latest'
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install .
+    - name: Lint
+      run: |
+        pip install flake8
+        flake8 -v .
+    - name: Test
+      run: |
+        pip install pytest
+        pytest -sv test

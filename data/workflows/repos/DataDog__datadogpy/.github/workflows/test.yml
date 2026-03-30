@@ -1,0 +1,83 @@
+name: test
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint datadogpy files
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+    - name: Set up Python 3.8
+      uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+      with:
+        python-version: "3.8"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install pre-commit
+        python -m pip install tox
+
+    # - name: Run black
+    #   run: pre-commit run --all-files --hook-stage=manual black
+
+    - name: Run mypy
+      run: tox -e mypy
+
+    - name: Run flake8
+      run: tox -e flake8
+
+  run:
+    name: Python ${{ matrix.python-version }} on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        python-version: ['pypy2.7', '3.7', 'pypy3.8']
+        # os: [ubuntu-latest, windows-latest, macos-latest]
+        # python-version: ['2.7', '3.7', '3.8', '3.9', '3.10', 'pypy-2.7', 'pypy-3.8']
+    env:
+      TOXENV: ${{ matrix.python-version }}
+
+    steps:
+    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Set constrains for python2.7
+      # Latest PyYaml supported version for python 2.7 is 5.4.1 which requires
+      # cython<3 to build. See: https://github.com/yaml/pyyaml/issues/724
+      if: ${{ matrix.python-version == 'pypy2.7' }}
+      run: |
+        echo "cython<3" > /tmp/constraints.txt
+        echo "PIP_CONSTRAINT=/tmp/constraints.txt" >> $GITHUB_ENV
+
+    - name: Install tox
+      run: pip install tox
+
+    - name: Run unit tests
+      run: tox
+
+    - name: Run integration tests on cassettes
+      run: tox -e integration -- --vcr-record=none
+
+    - name: Run admin integration tests on cassettes
+      run: tox -e integration-admin -- --vcr-record=none

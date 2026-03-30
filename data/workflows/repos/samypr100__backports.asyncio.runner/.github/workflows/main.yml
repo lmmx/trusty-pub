@@ -1,0 +1,155 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  release:
+    types: [ "published" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+
+  format-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.x"
+      - name: Formatting Checks
+        run: uv run ruff format --check src tests noxfile.py
+
+  type-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.x"
+      - name: Type Checks
+        run: uv run nox -rs ty
+
+  tests:
+    name: Tests / ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    needs:
+      - format-checks
+      - type-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.8", "3.9", "3.10" ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5 # we want to run tests on official builds
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.x"
+      - name: Run Tests ${{ matrix.python-version }}
+        run: uv run nox -rs tests-${{ matrix.python-version }} -- --cov
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
+          UV_NO_MANAGED_PYTHON: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cov-${{ matrix.python-version }}
+          path: .coverage.*
+          retention-days: 5
+          include-hidden-files: true
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs:
+      - tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.x"
+      - name: Download Coverage Data
+        uses: actions/download-artifact@v4
+      - name: Prepare Coverage Report
+        run: |
+          uv run coverage combine **/.coverage.*
+          uv run coverage report -m --skip-covered
+          uv run coverage json
+      - name: Output Coverage
+        run: echo "COVERAGE_JSON=$(jq -c . < coverage.json)" >> $GITHUB_ENV
+      - name: Get Coverage Totals
+        id: coverage-total
+        run: echo "coverage_total=${{ fromJson(env.COVERAGE_JSON).totals.percent_covered_display }}" >> $GITHUB_OUTPUT
+    outputs:
+      coverage_total: ${{ steps.coverage-total.outputs.coverage_total }}
+
+  coverage-badge:
+    runs-on: ubuntu-latest
+    needs:
+      - coverage
+    if: github.ref == 'refs/heads/main'
+    environment: release
+    env:
+      COVERAGE_TOTAL: ${{ needs.coverage.outputs.coverage_total }}
+    steps:
+      - name: Create Coverage Badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: ${{ vars.GIST_COVERAGE_ID }}
+          filename: ${{ vars.GIST_COVERAGE_NAME }}
+          label: Coverage
+          message: ${{ env.COVERAGE_TOTAL }}%
+          valColorRange: ${{ env.COVERAGE_TOTAL }}
+          maxColorRange: 90
+          minColorRange: 50
+
+  build:
+    runs-on: ubuntu-latest
+    needs:
+      - coverage
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.x"
+      - name: Build
+        run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ github.sha }}
+          path: dist
+          retention-days: 5
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    if: github.event_name == 'release'
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-${{ github.sha }}
+          path: dist
+      - name: Upload to GH Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "${{ github.ref_name }}" dist/*.tar.gz
+          gh release upload "${{ github.ref_name }}" dist/*.whl
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

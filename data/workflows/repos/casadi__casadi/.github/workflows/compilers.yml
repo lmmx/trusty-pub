@@ -1,0 +1,180 @@
+name: compilers
+
+on: [push, pull_request]
+
+env:
+  cache-suffix: v11
+  build_flags: "-DWITH_COMMON=OFF -DWITH_THREAD=ON -DWITH_WERROR=ON -DWITH_EXTRA_WARNINGS=ON"
+
+
+jobs:
+  linux-22_04-gcc:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['10','11','12'] # 13 compiler bug
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          CC=gcc-${{ matrix.compiler }} FC=gfortran-${{ matrix.compiler }} CXX=g++-${{ matrix.compiler }} cmake -Bbuild -DWITH_SELFCONTAINED=ON ${{env.build_flags}} -H.
+          cmake --build build -v
+
+  linux-24_04-gcc:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['13','14']
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          CC=gcc-${{ matrix.compiler }} FC=gfortran-${{ matrix.compiler }} CXX=g++-${{ matrix.compiler }} cmake -Bbuild -DWITH_SELFCONTAINED=ON ${{env.build_flags}} -H.
+          cmake --build build -v
+
+  linux-22_04-clang:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['13','14','15']
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          CC=clang-${{ matrix.compiler }} FC=gfortran-${{ matrix.compiler }} CXX=clang++-${{ matrix.compiler }} cmake -Bbuild -DWITH_SELFCONTAINED=ON ${{env.build_flags}} -H.
+          cmake --build build -v
+
+  linux-24_04-clang:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['16','17','18']
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          CC=clang-${{ matrix.compiler }} FC=gfortran-${{ matrix.compiler }} CXX=clang++-${{ matrix.compiler }} cmake -Bbuild -DWITH_SELFCONTAINED=ON ${{env.build_flags}} -H.
+          cmake --build build -v
+
+  linux-latest:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          cmake -Bbuild -DWITH_SELFCONTAINED=ON ${{env.build_flags}} -H.
+          cmake --build build -v
+
+  linux-std:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx_standard: ['14','17','20','23','26']
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          cmake -Bbuild -DWITH_SELFCONTAINED=ON -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard}} ${{env.build_flags}} -H.
+          cmake --build build -v
+
+  macos-15:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          cmake -Bbuild -DWITH_SELFCONTAINED=ON ${{env.build_flags}} -H.
+          cmake --build build -v
+  macos-15-intel:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: macos-15-intel
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          cmake -Bbuild -DWITH_SELFCONTAINED=ON ${{env.build_flags}} -H.
+          cmake --build build -v
+
+  macos-14:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: macos-14
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Build
+        run: |
+          cmake -Bbuild -DWITH_SELFCONTAINED=ON ${{env.build_flags}} -H.
+          cmake --build build -v
+          
+  windows-2022:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64,Win32]
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name : Build
+        run: |
+            cmake -Bbuild -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DWITH_SELFCONTAINED=ON -DWITH_BUILD_REQUIRED=ON -DCMAKE_INSTALL_PREFIX=install
+            cmake --build build --target install --config Release -v
+
+  windows-2025:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64,Win32]
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name : Build
+        run: |
+            cmake -Bbuild -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DWITH_SELFCONTAINED=ON -DWITH_BUILD_REQUIRED=ON -DCMAKE_INSTALL_PREFIX=install
+            cmake --build build --target install --config Release -v
+            
+  windows-latest-mingw:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name : Build
+        run: |
+            cmake -Bbuild -G "MinGW Makefiles" -DWITH_SELFCONTAINED=ON -DWITH_BUILD_REQUIRED=ON -DCMAKE_INSTALL_PREFIX=install ${{env.build_flags}}
+            cmake --build build --target install --config Release -v
+
+  windows-latest-msys2:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-ci:compilers]') }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: gcc cmake make git
+      - shell: msys2 {0}
+        run: |
+            cmake -Bbuild -G "Unix Makefiles" -DWITH_SELFCONTAINED=ON -DWITH_BUILD_REQUIRED=ON -DCMAKE_INSTALL_PREFIX=install ${{env.build_flags}}
+            cmake --build build --target install --config Release -v

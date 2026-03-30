@@ -1,0 +1,72 @@
+---
+name: tox
+
+on:
+  push: # only publishes pushes to the main branch to TestPyPI
+    branches: # any integration branch but not tag
+      - "main"
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: 1 # tox, pytest, ansible-lint
+  PY_COLORS: 1
+
+jobs:
+  pre:
+    name: pre
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.generate_matrix.outputs.matrix }}
+    steps:
+      - name: Determine matrix
+        id: generate_matrix
+        uses: coactions/dynamic-matrix@v1
+        with:
+          min_python: "3.9"
+          platforms: linux,macos
+          macos: minmax
+          other_names: |
+            lint
+            pkg
+  tox:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    needs: pre
+    strategy:
+      matrix: ${{ fromJson(needs.pre.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # we need full depth and tags for versioning
+      - name: Set up stock Python ${{ matrix.python_version }} from GitHub
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python_version }}
+          # cache: pip
+      - name: Log the selected Python version info (${{ matrix.python_version }})
+        run: |
+          python --version --version
+          which python
+      - name: Install tox
+        run: |
+          python -m pip install -U pip
+          pip install "tox>=4.0.0"
+      - name: Run tox -e ${{ matrix.passed_name }}
+        run: tox -e ${{ matrix.passed_name }}
+
+  check: # This job does nothing and is only used for the branch protection
+    if: always()
+
+    needs:
+      - tox
+
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

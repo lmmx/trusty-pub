@@ -1,0 +1,121 @@
+name: Build and Test C++
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  pull_request:
+    branches:
+      - "**"
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}--${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/long_lived/')) && github.sha || '' }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Collect coverage data
+        run: |
+          sudo apt-get update
+          sudo apt-get install lcov -y
+          cmake -B ../build -DCMAKE_BUILD_TYPE=Debug -DWITH_COVERAGE=1
+          cmake --build ../build -- -j 6
+          ../build/RunTests
+          lcov --directory ../build --capture --output-file lcov.info
+          lcov --remove lcov.info '*_deps/*' '/usr/*' --output-file lcov.info
+      - name: Upload to Coveralls
+        uses: coverallsapp/github-action@v2
+        if: always()
+        env:
+          COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+        with:
+          path-to-lcov: "./lcov.info"
+  valgrind:
+    name: valgrind ubuntu
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: cmake, RunTests, and valgrind on ubuntu-20.04
+        run: |
+          sudo apt update
+          sudo apt-get install valgrind -y
+          mkdir build
+          cd build
+          cmake ../
+          cmake --build . -- -j 6
+          ctest -j 6 --output-on-failure
+          valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all ctest -j 6 --output-on-failure
+
+  asan:
+    name: ASAN ubuntu
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: cmake, RunTests with address- and undefined sanitizer on Ubuntu
+        run: |
+          mkdir build-asan
+          cd build-asan
+          cmake -DCMAKE_BUILD_TYPE=ASAN ../
+          cmake --build . -- -j 6
+          ./RunTests
+
+  tsan:
+    name: TSAN ubuntu
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # See: https://github.com/google/sanitizers/issues/1716
+      # Fixes `FATAL: ThreadSanitizer: unexpected memory mapping 0x70498d8ae000-0x70498dd00000` type errors
+      - name: Adjust mmap_rnd_bits on ubuntu
+        run: |
+          sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: cmake, RunTests with thread sanitizer on Ubuntu
+        run: |
+          mkdir build-tsan
+          cd build-tsan
+          cmake -DCMAKE_BUILD_TYPE=TSAN ../
+          cmake --build . -- -j 6
+          ./RunTests
+
+  mac:
+    name: MacOS
+    runs-on: macos-15-intel
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: cmake, RunTests on Mac
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build . --config Release -j 6
+          ./RunTests
+
+  windows:
+    name: Windows Latest
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: cmake, RunTests with Windows
+        run: |
+          mkdir build-win
+          cd build-win
+          cmake ..
+          cmake --build . --config Release -j 6
+          ctest -C Release -j 6

@@ -1,0 +1,11 @@
+name: pr_benchmark_comment
+
+on:
+  workflow_run:
+    workflows: [pr_benchmarks]
+    types:
+      - completed
+
+jobs:
+  comment_pr:
+    uses: cvxpy/actions/.github/workflows/pr_benchmark_comment.yml@main

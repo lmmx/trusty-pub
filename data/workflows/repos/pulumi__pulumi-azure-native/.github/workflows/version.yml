@@ -1,0 +1,22 @@
+name: dev-version
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: Calculated version
+        value: ${{ jobs.version.outputs.version }}
+
+
+jobs:
+  version:
+    runs-on: pulumi-ubuntu-8core
+    name: Calculate Dev Version
+    steps:
+      - id: version
+        name: Calculate build version
+        uses: pulumi/provider-version-action@3a647064cf4697c7c6352b9a1d9e554450cbe957 # v1.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}

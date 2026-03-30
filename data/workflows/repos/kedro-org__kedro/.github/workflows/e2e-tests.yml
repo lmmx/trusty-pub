@@ -1,0 +1,42 @@
+name: Run e2e-tests on Kedro
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+      python-version:
+        type: string
+      branch:
+        type: string
+        default: ''
+
+env:
+  COLUMNS: 120
+  LINES: 25
+
+jobs:
+  e2e-tests:
+    permissions:
+      contents: read
+    runs-on: ${{ inputs.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.branch }}
+      - name: Install the latest version of uv with Python ${{inputs.python-version}}
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          python-version: ${{ inputs.python-version }}
+          activate-environment: true
+      - name: Install dependencies
+        run: |
+          make install-test-requirements
+          uv pip install pip
+          make install-pre-commit
+      - name: pip freeze
+        run: pip freeze
+      - name: Run e2e tests
+        run: make e2e-tests

@@ -1,0 +1,289 @@
+# This GitHub workflow will setup and run various kinds of tests with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: test
+
+on:
+  schedule:
+    # The schedule event always (and only) runs on the master branch.
+    - # cron (in UTC): minute hour day_of_month month day_of_week
+      cron: '00 22 * * SAT'
+  push:
+    branches: [ master, stable_* ]
+  pull_request:
+    branches: [ master, stable_* ]
+
+env:
+  # Local Docker image cache directory
+  DOCKER_CACHE_DIR: ~/docker-cache
+
+jobs:
+
+  set_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select_matrix.outputs.matrix }}
+    steps:
+    - name: "Select matrix"
+      id: select_matrix
+      # Select full matrix when scheduled or when releasing, and normal matrix
+      # otherwise. The matrix is defined as a JSON string.
+      # This technique documented in:
+      #    https://stackoverflow.com/questions/65384420/how-to-make-a-github-action-matrix-element-conditional
+      # TODO: Find a way to define this with fewer escapes.
+      # TODO: Python 3.13 was pinned to 3.13 to work around a pylint issue
+      #       https://github.com/pylint-dev/pylint/issues/10112 on Python 3.13.1.
+      #       Remove that pinning again when it is fixed.
+      run: |
+        if [[ "${{ github.event_name }}" == "schedule" || "${{ github.head_ref }}" =~ ^release_ ]]; then \
+          echo "matrix={ \
+            \"os\": [ \"ubuntu-latest\", \"macos-latest\", \"windows-latest\" ], \
+            \"python-version\": [ \"3.9\", \"3.10\", \"3.11\", \"3.12\", \"3.13\", \"3.14\" ], \
+            \"package_level\": [ \"minimum\", \"latest\" ] \
+          }" >> $GITHUB_OUTPUT; \
+        else \
+          echo "matrix={ \
+            \"os\": [ \"ubuntu-latest\", \"macos-latest\", \"windows-latest\" ], \
+            \"python-version\": [ \"3.14\" ], \
+            \"package_level\": [ \"minimum\", \"latest\" ], \
+            \"include\": [ \
+              { \
+                \"os\": \"ubuntu-latest\", \
+                \"python-version\": \"3.9\", \
+                \"package_level\": \"latest\" \
+              }, \
+              { \
+                \"os\": \"macos-latest\", \
+                \"python-version\": \"3.9\", \
+                \"package_level\": \"latest\" \
+              }, \
+              { \
+                \"os\": \"windows-latest\", \
+                \"python-version\": \"3.9\", \
+                \"package_level\": \"minimum\" \
+              }, \
+              { \
+                \"os\": \"windows-latest\", \
+                \"python-version\": \"3.9\", \
+                \"package_level\": \"latest\" \
+              } \
+            ] \
+          }" >> $GITHUB_OUTPUT; \
+        fi
+    - name: Show matrix in JSON
+      run: echo '${{ steps.select_matrix.outputs.matrix }}'
+
+  test:
+    needs: set_matrix
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJson(needs.set_matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: 1
+    steps:
+    - name: Set run type (normal, scheduled, release)
+      id: set-run-type
+      uses: actions/github-script@v8
+      with:
+        result-encoding: string
+        script: |
+          var result
+          if ("${{ github.event_name }}" == "schedule") {
+            result = "scheduled"
+          } else if ("${{ github.head_ref }}".match(/^release_/)) {
+            result = "release"
+          } else {
+            result = "normal"
+          }
+          console.log(result)
+          return result
+    - name: Create local cache directory for Docker images
+      # GitHub Actions has Docker only on Ubuntu
+      if: startsWith(matrix.os, 'ubuntu-')
+      run: |
+        mkdir -p ${{ env.DOCKER_CACHE_DIR }}
+    - name: Set up caching for local Docker image cache directory
+      # GitHub Actions has Docker only on Ubuntu
+      if: startsWith(matrix.os, 'ubuntu-')
+      uses: actions/cache@v5
+      with:
+        path: ${{ env.DOCKER_CACHE_DIR }}
+        key: docker-cache-{hash}
+        restore-keys: |
+          docker-cache-
+    - name: Checkout repo
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Display initial Python packages
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        echo "Installed Python packages:"
+        make pip_list
+    - name: Display platform and env vars
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make platform env
+    - name: Install the package and its dependents
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make install
+    - name: Display Python packages
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        echo "Installed Python packages:"
+        make pip_list
+    - name: Development setup
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make develop
+    - name: Display Python packages
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        echo "Installed Python packages:"
+        make pip_list
+    - name: Show package dependency tree
+      run: |
+        echo "Package dependency tree of installed Python packages:"
+        python -m pipdeptree --all
+    - name: Run check_reqs
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make check_reqs
+    - name: Run build
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make build
+    - name: Run builddoc
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make builddoc
+    - name: Run check
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make check
+    - name: Run ruff
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make ruff
+    - name: Run pylint
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make pylint
+    - name: Run test
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+        # TESTCASES: test_cim_obj.py
+      run: |
+        make test
+    - name: Run end2endtest
+      # GitHub Actions has Docker only on Ubuntu
+      if: startsWith(matrix.os, 'ubuntu-')
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make end2endtest
+    - name: Send coverage result to coveralls.io
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COVERALLS_PARALLEL: true
+        COVERALLS_FLAG_NAME: "${{ matrix.os }},${{ matrix.python-version }},${{ matrix.package_level }}"
+        COVERALLS_SERVICE_NAME: github
+        COVERALLS_SERVICE_JOB_ID: "${{ github.run_id }}"
+        COVERALLS_SERVICE_NUMBER: "${{ github.workflow }}-${{ github.run_number }}"
+      uses: nick-fields/retry@v3
+      with:
+        timeout_seconds: 30
+        max_attempts: 3
+        retry_wait_seconds: 15
+        command: coveralls
+    - name: Run installtest
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make installtest
+    - name: Run leaktest
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make leaktest
+    - name: Run resourcetest
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make resourcetest
+    - name: Run perftest
+      if: "github.event_name == 'schedule' || startsWith(github.head_ref, 'release_')"
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make perftest
+    - name: Run test of installed version
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make testinstalled
+    - name: Run safety
+      env:
+        PACKAGE_LEVEL: ${{ matrix.package_level }}
+        RUN_TYPE: ${{ steps.set-run-type.outputs.result }}
+      run: |
+        make safety
+
+  test_finish:
+    needs: test
+    runs-on: ubuntu-latest
+    container: python:3-slim
+    steps:
+    - name: Install coveralls
+      run: |
+        pip3 install --upgrade coveralls
+    - name: Send coverage finish to coveralls.io
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COVERALLS_SERVICE_NUMBER: "${{ github.workflow }}-${{ github.run_number }}"
+      uses: nick-fields/retry@v3
+      with:
+        timeout_seconds: 30
+        max_attempts: 3
+        retry_wait_seconds: 15
+        command: coveralls --finish

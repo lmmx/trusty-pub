@@ -1,0 +1,15 @@
+name: Package and publish
+on:
+  push:
+    tags:
+      - v*
+
+
+
+jobs:
+  build:
+    uses: fizyk/actions-reuse/.github/workflows/shared-pypi.yml@v4.1.1
+    with:
+      publish: true
+    secrets:
+      pypi_token: ${{ secrets.pypi_password }}

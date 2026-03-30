@@ -1,0 +1,173 @@
+#
+# GitHub actions for building the distribution and wheels of the sgp4 package
+# linting and testing the source.
+#
+# Contributed by @mworion
+#
+# Strategy:
+# The action is called with each commit, pull request master (and) release
+# branch. If commit is to release branch, the PyPI upload will follow
+# successful tests automatically.
+#
+# Run lint on python source, build step by step the python distro and
+# run all package tests for all OS and python versions
+#
+# If this job succeeds, build step by step all wheels for all OS and python
+# versions and run the tests in accelerated mode.
+#
+# If the first two jobs succeed, upload the distro and wheels to PyPI
+#
+
+name: ci
+
+on:
+  # The trigger event for running the action is either a push on master or
+  # release branch
+
+  push:
+    branches:
+      - master
+      - release
+      - ci
+
+  # or a pull request to master branch
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  # This action is split into three jobs:
+  # - Building the distribution linting and testing without acceleration.
+  # - Building the wheels for the distribution and testing with acceleration.
+  # - Uploading the artifacts to PyPI package if branch is release.
+  # The uploading job needs all tests to be finished without error.
+
+  build_test_dist:
+    # Build the distribution in a matrix. Jobs are done in parallel.
+    # The formal distro which is uploaded to PyPI will be built on
+    # ubuntu-latest for python 3.14.
+    # As in dist build no compilation takes place, we run all tests
+    # in not accelerated mode.
+
+    runs-on: ${{ matrix.os }}
+    name: Build dist ${{ matrix.python-version }} on ${{ matrix.os }}
+    strategy:
+      # max parallel should be (number os) * (number python versions)
+      max-parallel: 15
+      matrix:
+        # if adding python 3.15, just add "3.15", keep max parallel accordingly
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: Setup_Python_${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The build test needs numpy and pyflakes. Adding twine enables for
+      # testing and checking the metadata.
+
+      - name: install dependencies
+        run: pip install numpy pyflakes setuptools twine
+
+      - name: build distro
+        run: python setup.py sdist
+
+      - name: check metadata
+        # when adding python 3.15, move distro version to 3.15 as well
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+        run: twine check dist/*
+
+      - name: upload distro
+        # when adding python 3.15, move distro version to 3.15 as well
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-dist-${{ matrix.os }}-${{ matrix.python-version }}
+          path: dist/*.tar.gz
+
+      - name: rename file
+        run: mv dist/sgp4*.* dist/sgp4.tar.gz
+
+      - name: install distro for testing
+        run: |
+          pip install dist/sgp4.tar.gz
+          python -c "from sgp4.api import accelerated; print(accelerated)"
+
+      - name: run tests
+        run: python -m sgp4.tests
+
+  build_test_wheels:
+    # Building wheels for different OS, python and platform versions. This is
+    # done with the help of 'cibuildwheel' package.
+    # Reference: https://cibuildwheel.readthedocs.io
+    # OS: Windows (10, 11), Linux (x86 and ARM), macOS (x64) and macOS (M1)
+    # Python wheels for versions 3.10 - 3.14
+    # Tests run in accelerated mode on all selected python versions.
+
+    runs-on: ${{ matrix.os }}
+    name: Build wheels on ${{ matrix.os }}
+    needs: [build_test_dist]
+
+    strategy:
+      max-parallel: 5
+      matrix:
+        # there is actually no macos-latest-intel and the same for arm on ubuntu so it has to
+        # be maintained and checked in future
+        os: [windows-latest, ubuntu-latest, ubuntu-24.04-arm,  macos-latest, macos-15-intel]
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build wheels python 3.10 - 3.14
+        uses: pypa/cibuildwheel@v3.3.1
+        env:
+          # if adding python 3.15, just add cp315-*
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_BUILD_VERBOSITY: 0
+          CIBW_SKIP: '*-musllinux_*'
+          CIBW_TEST_REQUIRES: numpy
+          CIBW_TEST_COMMAND: python -m sgp4.tests
+
+      - name: upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: artifact-wheelhouse-${{ matrix.os }}
+          path: wheelhouse
+
+  upload_to_pypi:
+    # Finally, we collect all out data from the artifacts and put them back to
+    # dist directory for an upload. The final step waits for the other jobs to
+    # be finished and starts only if the trigger event of the action was a push
+    # on release branch
+
+    runs-on: [ubuntu-latest]
+    needs: [build_test_dist, build_test_wheels]
+
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/release'
+
+    steps:
+    - uses: actions/setup-python@v6
+
+    - uses: actions/download-artifact@v7
+      with:
+        path: dist
+        pattern: artifact-*
+        merge-multiple: true
+
+    # For the activation of the PyPI index, please add a secret token from
+    # PyPI to the GitHub repo, give it a name and replace in the password
+    # reference the <pypi_password> with the name of the secret's name you have
+    # chosen for the PyPI token.
+
+    - name: upload_to_pypi
+      uses: pypa/gh-action-pypi-publish@v1.13.0
+      with:
+        user: __token__
+        password: ${{ secrets.pypi_password }}
+        skip-existing: true

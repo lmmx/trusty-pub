@@ -1,0 +1,220 @@
+# This workflow runs tests and lint on pull requests that touch the api/
+# project or its CI configuration.
+
+name: 'API test/lint/deploy'
+
+on:
+  # Most of the time, we run on pull requests, which lets us handle external PRs
+  pull_request:
+    paths:
+      - 'api/**'
+      - 'Makefile'
+      - 'shared-data/**'
+      - '!shared-data/js/**'
+      - 'hardware/**'
+      - 'scripts/**.mk'
+      - 'scripts/**.py'
+      - '.github/workflows/api-test-lint-deploy.yaml'
+      - '.github/actions/python/**'
+      - '.github/workflows/utils.js'
+      - 'package-testing/**'
+  push:
+    paths:
+      - 'api/**'
+      - 'Makefile'
+      - 'shared-data/**'
+      - '!shared-data/js/**'
+      - 'hardware/**'
+      - 'scripts/**.mk'
+      - 'scripts/**.py'
+      - '.github/workflows/api-test-lint-deploy.yaml'
+      - '.github/actions/python/**'
+      - '.github/workflows/utils.js'
+    branches:
+      - 'edge'
+      - 'release'
+      - '*hotfix*'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.ref_name != 'edge' || github.run_id}}-${{ github.ref_type != 'tag' || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: 'opentrons package linting'
+    timeout-minutes: 10
+    runs-on: 'ubuntu-24.04'
+    steps:
+      - uses: 'actions/checkout@v4'
+        with:
+          fetch-depth: 0
+      - uses: 'actions/setup-node@v6'
+        with:
+          node-version: '22.22.0'
+      - uses: './.github/actions/python/setup-uv'
+        with:
+          project: 'api'
+          python-version: '3.12'
+      - name: Lint with opentrons_hardware
+        run: make -C api lint
+  test:
+    name: 'opentrons package tests on ${{ matrix.os }}, python ${{ matrix.python }}, ot-hardware ${{ matrix.with-ot-hardware }}'
+    timeout-minutes: 30
+    needs: [lint]
+    strategy:
+      matrix:
+        os: ['windows-2022', 'ubuntu-24.04', 'macos-latest']
+        python: ['3.12']
+        with-ot-hardware: ['true', 'false']
+        exclude:
+          - os: 'windows-2022'
+            with-ot-hardware: 'true'
+          - os: 'macos-latest'
+            with-ot-hardware: 'true'
+    runs-on: '${{ matrix.os }}'
+    steps:
+      - uses: 'actions/checkout@v4'
+        with:
+          fetch-depth: 0
+      # https://github.com/actions/checkout/issues/290
+      - name: 'Fix actions/checkout odd handling of tags'
+        if: startsWith(github.ref, 'refs/tags')
+        run: |
+          git fetch -f origin ${{ github.ref }}:${{ github.ref }}
+          git checkout ${{ github.ref }}
+      - uses: 'actions/setup-node@v6'
+        with:
+          node-version: '22.22.0'
+      - name: 'set complex environment variables'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { buildComplexEnvVars, } = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/utils.js`)
+            buildComplexEnvVars(core, context)
+      - uses: './.github/actions/python/setup-uv'
+        with:
+          project: 'api'
+          python-version: ${{ matrix.python }}
+      - if: ${{ matrix.with-ot-hardware == 'false' }}
+        name: Remove OT-3 hardware package
+        run: make -C api setup-ot2
+      - if: ${{ matrix.with-ot-hardware == 'false' }}
+        name: Test without opentrons_hardware
+        run: make -C api test-ot2
+      - if: ${{ matrix.with-ot-hardware == 'true' }}
+        name: Test with opentrons_hardware
+        run: make -C api test-cov
+      - name: Ensure assets build
+        run: make -C api sdist wheel
+      - name: Upload coverage report
+        uses: 'codecov/codecov-action@v3'
+        with:
+          files: ./api/coverage.xml
+          flags: api
+
+  test-package:
+    name: 'installed package tests on ${{ matrix.os }}'
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        os: ['ubuntu-24.04', 'macos-latest', 'windows-2022']
+        python: ['3.10', '3.11', '3.12', '3.13']
+        exclude:
+          # numpy 1.26.4 does not have a precompiled wheel for 3.13, and building it locally gives
+          # a bad object that crashes a bunch
+          - os: 'windows-2022'
+            python: '3.13'
+    runs-on: '${{ matrix.os }}'
+    steps:
+      - uses: 'actions/checkout@v4'
+      - name: 'Fix actions/checkout odd handling of tags'
+        if: startsWith(github.ref, 'refs/tags')
+        run: |
+          git fetch -f origin ${{ github.ref }}:${{ github.ref }}
+          git checkout ${{ github.ref }}
+      - name: Set up package-testing
+        id: setup
+        uses: './.github/actions/python/setup-uv'
+        with:
+          project: 'package-testing'
+          python-version: '3.12'
+      - name: Run the tests
+        if: ${{ matrix.os != 'windows-2022' }}
+        shell: bash
+        id: test
+        working-directory: package-testing
+        run: make test
+      - name: Run the tests (Windows)
+        shell: pwsh
+        id: test-windows
+        working-directory: package-testing
+        run: make test-windows
+      - name: Save the test results
+        if: ${{ always() && steps.setup.outcome == 'success' }}
+        id: results
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-test-results-${{ matrix.os }}-${{ matrix.python }}
+          path: package-testing/results
+      - name: Set job summary
+        if: ${{ always() }}
+        run: |
+          echo "## Opentrons Package Test Results ${{matrix.os}}" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Outcome: Unixy ${{ steps.test.outcome }} Windows: ${{ steps.test-windows.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "[Download the test results artifact](${{steps.results.outputs.artifact-url}})" >> $GITHUB_STEP_SUMMARY
+
+  deploy:
+    name: 'deploy opentrons package'
+    needs: [test]
+    runs-on: 'ubuntu-24.04'
+    if: github.event_name == 'push'
+    permissions:
+      id-token: write # Required for OIDC
+      contents: read # Required for checkout
+    steps:
+      - uses: 'actions/checkout@v4'
+        with:
+          fetch-depth: 0
+      # https://github.com/actions/checkout/issues/290
+      - name: 'Fix actions/checkout odd handling of tags'
+        if: startsWith(github.ref, 'refs/tags')
+        run: |
+          git fetch -f origin ${{ github.ref }}:${{ github.ref }}
+          git checkout ${{ github.ref }}
+      - uses: 'actions/setup-node@v6'
+        with:
+          node-version: '22.22.0'
+      - name: 'set complex environment variables'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { buildComplexEnvVars, } = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/utils.js`)
+            buildComplexEnvVars(core, context)
+      - uses: './.github/actions/python/setup-uv'
+        with:
+          project: 'api'
+          python-version: '3.12'
+      - name: 'build api distributables'
+        shell: bash
+        run: make -C api sdist wheel
+      # creds and repository configuration for deploying python wheels
+      - if: ${{ !env.OT_TAG }}
+        name: 'upload to test pypi'
+        uses: './.github/actions/python/pypi-deploy'
+        with:
+          project: 'api'
+          repository_url: 'https://test.pypi.org/legacy/'
+          password: '${{ secrets.TEST_PYPI_DEPLOY_TOKEN_OPENTRONS }}'
+      - if: startsWith(env.OT_TAG, 'v')
+        name: 'upload to real pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: api/dist/
+          repository-url: https://upload.pypi.org/legacy/

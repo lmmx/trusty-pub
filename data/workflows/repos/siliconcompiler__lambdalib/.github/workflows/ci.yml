@@ -1,0 +1,117 @@
+name: CI
+on:
+  # Runs on pushes to test/ branches and main
+  push:
+    branches:
+      - 'main'
+      - 'test/**'
+  # Runs on all PRs
+  pull_request:
+  # Manual Dispatch
+  workflow_dispatch:
+
+concurrency:
+  group: lambdalib-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint_python:
+    name: Lint Python Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+      - name: Lint with Flake8
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          pip install --upgrade pip
+          pip install .[lint]
+          flake8 --statistics .
+
+  check_spelling:
+    name: Check code spelling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+      - name: Check spelling with codespell
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          pip install --upgrade pip
+          pip install .[lint]
+          codespell .
+
+  python_ci:
+    name: Run Python Only
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+      - name: Run tests
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          pip install --upgrade pip
+          pip install .[test]
+
+          # change running directory
+          mkdir testrun
+          cd testrun
+
+          pytest $GITHUB_WORKSPACE -n logical -m "not eda"
+
+  lint_verilog:
+    name: Lint Verilog Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+
+      - name: Check out siliconcompiler Git repository
+        uses: actions/checkout@v6
+        with:
+          repository: siliconcompiler/siliconcompiler
+          path: siliconcompiler
+
+      - name: Set up Verible
+        run: |
+          ./siliconcompiler/siliconcompiler/toolscripts/ubuntu22/install-verible.sh
+          echo /opt/verible/bin >> $GITHUB_PATH
+
+      - name: Check format
+        id: check-format
+        run: |
+          ./.github/workflows/bin/format_verilog.sh > files.txt
+          cat files.txt
+          git diff --exit-code
+
+      - name: Check lint
+        if: success() || steps.check-format.conclusion == 'failure'
+        run: |
+          verible-verilog-lint --rules_config ./.github/workflows/config/verible.rules `cat files.txt`
+
+  eda_ci:
+    name: Run EDA
+    runs-on: ubuntu-latest
+    container: ghcr.io/siliconcompiler/sc_runner:latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+      - name: Run tests
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          pip install --upgrade pip
+          pip install -e .[test]
+
+          # change running directory
+          mkdir testrun
+          cd testrun
+
+          pytest $GITHUB_WORKSPACE -n logical -m "eda" --verbose

@@ -1,0 +1,107 @@
+# Derived from https://github.com/actions/starter-workflows/blob/main/ci/python-package.yml
+#
+name: Python Package
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+env:
+  FORCE_COLOR: "1"  # Make tools pretty.
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_PYTHON_VERSION_WARNING: "1"
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    name: "Test: python ${{ matrix.python }} / kafka ${{ matrix.kafka }}"
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        kafka:
+          - "0.8.2.2"
+          - "0.9.0.1"
+          - "0.10.2.2"
+          - "0.11.0.3"
+          - "1.1.1"
+          - "2.4.0"
+          - "2.8.2"
+          - "3.0.2"
+          - "3.5.2"
+          - "3.9.0"
+          - "4.0.0"
+        python:
+          - "3.14"
+        include:
+          #- python: "pypy3.9"
+          #  kafka: "2.6.0"
+          #  experimental: true
+          - python: "3.8"
+            kafka: "4.0.0"
+          - python: "3.9"
+            kafka: "4.0.0"
+          - python: "3.10"
+            kafka: "4.0.0"
+          - python: "3.11"
+            kafka: "4.0.0"
+          - python: "3.12"
+            kafka: "4.0.0"
+          - python: "3.13"
+            kafka: "4.0.0"
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          sudo apt install -y libsnappy-dev libzstd-dev
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Pylint
+        run: make lint
+      - name: Setup java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 23
+      - name: Restore cached kafka releases
+        id: cache-servers-dist-restore
+        uses: actions/cache/restore@v5
+        with:
+          path: servers/dist
+          key: servers-dist-${{ matrix.kafka }}
+      - name: Install Kafka release
+        run: make servers/${{ matrix.kafka }}/kafka-bin
+      - name: Update kafka release cache
+        id: cache-servers-dist-save
+        uses: actions/cache/save@v5
+        with:
+          path: servers/dist
+          key: ${{ steps.cache-servers-dist-restore.outputs.cache-primary-key }}
+      - name: Pytest
+        # coverage runs all tests, so we can skip this test step if we're going to do coverage
+        if: matrix.python != '3.14' || matrix.kafka != '4.0.0'
+        run: make test
+        env:
+          KAFKA_VERSION: ${{ matrix.kafka }}
+      - name: Pytest (with coverage)
+        if: matrix.python == '3.14' && matrix.kafka == '4.0.0'
+        run: make test-coverage
+        env:
+          KAFKA_VERSION: ${{ matrix.kafka }}
+      - name: Upload coverage report
+        if: matrix.python == '3.14' && matrix.kafka == '4.0.0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: htmlcov/

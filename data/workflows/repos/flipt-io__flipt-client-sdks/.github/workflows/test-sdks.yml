@@ -1,0 +1,57 @@
+name: Test SDKs
+on:
+  pull_request:
+    branches-ignore:
+      - release/*
+  workflow_dispatch:
+
+env:
+  MISE_EXPERIMENTAL: "1"
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - wasm
+          - js
+
+    name: Integration Tests (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Sources
+        uses: actions/checkout@v6
+
+      - name: Install mise
+        uses: jdx/mise-action@v4
+
+      - name: Run Integration Tests (${{ matrix.group }})
+        run: |
+          dagger run go run ./test --groups ${{ matrix.group }}
+
+  test-ffi:
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk:
+          - python
+          - ruby
+          - java
+          - dart
+          - csharp
+
+    name: Integration Tests FFI - (${{ matrix.sdk }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Sources
+        uses: actions/checkout@v6
+
+      - name: Install mise
+        uses: jdx/mise-action@v4
+
+      - name: Run Integration Tests (${{ matrix.sdk }})
+        run: |
+          dagger run go run ./test --sdks ${{ matrix.sdk }}

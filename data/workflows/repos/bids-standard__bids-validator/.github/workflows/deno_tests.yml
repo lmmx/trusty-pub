@@ -1,0 +1,155 @@
+---
+name: Deno build
+
+on:
+  push:
+    branches: [main, dev, maint/*]
+    tags: ['*']
+  pull_request:
+    branches: [main, dev, maint/*]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug_info:
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+      - run: git status
+      - run: git describe
+      - run: env
+      - name: Dump github context
+        run: echo $GITHUB_CONTEXT | jq .
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+
+  build:
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+      - name: Save describe stamp
+        id: describe
+        run: echo version=$( git describe ) >> $GITHUB_OUTPUT
+      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2
+        with:
+          deno-version: v2.6.6
+      - run: deno --node-modules-dir=auto -A ./build.ts
+      - run: deno run -A ./dist/validator/bids-validator.js --version
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: main
+          path: dist/validator
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        allow-net: [true, false]
+      fail-fast: false
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          submodules: true
+      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2
+        with:
+          deno-version: v2.x
+      - name: Set permissions with network access
+        run: echo 'PERMS=--allow-read --allow-write --allow-env --allow-run --allow-net' >> $GITHUB_ENV
+        if: ${{ matrix.allow-net }}
+      - name: Set permissions without network access
+        run: echo 'PERMS=--allow-read --allow-write --allow-env --allow-run --deny-net' >> $GITHUB_ENV
+        if: ${{ ! matrix.allow-net }}
+      - name: Disable example that requires network access
+        run: |
+          for DS in eeg_ds003645s_hed_library xeeg_hed_score; do
+            touch tests/data/bids-examples/${DS}/.SKIP_VALIDATION
+          done
+        if: ${{ ! matrix.allow-net }}
+      - name: Disable unreleased examples
+        run: |
+          for DS in dwi_deriv pheno004; do
+            touch tests/data/bids-examples/${DS}/.SKIP_VALIDATION
+          done
+        if: github.ref_name != 'dev' && github.base_ref != 'dev'
+      - run: deno test --parallel --node-modules-dir=auto $PERMS --coverage=cov/ src/
+      - name: Collect coverage
+        run: deno coverage cov/ --lcov --output=coverage.lcov
+        if: ${{ always() }}
+      - uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        if: ${{ always() }}
+        with:
+          files: coverage.lcov
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  publish-dry-run:
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2
+        with:
+          deno-version: v2.x
+      - run: deno publish --dry-run
+
+  publish:
+    runs-on: ubuntu-slim
+    needs: [test, publish-dry-run]
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Check tag matches ${{ github.ref_name }}
+        run: jq -e ".version[:1] != \"v\" and .version==\"$TAG\"" deno.json
+        env:
+          TAG: ${{ github.ref_name }}
+      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2
+        with:
+          deno-version: v2.x
+      - run: deno publish
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+    if: github.event_name != 'pull_request' && github.repository_owner == 'bids-standard'
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set credentials
+        run: |
+          git config --global user.name "BIDS-Bot"
+          git config --global user.email "bids-maintenance@users.noreply.github.com"
+      - name: Reset deno-build to orphan
+        run: |
+          git checkout --orphan deno-build
+          git reset --hard
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: main
+          path: main
+      - name: Commit to new branch
+        run: |
+          mv main/main.js main/bids-validator.js .
+          git add main.js bids-validator.js
+          git commit -m "BLD: $VERSION [skip ci]" || true
+        env:
+          VERSION: ${{ needs.build.describe.version }}
+      - name: Push
+        run: git push -f origin deno-build

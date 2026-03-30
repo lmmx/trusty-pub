@@ -1,0 +1,68 @@
+name: server
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        description: 'Ref (SHA/branch) to run the workflow on'
+        required: true
+        default: 'main'
+  workflow_dispatch:
+    inputs:
+      ref:
+        type: string
+        description: 'Ref (SHA/branch) to run the workflow on'
+        required: true
+        default: 'main'
+jobs:
+  test:
+    name: py${{ matrix.python-version }}-jira${{ matrix.jira-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+        jira-version: [8.17.1]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Start Jira docker instance
+        run: docker run -dit -p 2990:2990 --name jira addono/jira-software-standalone --version ${{ matrix.jira-version }}
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update; sudo apt-get install gcc libkrb5-dev
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade tox tox-gh-actions
+
+      - name: Lint with tox
+        if: ${{ 'Skipped as pre-commit GHA also running'== 'true' }}
+        run: tox -e lint
+
+      - name: Test with tox
+        run: tox
+        env:
+          CI_JIRA_TYPE: SERVER
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          name: ${{ runner.os }}-${{ matrix.python-version }}
+
+      - name: Run tox packaging
+        run: tox -e packaging
+
+      - name: Make docs
+        if: ${{ 'Skipped as readthedocs GHA also running'== 'true' }}
+        run: tox -e docs

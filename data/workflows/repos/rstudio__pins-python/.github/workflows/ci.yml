@@ -1,0 +1,250 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main', 'dev-*']
+  pull_request:
+  release:
+    types: [published]
+
+env:
+  PINS_ALLOW_RSC_SHORT_NAME: 1
+  PINS_FEATURE_PREVIEW: 1
+
+jobs:
+  tests:
+    name: "Tests"
+    runs-on: ${{ matrix.os }}
+    if: ${{ !github.event.pull_request.head.repo.fork }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        os: ["ubuntu-latest"]
+        pytest_opts: ["--workers 4 --tests-per-worker 1"]
+        requirements: [""]
+        include:
+          - os: "ubuntu-latest"
+            python: "3.9"
+            requirements: "requirements/minimum.txt"
+          - os: "macos-latest"
+            python: "3.10"
+            # ignore doctests, as they involve calls to github, and all mac machines
+            # use the same IP address
+            pytest_opts: "--workers 4 --tests-per-worker 1 -k pins/tests"
+          - os: "windows-latest"
+            python: "3.10"
+            # ignore doctests
+            pytest_opts: "-k pins/tests"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+
+          # optionally install from requirements file
+          if [ $REQUIREMENTS ]; then
+            pip install -r $REQUIREMENTS
+          fi
+
+          python -m pip install -e .[test]
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+        with:
+          project_id: siuba-tests
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+      - name: Run tests
+        shell: bash
+        run: |
+          pytest pins -m 'not fs_rsc and not skip_on_github' $PYTEST_OPTS
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: "us-east-1"
+          AZURE_STORAGE_ACCOUNT_NAME: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
+          AZURE_STORAGE_ACCOUNT_KEY: ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          PYTEST_OPTS: ${{ matrix.pytest_opts }}
+          REQUIREMENTS: ${{ matrix.requirements }}
+          ACTION_OS: ${{ matrix.os }}
+          # fixes error on macosx virtual machine with pytest-parallel
+          # https://github.com/browsertron/pytest-parallel/issues/93
+          no_proxy: "*"
+
+  test-connect:
+    name: "Test Posit Connect"
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.head.repo.fork }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/dev.txt
+          python -m pip install -e .
+
+      - name: Run tests
+        uses: posit-dev/with-connect@main
+        env:
+          ALLOW_RSC_SHORT_NAME: 1
+        with:
+          # License file is valid until 2026-11-05
+          license: ${{ secrets.CONNECT_LICENSE }}
+          config-file: "script/setup-rsconnect/rstudio-connect.gcfg"
+          command: |
+            python script/setup-rsconnect/dump_api_keys.py pins/tests/rsconnect_api_keys.json
+            pytest pins -m "fs_rsc and not skip_on_github"
+
+
+  test-fork:
+    name: "Test a fork PR (no secrets)"
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.head.repo.fork }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+          python -m pip install -e .[test]
+      - name: Run tests
+        run: |
+          # Skip all tests requiring credentials, which aren't available on fork PRs.
+          pytest pins -m 'not fs_rsc and not fs_s3 and not fs_gcs and not fs_abfs and not fs_dbc and not skip_on_github'
+
+
+  build-docs:
+    name: "Build Docs"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/dev.txt
+          python -m pip install -e .
+          python -m ipykernel install --user
+
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+      - name: Build docs
+        run: |
+          make docs-build
+      - name: Save docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-html
+          path: docs/_site
+
+  preview-docs:
+    name: "Preview Docs:"
+    runs-on: ubuntu-latest
+    needs: ["build-docs"]
+    if: "${{github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}"
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-html
+          path: docs/_site
+
+      # Determine the release name ---
+
+      - name: Configure pull release name
+        if: ${{github.event_name == 'pull_request'}}
+        run: |
+          echo "RELEASE_NAME=pr-${PR_NUMBER}" >> $GITHUB_ENV
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+
+      # create deployment ----
+
+      - name: Create Github Deployment
+        uses: bobheadxi/deployments@v0.4.3
+        id: deployment
+        with:
+          step: start
+          token: ${{ secrets.GITHUB_TOKEN }}
+          env: ${{ env.RELEASE_NAME }}
+          ref: ${{ github.head_ref }}
+          transient: true
+          logs: 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+
+      # push docs ----
+
+      - name: Netlify docs preview
+        run: |
+          npm install -g netlify-cli
+          # push main branch to production, others to preview --
+          netlify deploy --dir=docs/_site --alias="${ALIAS}"
+
+        env:
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          ALIAS: ${{ steps.deployment.outputs.env }}
+
+      # update deployment ----
+
+      - name: Update Github Deployment
+        uses: bobheadxi/deployments@v0.4.3
+        if: ${{ always() }}
+        with:
+          step: finish
+          token: ${{ secrets.GITHUB_TOKEN }}
+          status: ${{ job.status }}
+          deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+          env_url: 'https://${{ steps.deployment.outputs.env }}--pins-python.netlify.app'
+          logs: 'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+
+  publish-docs:
+    name: "Publish Docs"
+    runs-on: ubuntu-latest
+    needs: ["build-docs", "tests", "test-connect"]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-html
+          path: docs/_site
+      - uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/_site
+
+  release-pypi:
+    name: "Release to pypi"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    needs: [build-docs, tests]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: "Build Package"
+        run: |
+          python -m pip install build wheel
+          python -m build --sdist --wheel
+
+      - name: "Deploy to Test PyPI"
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}

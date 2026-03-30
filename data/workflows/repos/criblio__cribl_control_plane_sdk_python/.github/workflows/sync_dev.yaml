@@ -1,0 +1,109 @@
+name: Sync Main to dev-local and Speakeasy versions to branches
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  merge-main-to-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git user
+        run: |
+          git config user.name "SyncUpBot"
+          git config user.email "syncupbot@users.noreply.github.com"
+
+      - name: Merge main into dev-local
+        run: |
+          git fetch origin main dev-local
+
+          git checkout dev-local
+          git merge origin/main -X theirs --no-edit
+          git push origin dev-local
+
+  sync-speakeasy-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git user
+        run: |
+          git config user.name "SyncUpBot"
+          git config user.email "syncupbot@users.noreply.github.com"
+
+      - name: Check for Speakeasy version changes
+        id: check-changes
+        run: |
+          # Check if the push includes changes to speakeasyVersion
+          if git diff HEAD~1 HEAD -- .speakeasy/workflow.yaml | grep -q "speakeasyVersion"; then
+            echo "speakeasy_version_changed=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Speakeasy version change detected"
+          else
+            echo "speakeasy_version_changed=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️  No Speakeasy version changes detected"
+          fi
+
+      - name: Sync Speakeasy version to dev, stage, and openapi-prerelease branches
+        if: steps.check-changes.outputs.speakeasy_version_changed == 'true'
+        run: |
+          # Get the speakeasyVersion from main branch
+          SPEAKEASY_VERSION=$(grep "speakeasyVersion:" .speakeasy/workflow.yaml | sed 's/speakeasyVersion: //')
+          echo "Current Speakeasy version: $SPEAKEASY_VERSION"
+
+          # Sync to dev branch
+          echo "🔄 Syncing to dev branch..."
+          git fetch origin dev || echo "⚠️  Dev branch not found, skipping"
+          if git ls-remote --heads origin dev | grep -q dev; then
+            git checkout dev
+            sed -i "s/speakeasyVersion: .*/speakeasyVersion: $SPEAKEASY_VERSION/" .speakeasy/workflow.yaml
+            git add .speakeasy/workflow.yaml
+            git commit -m "sync: update Speakeasy version to $SPEAKEASY_VERSION from main" || echo "No changes to commit on dev"
+            git push origin dev
+            echo "✅ Dev branch updated"
+          else
+            echo "⚠️  Dev branch does not exist, skipping"
+          fi
+
+          # Sync to stage branch  
+          echo "🔄 Syncing to stage branch..."
+          git fetch origin stage || echo "⚠️  Stage branch not found, skipping"
+          if git ls-remote --heads origin stage | grep -q stage; then
+            git checkout stage
+            sed -i "s/speakeasyVersion: .*/speakeasyVersion: $SPEAKEASY_VERSION/" .speakeasy/workflow.yaml
+            git add .speakeasy/workflow.yaml
+            git commit -m "sync: update Speakeasy version to $SPEAKEASY_VERSION from main" || echo "No changes to commit on stage"
+            git push origin stage
+            echo "✅ Stage branch updated"
+          else
+            echo "⚠️  Stage branch does not exist, skipping"
+          fi
+
+          # Sync to openapi-prerelease branch
+          echo "🔄 Syncing to openapi-prerelease branch..."
+          git fetch origin openapi-prerelease || echo "⚠️  OpenAPI-prerelease branch not found, skipping"
+          if git ls-remote --heads origin openapi-prerelease | grep -q openapi-prerelease; then
+            git checkout openapi-prerelease
+            sed -i "s/speakeasyVersion: .*/speakeasyVersion: $SPEAKEASY_VERSION/" .speakeasy/workflow.yaml
+            git add .speakeasy/workflow.yaml
+            git commit -m "sync: update Speakeasy version to $SPEAKEASY_VERSION from main" || echo "No changes to commit on openapi-prerelease"
+            git push origin openapi-prerelease
+            echo "✅ OpenAPI-prerelease branch updated"
+          else
+            echo "⚠️  OpenAPI-prerelease branch does not exist, skipping"
+          fi
+
+      - name: Summary
+        if: steps.check-changes.outputs.speakeasy_version_changed == 'true'
+        run: |
+          echo "🎉 Speakeasy version sync completed!"
+          echo "📋 Updated branches: dev, stage, openapi-prerelease"
+          echo "🔗 Changes pushed directly to branches"

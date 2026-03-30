@@ -1,0 +1,61 @@
+name: Clang-tidy check
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+    paths:
+      - .github/workflows/tidy.yml
+      - pennylane_lightning/core/**
+      - '!pennylane_lightning/core/simulators/lightning_gpu/**'
+      - '!pennylane_lightning/core/simulators/lightning_kokkos/**'
+  push:
+    branches:
+      - main
+
+env:
+  GCC_VERSION: 13
+
+concurrency:
+  group: tidy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  tidy-cpp:
+    if: github.event.pull_request.draft == false
+    strategy:
+      matrix:
+        pl_backend: ["lightning_qubit"]
+
+    name: Tidy (C++)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout PennyLane-Lightning
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: sudo apt update && sudo apt -y install cmake gcc-$GCC_VERSION g++-$GCC_VERSION ninja-build libomp-14-dev && python -m pip install --group dev
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Run clang-tidy compilation
+        run: |
+          cmake -BBuild -G Ninja . \
+            -DENABLE_CLANG_TIDY=ON \
+            -DCLANG_TIDY_BINARY=$(dirname $(which python))/clang-tidy \
+            -DBUILD_TESTS=ON \
+            -DENABLE_WARNINGS=ON \
+            -DSCIPY_OPENBLAS=$(python -c "import scipy_openblas32; print(scipy_openblas32.get_lib_dir())") \
+            -DPL_BACKEND=${{ matrix.pl_backend }} \
+            -DCMAKE_CXX_COMPILER="$(which g++-$GCC_VERSION)" \
+            -DCMAKE_C_COMPILER="$(which gcc-$GCC_VERSION)"
+          cmake --build ./Build

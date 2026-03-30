@@ -1,0 +1,47 @@
+name: Browser Release
+
+on:
+  push:
+    tags:
+      - "robocorp-browser-*"
+
+defaults:
+  run:
+    working-directory: './browser'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+
+    strategy:
+      fail-fast: true
+
+    steps:
+    - name: Checkout repository and submodules
+      uses: actions/checkout@v4
+
+    - name: Install poetry
+      run: pipx install poetry
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+        cache: 'poetry'
+
+    - name: Install project
+      run: poetry install
+
+    - name: Check tag version
+      run: poetry run invoke check-tag-version
+
+    - name: Build with poetry
+      run: poetry build
+
+    - name: Publish package distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: browser/dist

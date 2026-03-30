@@ -1,0 +1,87 @@
+# Action which validates the ability to build this extension against multiple
+# versions of Sphinx using various Python interpreters.
+
+name: Build
+
+on:
+  push:
+    branches:
+    - main
+    paths:
+      - '.github/workflows/build.yml'
+      - 'sphinxcontrib/**'
+      - 'tests/**'
+      - 'MANIFEST.in'
+      - 'pyproject.toml'
+      - 'requirements_dev.txt'
+      - 'tox.ini'
+  pull_request:
+    branches:
+    - main
+    paths:
+      - '.github/workflows/build.yml'
+      - 'sphinxcontrib/**'
+      - 'tests/**'
+      - 'MANIFEST.in'
+      - 'pyproject.toml'
+      - 'requirements_dev.txt'
+      - 'tox.ini'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.toxenv }}  (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+            # test each python/sphinx pair supported
+            - { os:  ubuntu-latest, python: "3.10", toxenv: py310-sphinx80, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.10", toxenv: py310-sphinx81, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.11", toxenv: py311-sphinx80, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.11", toxenv: py311-sphinx81, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.11", toxenv: py311-sphinx82, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.11", toxenv: py311-sphinx90, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.12", toxenv: py312-sphinx80, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.12", toxenv: py312-sphinx81, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.12", toxenv: py312-sphinx82, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.12", toxenv: py312-sphinx90, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.12", toxenv: py312-sphinx91, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.13", toxenv: py313-sphinx80, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.13", toxenv: py313-sphinx81, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.13", toxenv: py313-sphinx82, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.13", toxenv: py313-sphinx90, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.13", toxenv: py313-sphinx91, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.14", toxenv: py314-sphinx80, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.14", toxenv: py314-sphinx81, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.14", toxenv: py314-sphinx82, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.14", toxenv: py314-sphinx90, cache: ~/.cache/pip }
+            - { os:  ubuntu-latest, python: "3.14", toxenv: py314-sphinx91, cache: ~/.cache/pip }
+
+            # other OSes
+            #  - test against all other supported OSes, using most recent interpreter/sphinx
+            - { os:   macos-latest, python: "3.12", toxenv: py312-sphinx81, cache: ~/Library/Caches/pip }
+            - { os: windows-latest, python: "3.12", toxenv: py312-sphinx81, cache: ~\AppData\Local\pip\Cache }
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: Cache pip
+      uses: actions/cache@v5
+      id: cache-pip
+      with:
+        path: ${{ matrix.cache }}
+        key: ${{ matrix.os }}-${{ matrix.python }}-pip-${{ matrix.toxenv }}
+
+    - name: Install dependencies
+      run: python -m pip install --upgrade tox
+
+    - name: tox
+      env:
+        TOXENV: ${{ matrix.toxenv }}
+      run: tox

@@ -1,0 +1,532 @@
+name: Cargo Tests (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      code_changed:
+        required: true
+        type: string
+      run_all:
+        required: true
+        type: boolean
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  cargo-test-linux:
+    name: "cargo test (linux)"
+    runs-on: ubuntu-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Install Rust toolchain BEFORE rust-cache so cache key uses correct Rust version
+      - name: "Install Rust toolchain"
+        run: rustup show
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          # Share cache across similar Linux jobs for better hit rates
+          shared-key: "linux-cargo"
+
+      - name: "Install cargo insta"
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-insta
+
+      - name: "Install cargo nextest"
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: "Install uv"
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: "Run tests with nextest"
+        run: cargo nextest run --all-features
+        working-directory: baml_language
+
+      - name: "Run snapshot tests with insta"
+        run: cargo insta test --workspace --all-features --unreferenced reject --exclude rig_python_empty --exclude rig_python_literal_types --exclude rig_python_map_types --exclude rig_python_mixed_complex_types --exclude rig_python_semantic_streaming --exclude rig_python_union_types_extended
+        working-directory: baml_language
+
+      - name: "Check documentation"
+        run: cargo doc --all --no-deps
+        working-directory: baml_language
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+      - name: "Upload test results on failure"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-failures-linux
+          path: |
+            baml_language/**/*.snap.new
+            baml_language/**/target/nextest/
+
+  cargo-test-macos:
+    name: "cargo test (macos)"
+    runs-on: macos-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Install Rust toolchain BEFORE rust-cache so cache key uses correct Rust version
+      - name: "Install Rust toolchain"
+        run: rustup show
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          # Share cache across similar macOS jobs for better hit rates
+          shared-key: "macos-cargo"
+
+      - name: "Install cargo nextest"
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: "Install uv"
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: "Run tests"
+        run: |
+          cargo nextest run --all-features
+          cargo test --all-features --doc
+        working-directory: baml_language
+
+  cargo-test-windows:
+    name: "cargo test (windows)"
+    runs-on: windows-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    # TODO: Reduce this once our changes to aws-sdk-rust are upstreamed
+    # Right now it needs to download our repo every time which is very slow
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Install Rust toolchain BEFORE rust-cache so cache key uses correct Rust version
+      - name: "Install Rust toolchain"
+        run: rustup show
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          # Share cache across similar Windows jobs for better hit rates
+          shared-key: "windows-cargo"
+
+      - name: "Install cargo nextest"
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: "Install uv"
+        run: irm https://astral.sh/uv/install.ps1 | iex
+        shell: powershell
+
+      - name: "Run tests"
+        run: |
+          cargo nextest run --all-features
+          cargo test --all-features --doc
+        working-directory: baml_language
+
+  cargo-test-wasm:
+    name: "cargo test (wasm)"
+    runs-on: ubuntu-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Install Rust toolchain BEFORE rust-cache so cache key uses correct Rust version
+      - name: "Install Rust toolchain"
+        run: |
+          rustup show
+          rustup target add wasm32-unknown-unknown
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          # Share cache across similar Linux WASM jobs for better hit rates
+          shared-key: "linux-wasm"
+
+      - name: "Build for WASM"
+        run: |
+          WASM_PACKAGES=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.source==null) | select(if .metadata.ci.wasm_support == null then true else .metadata.ci.wasm_support end) | "-p \(.name)"' | xargs)
+          cargo build $WASM_PACKAGES --target wasm32-unknown-unknown --no-default-features --release
+        working-directory: baml_language
+
+      - name: "List WASM artifacts"
+        run: ls -lh target/wasm32-unknown-unknown/release/*.wasm || true
+        working-directory: baml_language
+
+  # ---------------------------------------------------------------------------
+  # Size Gate — one job per platform, unified PR comment at the end
+  # ---------------------------------------------------------------------------
+
+  size-gate-linux:
+    name: "size-gate (linux)"
+    runs-on: ubuntu-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "Install Rust toolchain"
+        run: rustup show
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          shared-key: "linux-cargo"
+
+      - name: "Run size-gate check"
+        id: check
+        working-directory: baml_language
+        run: |
+          cargo run -p cargo-size-gate -- size-gate check \
+            --only bridge_cffi-stripped,bridge_cffi \
+            --format json > size-gate-linux.json 2> size-gate-stderr.txt || exit_code=$?
+          cat size-gate-stderr.txt >&2
+          echo "exit_code=${exit_code:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: "Upload size-gate report"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-gate-linux
+          path: baml_language/size-gate-linux.json
+          if-no-files-found: ignore
+
+      - name: "Upload size-gate binary"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-gate-binary
+          path: baml_language/target/debug/cargo-size-gate
+          if-no-files-found: ignore
+
+      - name: "Fail on policy violation"
+        if: steps.check.outputs.exit_code != '0'
+        run: exit ${{ steps.check.outputs.exit_code }}
+
+  size-gate-macos:
+    name: "size-gate (macos)"
+    runs-on: macos-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "Install Rust toolchain"
+        run: rustup show
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          shared-key: "macos-cargo"
+
+      - name: "Run size-gate check"
+        id: check
+        working-directory: baml_language
+        run: |
+          cargo run -p cargo-size-gate -- size-gate check \
+            --only bridge_cffi-stripped,bridge_cffi \
+            --format json > size-gate-macos.json 2> size-gate-stderr.txt || exit_code=$?
+          cat size-gate-stderr.txt >&2
+          echo "exit_code=${exit_code:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: "Upload size-gate report"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-gate-macos
+          path: baml_language/size-gate-macos.json
+          if-no-files-found: ignore
+
+      - name: "Fail on policy violation"
+        if: steps.check.outputs.exit_code != '0'
+        run: exit ${{ steps.check.outputs.exit_code }}
+
+  size-gate-windows:
+    name: "size-gate (windows)"
+    runs-on: windows-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    # TODO: Reduce this once our changes to aws-sdk-rust are upstreamed
+    # Right now it needs to download our repo every time which is very slow
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "Install Rust toolchain"
+        run: rustup show
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          shared-key: "windows-cargo"
+
+      - name: "Run size-gate check"
+        id: check
+        working-directory: baml_language
+        run: |
+          cargo run -p cargo-size-gate -- size-gate check \
+            --only bridge_cffi-stripped,bridge_cffi \
+            --format json > size-gate-windows.json 2> size-gate-stderr.txt || exit_code=$?
+          cat size-gate-stderr.txt >&2
+          echo "exit_code=${exit_code:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: "Upload size-gate report"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-gate-windows
+          path: baml_language/size-gate-windows.json
+          if-no-files-found: ignore
+
+      - name: "Fail on policy violation"
+        if: steps.check.outputs.exit_code != '0'
+        run: exit ${{ steps.check.outputs.exit_code }}
+
+  size-gate-wasm:
+    name: "size-gate (wasm)"
+    runs-on: ubuntu-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "Install Rust toolchain"
+        run: |
+          rustup show
+          rustup target add wasm32-unknown-unknown
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          shared-key: "linux-wasm"
+
+      - name: "Run size-gate check"
+        id: check
+        working-directory: baml_language
+        run: |
+          cargo run -p cargo-size-gate -- size-gate check \
+            --only bridge_wasm \
+            --format json > size-gate-wasm.json 2> size-gate-stderr.txt || exit_code=$?
+          cat size-gate-stderr.txt >&2
+          echo "exit_code=${exit_code:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: "Upload size-gate report"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-gate-wasm
+          path: baml_language/size-gate-wasm.json
+          if-no-files-found: ignore
+
+      - name: "Fail on policy violation"
+        if: steps.check.outputs.exit_code != '0'
+        run: exit ${{ steps.check.outputs.exit_code }}
+
+  size-gate-report:
+    name: "size-gate (report)"
+    runs-on: ubuntu-latest
+    if: ${{ always() && (inputs.code_changed == 'true' || inputs.run_all) }}
+    needs: [size-gate-linux, size-gate-macos, size-gate-windows, size-gate-wasm]
+    permissions:
+      pull-requests: write
+    steps:
+      - name: "Download size-gate reports and binary"
+        uses: actions/download-artifact@v4
+        with:
+          pattern: size-gate-*
+          merge-multiple: true
+          path: reports
+
+      - name: "Compose unified report"
+        env:
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          chmod +x reports/cargo-size-gate
+
+          # Collect all JSON reports that exist
+          json_files=()
+          for platform in linux macos windows wasm; do
+            f="reports/size-gate-${platform}.json"
+            [ -f "$f" ] && json_files+=("$f")
+          done
+
+          # Run agg to produce unified markdown
+          reports/cargo-size-gate size-gate agg \
+            "${json_files[@]}" \
+            --run-url "$RUN_URL" \
+            > unified-report.md || true
+
+      - name: "Post PR comment"
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@v3.0.1
+        with:
+          file-path: unified-report.md
+          comment-tag: size-gate
+
+      - name: "Write job summary"
+        run: cat unified-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Fail if any size check failed"
+        run: |
+          for result in \
+            "${{ needs.size-gate-linux.result }}" \
+            "${{ needs.size-gate-macos.result }}" \
+            "${{ needs.size-gate-windows.result }}" \
+            "${{ needs.size-gate-wasm.result }}" \
+          ; do
+            if [ "$result" = "failure" ]; then
+              echo "::error::One or more size-gate checks failed"
+              exit 1
+            fi
+          done
+
+  cargo-build-msrv:
+    name: "cargo build (msrv)"
+    runs-on: ubuntu-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: SebRollen/toml-action@v1.2.0
+        id: msrv
+        with:
+          file: "baml_language/Cargo.toml"
+          field: "workspace.package.rust-version"
+
+      # Install Rust toolchain BEFORE rust-cache so cache key uses correct Rust version
+      - name: "Install Rust toolchain (MSRV)"
+        env:
+          MSRV: ${{ steps.msrv.outputs.value }}
+        run: |
+          rustup toolchain install "${MSRV}"
+          rustup default "${MSRV}"
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          # Share cache across Linux MSRV jobs
+          shared-key: "linux-msrv"
+
+      - name: "Build with MSRV"
+        env:
+          MSRV: ${{ steps.msrv.outputs.value }}
+        run: cargo "+${MSRV}" test --no-run --all-features
+        working-directory: baml_language
+
+  check-dependencies:
+    name: "check dependencies"
+    runs-on: ubuntu-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "Install Rust toolchain"
+        run: rustup show
+        working-directory: baml_language
+
+      - name: "Install cargo-deny"
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: "Check dependencies"
+        run: cargo deny check
+        working-directory: baml_language
+        continue-on-error: true # For now, just warn
+
+  snapshot-tests:
+    name: "snapshot tests"
+    runs-on: ubuntu-latest
+    if: ${{ inputs.code_changed == 'true' || inputs.run_all }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Install Rust toolchain BEFORE rust-cache so cache key uses correct Rust version
+      - name: "Install Rust toolchain"
+        run: rustup show
+        working-directory: baml_language
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "baml_language -> target"
+          # Share cache across similar Linux jobs for better hit rates
+          shared-key: "linux-cargo"
+
+      - name: "Install cargo insta"
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-insta
+
+      - name: "Run snapshot tests"
+        run: |
+          cargo insta test --workspace --all-features --unreferenced=reject --exclude rig_python_empty --exclude rig_python_literal_types --exclude rig_python_map_types --exclude rig_python_mixed_complex_types --exclude rig_python_semantic_streaming --exclude rig_python_union_types_extended
+          cargo insta test --workspace --all-features --review --exclude rig_python_empty --exclude rig_python_literal_types --exclude rig_python_map_types --exclude rig_python_mixed_complex_types --exclude rig_python_semantic_streaming --exclude rig_python_union_types_extended
+        working-directory: baml_language
+
+      - name: "Check for snapshot changes"
+        run: |
+          if [ -n "$(git status --porcelain baml_language/crates/baml_tests/snapshots)" ]; then
+            echo "::error::Snapshot tests have uncommitted changes"
+            git diff baml_language/crates/baml_tests/snapshots
+            exit 1
+          fi
+
+      - name: "Upload snapshot failures"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-failures
+          path: |
+            baml_language/crates/baml_tests/snapshots/**/*.snap.new
+            baml_language/crates/baml_tests/snapshots/**/*.snap

@@ -1,0 +1,39 @@
+name: Publish Package
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Is this a dry run? If so no package will be published.'
+        type: boolean
+        required: true
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+    # Needed to get tokens during publishing.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install poetry
+        run: pipx install poetry
+
+      - uses: launchdarkly/gh-actions/actions/release-secrets@release-secrets-v1.2.0
+        name: 'Get PyPI token'
+        with:
+          aws_assume_role: ${{ vars.AWS_ROLE_ARN }}
+          ssm_parameter_pairs: '/production/common/releasing/pypi/token = PYPI_AUTH_TOKEN'
+
+      - uses: ./.github/actions/build
+
+      - name: Publish package distributions to PyPI
+        if: ${{ inputs.dry_run == 'false' }}
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
+        with:
+            password: ${{env.PYPI_AUTH_TOKEN}}

@@ -1,0 +1,40 @@
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      POETRY_VIRTUALENVS_CREATE: "false"
+      coverage_json: "{}"
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pipx
+        run: python -m pip install pipx && python -m pipx ensurepath
+      - name: Install poetry
+        run: pipx install poetry && poetry --version
+      - name: Install dependencies
+        run: |
+          POETRY_VIRTUALENVS_CREATE=false poetry install
+      - name: pytest
+        run: poetry run poe test --junitxml=pytest-results-${{ matrix.python-version }}.xml
+      - name: coverage
+        run: poetry run poe coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          env_vars: OS,PYTHON

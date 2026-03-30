@@ -1,0 +1,133 @@
+name: Publish to container registries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - src/**
+      - Dockerfile
+      - pyproject.toml
+  pull_request:
+    paths:
+      - src/**
+      - Dockerfile
+      - pyproject.toml
+
+jobs:
+  docker-hub:
+    name: Push multi-arch Docker image to Docker Hub
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a #v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
+
+      - name: Extract tags and labels for Docker
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: sparfenyuk/mcp-proxy
+          tags: |
+            type=sha,format=short,prefix=commit-
+            type=ref,event=tag
+          labels: |
+            org.opencontainers.image.authors=Sergey Parfenyuk
+            org.opencontainers.image.source=https://github.com/sparfenyuk/mcp-proxy
+            org.opencontainers.image.url=https://github.com/sparfenyuk/mcp-proxy
+            org.opencontainers.image.title=mcp-proxy
+            org.opencontainers.image.description=Connect to MCP servers that run on SSE transport, or expose stdio servers as an SSE server using the MCP Proxy server.
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.base.name=docker.io/library/python:3.13-alpine
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        if: github.event_name != 'pull_request'
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+
+      - name: Clean Docker cache
+        if: github.event_name != 'pull_request'
+        run: |
+          docker system prune --force
+
+  ghcr-io:
+    name: Push multi-arch Docker image to ghcr.io
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a #v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
+
+      - name: Extract tags and labels for Docker
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ghcr.io/sparfenyuk/mcp-proxy
+          tags: |
+            type=sha,format=short,prefix=commit-
+            type=ref,event=tag
+          labels: |
+            org.opencontainers.image.authors=Sergey Parfenyuk
+            org.opencontainers.image.source=https://github.com/sparfenyuk/mcp-proxy
+            org.opencontainers.image.url=https://github.com/sparfenyuk/mcp-proxy
+            org.opencontainers.image.title=mcp-proxy
+            org.opencontainers.image.description=Connect to MCP servers that run on SSE transport, or expose stdio servers as an SSE server using the MCP Proxy server.
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.base.name=docker.io/library/python:3.13-alpine
+
+      - name: Log in to GHCR
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+
+      - name: Clean Docker cache
+        if: github.event_name != 'pull_request'
+        run: |
+          docker system prune --force

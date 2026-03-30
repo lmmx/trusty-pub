@@ -1,0 +1,63 @@
+name: Bump Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver type of the new version"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prerelease
+          - prepatch
+          - preminor
+          - prepatch
+
+jobs:
+  bump-version:
+    environment: publish
+    runs-on: ubuntu-latest
+    if: github.actor == 'Wirg'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/workflows/actions/install_dependencies
+
+      - name: bump version
+        run: poetry version ${{ github.event.inputs.version }}
+
+      - name: export release-data
+        id: release-data
+        run: |
+          export RELEASE="v$(poetry version --short)"
+          echo "version=${RELEASE}" >> $GITHUB_OUTPUT
+          echo "branch=release/${RELEASE}" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request "[Release] ${{ steps.release-data.outputs.version }} => main"
+        uses: peter-evans/create-pull-request@v5
+        id: create-pull-request
+        with:
+          # PR
+          title: "[Release] ${{ steps.release-data.outputs.version }} => main"
+          reviewers: Wirg
+          labels: release
+          branch: ${{ steps.release-data.outputs.branch }}
+          base: main
+          delete-branch: true
+
+          # Commit
+          commit-message: "bump to version ${{ steps.release-data.outputs.version }}"
+          add-paths: "./pyproject.toml"
+
+          # Auth
+          token: ${{ secrets.GH_WIRG_BOT_PAT }}
+
+      - name: Auto-merge Pull Request
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GH_WIRG_BOT_PAT }}
+          pull-request-number: ${{ steps.create-pull-request.outputs.pull-request-number }}
+          merge-method: rebase

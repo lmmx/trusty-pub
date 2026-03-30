@@ -1,0 +1,235 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '**'
+  pull_request:
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        # Install pip for pre-commit
+        run: |
+          uv sync --group lint
+          uv pip install pip
+
+      - name: Run Ruff formatter
+        run: make format-diff
+
+      - name: Run Ruff linter
+        run: make lint-github
+
+      - name: Run Pyright
+        run: make typecheck
+
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --all-files --verbose
+        env:
+          # https://pre-commit.com/#temporarily-disabling-hooks:
+          SKIP: no-commit-to-branch
+
+  test:
+    name: Run tests
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        exclude:
+          # uv pulls out 3.9.6, which is too old and there's a bug
+          # (https://github.com/python/cpython/pull/30864) only fixed in 3.9.11
+          - os: macos-latest
+            python-version: '3.9'
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --group tests
+      - name: Run tests
+        run: make test
+        env:
+          COVERAGE_FILE: coverage/.coverage.${{ runner.os }}-py${{ matrix.python-version }}
+
+      - name: Store coverage files
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+          path: coverage
+          include-hidden-files: true
+
+  test-typing-extensions:
+    name: Run test on typing-extensions
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        typing-extensions: [main, lowest]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies and typing-extensions main
+        run: |
+          uv sync --group tests
+          uv pip install 'typing-extensions @ git+https://github.com/python/typing_extensions.git'
+        if: matrix.typing-extensions == 'main'
+      - name: Install lowest dependencies
+        run: uv sync --group tests --resolution lowest-direct
+        if: matrix.typing-extensions == 'lowest'
+      - name: Run tests
+        run: make test
+
+  docs:
+    name: Build and check documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: uv sync --group docs
+
+      - run: uv run mkdocs build
+
+  coverage-combine:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: uv sync --group tests
+      - name: Get coverage files
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          pattern: coverage-*
+          path: coverage
+
+      - run: |
+          ls -la coverage/
+          coverage combine coverage/
+          coverage report
+          coverage html --show-contexts --title "typing-inspection coverage for ${{ github.sha }}"
+
+      - name: Store coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-data
+          path: .coverage
+          include-hidden-files: true
+
+      - name: Store coverage HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov
+
+  coverage-pr-comment:
+    needs: coverage-combine
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download coverage data
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-data
+
+      - name: Generate coverage comment
+        id: coverage-comment
+        uses: py-cov-action/python-coverage-comment-action@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Store coverage comment
+        uses: actions/upload-artifact@v4
+        if: steps.coverage-comment.outputs.COMMENT_FILE_WRITTEN == 'true'
+        with:
+          name: python-coverage-comment-action
+          path: python-coverage-comment-action.txt
+
+  check:
+    if: always()
+    outputs:
+      result: ${{ steps.all-green.outputs.result }}
+    needs:
+      - lint
+      - test
+      - docs
+      - test-typing-extensions
+      - coverage-combine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        id: all-green
+        with:
+          jobs: ${{ toJSON(needs) }}
+
+  release:
+    needs: check
+    if: needs.check.outputs.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: release
+
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install 'build' library
+        run: pip install -U build
+
+      - name: Check version
+        uses: samuelcolvin/check-python-version@v4.1
+        with:
+          version_file_path: pyproject.toml
+
+      - name: Build library
+        run: python -m build
+
+      - name: Upload package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

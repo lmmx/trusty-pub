@@ -1,0 +1,79 @@
+name: "Tests"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number }}-${{ github.event.ref }}
+  cancel-in-progress: true
+on: # yamllint disable-line rule:truthy
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  # Run at 04:00 UTC every Monday
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  style:
+    name: Code style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - run: |
+          pip install pip --upgrade
+          pip install -ve '.[tests]'
+          pip install mypy sphinx sphobjinv aiohttp
+      - run: mypy
+
+  pytest:
+    name: Test on ${{ matrix.os }} with Python ${{ matrix.python }}
+    needs: [style]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash -el {0}
+    permissions:
+      contents: read
+      issues: write # to create issues on test failures
+    strategy:
+      matrix:
+        os: ["ubuntu-latest"]
+        python: ["3.x"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: |
+          pip install pip --upgrade
+          pip install -ve '.[tests]'
+          pip install mypy sphinx
+          pip install pytest-reportlog
+
+      - run: echo "NOW=$(date +'%Y-%m-%dT%H:%M:%S')" >> $GITHUB_ENV
+
+      - name: Test
+        id: pytest
+        run: pytest tests --report-log pytest-log.jsonl
+
+      - uses: scientific-python/issue-from-pytest-log-action@8e905db353437cda1d6a773de245343fbfc940dd # v1.5.0
+        if: |
+          failure()
+          && steps.pytest.outcome == 'failure'
+          && github.repository == 'Quansight-Labs/intersphinx_registry'
+          && github.event_name == 'schedule'
+        with:
+          log-path: pytest-log.jsonl
+          issue-title: ⚠️ CI failure at ${{ env.NOW }} ⚠️
+          # issue-label: 'bug'

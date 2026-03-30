@@ -1,0 +1,336 @@
+name: Examples
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-node-example:
+    name: node-js
+    runs-on: ubuntu-24.04
+
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        large-packages: false
+        tool-cache: true
+
+    - uses: nick-fields/retry@v3
+      with:
+        max_attempts: 5
+        timeout_minutes: 10
+        command: ./src/docker/pull.sh --no-debug
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Install
+      uses: pnpm/action-setup@v5
+      with:
+        run_install: true
+
+    - name: Build dependencies
+      run: |
+        pnpm run --filter '@itk-wasm/image-io...' build
+        pnpm run --filter '@itk-wasm/mesh-io...' build
+
+    - name: Test
+      working-directory: ./examples/node-js
+      run: |
+        pnpm test
+
+  build-hello-world-example:
+    name: hello-world build
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: ./examples/hello-world
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        large-packages: false
+        tool-cache: true
+
+    - uses: nick-fields/retry@v3
+      with:
+        max_attempts: 5
+        timeout_minutes: 10
+        command: ./src/docker/pull.sh --no-debug
+
+    - name: Install
+      uses: pnpm/action-setup@v5
+      with:
+        run_install: true
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Build
+      run: |
+        pnpm build
+
+    - name: Save wasm builds
+      uses: actions/upload-artifact@v7
+      with:
+        name: hello-world-build
+        if-no-files-found: error
+        path: |
+          examples/hello-world/emscripten-build
+          examples/hello-world/wasi-build
+
+
+  build-test-hello-pipeline-example:
+    name: hello-pipeline build test
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: ./examples/hello-pipeline
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        large-packages: false
+        tool-cache: true
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Install
+      run: |
+        npm install
+
+    - name: Build
+      run: |
+        npm run build
+
+    - name: Test
+      run: |
+        npm run test
+        npm run test:quiet
+        npm run test:help
+
+  build-test-inputs-outputs-example:
+    name: inputs-outputs
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: ./examples/inputs-outputs
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        large-packages: false
+        tool-cache: true
+
+    - uses: nick-fields/retry@v3
+      with:
+        max_attempts: 5
+        timeout_minutes: 10
+        command: ./src/docker/pull.sh --no-debug
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Install
+      uses: pnpm/action-setup@v5
+      with:
+        run_install: true
+
+    - name: Build dependencies
+      run: |
+        pnpm run --filter '@itk-wasm/image-io...' build
+
+    - name: Build
+      working-directory: ./examples/inputs-outputs
+      run: |
+        pnpm build
+
+    - name: Test WASI
+      working-directory: ./examples/inputs-outputs
+      run: |
+        pnpm test
+
+    - name: Build TypeScript
+      working-directory: ./examples/inputs-outputs/typescript
+      run: |
+        pnpm build
+
+    - name: Test TypeScript
+      working-directory: ./examples/inputs-outputs/typescript
+      run: |
+        pnpm test
+  test-debugging-example:
+    name: debugging
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ./examples/debugging
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        large-packages: false
+        tool-cache: true
+
+    - uses: nick-fields/retry@v3
+      with:
+        max_attempts: 5
+        timeout_minutes: 10
+        command: ./src/docker/pull.sh
+
+    - name: Install
+      uses: pnpm/action-setup@v5
+      with:
+        run_install: true
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Build dependencies
+      run: |
+        pnpm run --filter 'itk-wasm' build
+
+    - name: Install
+      run: |
+        pnpm install
+
+    - name: Build
+      run: |
+        pnpm native-build
+        pnpm emscripten-build-release
+        pnpm emscripten-build-debug
+        pnpm wasi-build-debug
+
+  test-different-input-types-example:
+    name: different-input-types
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ./examples/different-input-types
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        large-packages: false
+        tool-cache: true
+
+    - uses: nick-fields/retry@v3
+      with:
+        max_attempts: 5
+        timeout_minutes: 10
+        command: ./src/docker/pull.sh --no-debug
+
+    - name: Install
+      uses: pnpm/action-setup@v5
+      with:
+        run_install: true
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Build
+      run: |
+        pnpm run build
+
+    - name: Test
+      run: |
+        pnpm run test
+
+  test-mean-squares-versor-registration:
+    name: mean-squares-versor-registration
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        large-packages: false
+        tool-cache: true
+
+    - uses: nick-fields/retry@v3
+      with:
+        max_attempts: 5
+        timeout_minutes: 10
+        command: ./src/docker/pull.sh --no-debug
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+
+    - name: Install
+      uses: pnpm/action-setup@v5
+      with:
+        run_install: true
+
+    - name: Build dependencies
+      run: |
+        pnpm run --filter '@itk-wasm/image-io...' build
+
+    - name: Build
+      working-directory: ./examples/mean-squares-versor-registration
+      run: |
+        pnpm build
+
+    - name: Test WASI
+      working-directory: ./examples/mean-squares-versor-registration
+      run: |
+        pnpm test
+
+    - name: Build TypeScript
+      working-directory: ./examples/mean-squares-versor-registration/typescript
+      run: |
+        pnpm build
+
+  test-deno-example:
+    name: deno
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: ./examples/deno
+
+    steps:
+    - uses: actions/checkout@v6.0.2
+
+    - uses: denoland/setup-deno@v2
+      with:
+        deno-version: v2.x
+
+    - name: Test
+      run: |
+        deno task test

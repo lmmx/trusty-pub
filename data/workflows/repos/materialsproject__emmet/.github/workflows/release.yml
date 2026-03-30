@@ -1,0 +1,43 @@
+name: release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    strategy:
+      max-parallel: 1
+      matrix:
+        package: ["emmet-core", "emmet-builders", "emmet-api"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip build
+          pip install --upgrade setuptools setuptools_scm wheel
+
+      - name: Build packages
+        run: python -m build
+        working-directory: ./${{ matrix.package }}/
+
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          packages-dir: ./${{ matrix.package }}/dist/
+
+  trigger-docs:
+    if: github.repository_owner == 'materialsproject' && github.event.release.prerelease == false
+    needs:
+      - deploy
+    uses: ./.github/workflows/docs.yml

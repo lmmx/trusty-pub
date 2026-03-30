@@ -1,0 +1,71 @@
+name: iwyu-linux-x86
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-iwyu-linux-x86:
+    name: IWYU (Linux x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Linux x86_64 - IWYU"
+        uname -a
+        python --version
+
+    - name: Download and install toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      timeout-minutes: 20
+
+    - name: Purge old IWYU installation (force re-download with new archives)
+      run: |
+        rm -rf ~/.clang-tool-chain/iwyu
+        rm -rf ~/.clang-tool-chain/downloads/iwyu*
+        echo "Purged old IWYU installation and cached archives to force fresh download"
+      shell: bash
+
+    - name: Trigger IWYU download
+      run: |
+        echo "Triggering IWYU download by calling include-what-you-use --version"
+        uv run include-what-you-use --version || echo "IWYU version check failed (expected)"
+      shell: bash
+
+    - name: Debug IWYU installation
+      run: |
+        echo "=== IWYU Installation Structure ==="
+        ls -laR ~/.clang-tool-chain/iwyu/ || echo "IWYU dir not found"
+        echo "=== Checking for lib directory ==="
+        ls -la ~/.clang-tool-chain/iwyu/*/lib/ || echo "lib dir not found"
+        echo "=== Checking IWYU binary ==="
+        file ~/.clang-tool-chain/iwyu/*/bin/include-what-you-use || echo "IWYU binary not found"
+        echo "=== Testing IWYU with LD_LIBRARY_PATH ==="
+        export LD_LIBRARY_PATH=~/.clang-tool-chain/iwyu/*/lib:$LD_LIBRARY_PATH
+        ldd ~/.clang-tool-chain/iwyu/*/bin/include-what-you-use || echo "ldd failed"
+      shell: bash
+
+    - name: Run IWYU tests
+      run: |
+        uv run pytest tests/test_iwyu.py -v

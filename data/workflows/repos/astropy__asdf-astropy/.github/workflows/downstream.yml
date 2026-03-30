@@ -1,0 +1,58 @@
+name: Downstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run every Monday at 6am UTC
+    - cron: '0 6 * * 1'
+  pull_request:
+    # We also want this workflow triggered if the `Downstream CI` label is
+    # added or present when PR is updated
+    types:
+      - synchronize
+      - labeled
+  push:
+    branches:
+      - main
+      - '*.x'
+    tags:
+      - "*"
+
+permissions:
+  contents: read
+
+
+jobs:
+  astropy:
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@99401c364fa51c9c507d3cd6d272049278ac0b2c  # v2.4.0
+    if: (github.repository == 'astropy/asdf-astropy' && (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'Downstream CI')))
+    with:
+      submodules: false
+      # Any env name which does not start with `pyXY` will use this Python version.
+      default_python: '3.12'
+      envs: |
+        - linux: specutils
+
+  stsci:
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@99401c364fa51c9c507d3cd6d272049278ac0b2c  # v2.4.0
+    if: (github.repository == 'astropy/asdf-astropy' && (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'Downstream CI')))
+    with:
+      submodules: false
+      # Any env name which does not start with `pyXY` will use this Python version.
+      default_python: '3.12'
+      envs: |
+        - linux: gwcs
+        - linux: jwst
+        - linux: stdatamodels
+        - linux: roman_datamodels
+
+  third-party:
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@99401c364fa51c9c507d3cd6d272049278ac0b2c  # v2.4.0
+    if: (github.repository == 'astropy/asdf-astropy' && (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'Downstream CI')))
+    with:
+      submodules: false
+      # Any env name which does not start with `pyXY` will use this Python version.
+      default_python: '3.12'
+      envs: |
+        - linux: sunpy
+        - linux: dkist

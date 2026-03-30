@@ -1,0 +1,69 @@
+name: GNU/Linux Build
+
+# Controls when the action will run. Triggers the workflow on push or
+# pull request events but only for the master branch
+on: [push, pull_request]
+
+env:
+  PYKCS11LIB: /usr/lib/softhsm/libsofthsm2.so
+
+# A workflow run is made up of one or more jobs that can run
+# sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of
+    # the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job
+      # can access it
+      - uses: actions/checkout@v6
+
+      - name: setup prerequisites (linux)
+        shell: bash
+        run: sudo apt install python3-all-dev python3-setuptools softhsm2 swig tox
+
+      - name: Build
+        run: |
+          python3 -m venv temp
+          source temp/bin/activate
+          pip3 install -r dev-requirements.txt
+          make
+
+      - name: Test
+        shell: bash
+        run: |
+          sudo chmod -R a+rx /etc/softhsm
+          sudo chmod a+r /etc/softhsm/softhsm2.conf
+          sudo chown -R "$(whoami)" /var/lib/softhsm
+          softhsm2-util --init-token --slot 0 --label "A token" --pin 1234 --so-pin 123456
+          source temp/bin/activate
+          make install
+          # test_symetric_ECC blocks on GNU/Linux for now
+          ./run_test.py
+
+      - name: pylint
+        run: |
+          source temp/bin/activate
+          make pylint
+
+      - name: tox
+        shell: bash
+        run: |
+          ./get_PYKCS11LIB.py > tox.env
+          tox -e py312
+
+      - name: coverage
+        shell: bash
+        run: |
+          source temp/bin/activate
+          coverage erase
+          coverage run -m unittest discover
+          coverage report
+
+      - name: Covealls
+        uses: AndreMiras/coveralls-python-action@develop
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

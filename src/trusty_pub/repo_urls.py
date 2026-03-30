@@ -24,7 +24,9 @@ def _extract_github_url(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     return df.with_columns(
-        pl.coalesce(from_project_urls, from_home_page).alias("github_url"),
+        pl.coalesce(from_project_urls, from_home_page)
+        .str.replace(r"^http://github\.com", "https://github.com")
+        .alias("github_url"),
     )
 
 

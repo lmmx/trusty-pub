@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "master"
+  pull_request:
+    branches:
+      - "master"
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', 'pypy-3.11', '3.11', '3.12', '3.13', '3.14']
+        exclude:
+        - os: macos-latest
+          python-version: 'pypy-3.11'
+        - os: windows-latest
+          python-version: 'pypy-3.11'
+    defaults:
+      run:
+        shell: bash
+
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONIOENCODING: UTF-8
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Set Up Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+
+      - if: ${{ ! startsWith(matrix.python-version, 'pypy-') }}
+        run: make check
+
+      - if: ${{ ! startsWith(matrix.python-version, 'pypy-') }}
+        run: make typing
+
+      - name: Tests
+        run: make tests
+
+      - uses: codecov/codecov-action@v4
+        with:
+          flags: unittests
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+          verbose: true

@@ -1,0 +1,40 @@
+name: Skipped Flaky Tests Report
+
+on:
+  schedule:
+    # Run every Monday and Thursday at 6 AM Eastern Time (EST)
+    - cron: '0 11 * * 1,4'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to run the workflow on"
+        required: true
+        default: "main"
+        type: string
+
+
+jobs:
+  flaky-tests:
+    name: Run Skipped Flaky Tests Report
+    if: github.event_name != 'schedule' || github.event.repository.fork == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.branch }}
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          python-version: '3.11'
+
+      - name: Run flaky tests report script
+        run: python scripts/report_skipped_flaky.py
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: flaky-tests-report
+          path: flaky_tests_report.json
+          retention-days: 7

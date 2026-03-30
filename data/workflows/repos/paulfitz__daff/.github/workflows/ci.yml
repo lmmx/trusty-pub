@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 23]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.4
+
+      - name: Display Haxe version
+        run: haxe -version
+
+      - name: Install Haxe libraries
+        run: |
+          haxelib install hx3compat
+
+      - name: Set up Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Check Node.js version
+        run: node -v
+
+      - name: Install Node.js dependencies
+        run: npm install
+
+      - name: Conditionally install better-sqlite3 for Node < 23
+        run: |
+          NODE_VERSION=$(node -v | sed 's/v\([0-9]*\).*/\1/')
+          if [ "$NODE_VERSION" -lt 23 ]; then
+            echo "Installing better-sqlite3 for Node.js v$NODE_VERSION"
+            npm install better-sqlite3
+          else
+            echo "Skipping better-sqlite3 for Node.js v$NODE_VERSION"
+          fi
+
+      - name: Build js
+        run: make js
+
+      - name: Run js tests
+        run: |
+          make test
+          make ntest_js
+
+      - name: Build py
+        run: make py
+
+      - name: Run py tests
+        run: make ntest_py
+
+      - name: Build php
+        run: make php
+
+      - name: Run php tests
+        run: make ntest_php

@@ -1,0 +1,124 @@
+name: Core integration tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_version:
+        description: 'The docker image tag for the firebolt core'
+        required: false
+        type: string
+      python_version:
+        description: 'Python version'
+        required: false
+        type: string
+        default: '3.10'
+      os_name:
+        description: 'The operating system'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+  workflow_call:
+    inputs:
+      tag_version:
+        description: 'The docker image tag for the firebolt core'
+        required: false
+        type: string
+      python_version:
+        description: 'Python version'
+        required: false
+        type: string
+        default: '3.10'
+      os_name:
+        description: 'Operating system'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      sendSlackNotifications:
+        description: 'Send Slack notifications on failure'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      SLACK_BOT_TOKEN:
+        required: false
+jobs:
+  run-core-integration-tests:
+    runs-on: ${{ inputs.os_name }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: 'firebolt-db/firebolt-python-sdk'
+
+      - name: Setup Firebolt Core
+        id: setup-core
+        uses: firebolt-db/action-setup-core@eabcd701de0be41793fda0655d29d46c70c847c2 # main
+        with:
+          tag_version: ${{ inputs.tag_version || vars.DEFAULT_CORE_IMAGE_TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Run integration tests HTTP
+        env:
+          SERVICE_ID: ${{ secrets.FIREBOLT_CLIENT_ID_STG_NEW_IDN }}
+          SERVICE_SECRET: ${{ secrets.FIREBOLT_CLIENT_SECRET_STG_NEW_IDN }}
+          DATABASE_NAME: "firebolt"
+          ENGINE_NAME: ""
+          STOPPED_ENGINE_NAME: ""
+          API_ENDPOINT: ""
+          ACCOUNT_NAME: ""
+          CORE_URL: ${{ steps.setup-core.outputs.service_url }}
+        run: |
+          pytest -o log_cli=true -o log_cli_level=WARNING tests/integration -k "core"  --alluredir=allure-results/
+
+      - name: Run integration tests HTTPS
+        env:
+          SERVICE_ID: ${{ secrets.FIREBOLT_CLIENT_ID_STG_NEW_IDN }}
+          SERVICE_SECRET: ${{ secrets.FIREBOLT_CLIENT_SECRET_STG_NEW_IDN }}
+          DATABASE_NAME: "firebolt"
+          ENGINE_NAME: ""
+          STOPPED_ENGINE_NAME: ""
+          API_ENDPOINT: ""
+          ACCOUNT_NAME: ""
+          CORE_URL: ${{ steps.setup-core.outputs.service_https_url }}
+        run: |
+          pytest -o log_cli=true -o log_cli_level=WARNING tests/integration -k "core"  --alluredir=allure-results-https/
+
+       # Need to pull the pages branch in order to fetch the previous runs
+      - name: Get Allure history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: always()
+        continue-on-error: true
+        with:
+            ref: gh-pages
+            path: gh-pages
+
+      - name: Allure Report
+        uses: firebolt-db/action-allure-report@781b4529b67b4f393c63d7dc1e098cb558e1ab16 # v1.4.1
+        if: always()
+        continue-on-error: true
+        with:
+          github-key: ${{ secrets.GITHUB_TOKEN }}
+          test-type: core
+          allure-dir: allure-results
+          pages-branch: gh-pages
+          repository-name: python-sdk
+
+      - name: Allure Report HTTPS
+        uses: firebolt-db/action-allure-report@781b4529b67b4f393c63d7dc1e098cb558e1ab16 # v1.4.1
+        if: always()
+        continue-on-error: true
+        with:
+          github-key: ${{ secrets.GITHUB_TOKEN }}
+          test-type: core_https
+          allure-dir: allure-results-https
+          pages-branch: gh-pages
+          repository-name: python-sdk

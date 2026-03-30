@@ -1,0 +1,57 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout-code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: prepare-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+
+      - name: install-poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.2.1
+
+      - name: build-package
+        run: |
+          poetry build
+
+      - name: upload-build-artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/yaspin
+    permissions:
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+
+    steps:
+      - name: download-build-artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: python-package-distributions
+          path: dist/
+   
+      - name: publish-to-pypi
+        uses: pypa/gh-action-pypi-publish@release/v1

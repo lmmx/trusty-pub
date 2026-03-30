@@ -1,0 +1,48 @@
+---
+name: Documentation
+
+"on":
+  schedule:
+    - cron: "0 0 * * 0" # every week at midnight
+  push:
+    paths:
+      - "**.md"
+      - "docs/**"
+      - ".github/workflows/documentation.yml"
+  pull_request:
+    paths:
+      - "**.md"
+      - "docs/**"
+      - ".github/workflows/documentation.yml"
+
+jobs:
+  docs:
+    name: Build documentation & check links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Upgrade pip
+        run: |
+          pip install --force-reinstall --constraint=.github/workflows/constraints.txt pip pipx
+          pip --version
+      - name: Install Poetry
+        run: |
+          pipx install --pip-args=--constraint=.github/workflows/python-constraints.txt poetry
+          poetry --version
+      - name: Install Nox
+        run: |
+          pipx install --pip-args=--constraint=.github/workflows/constraints.txt nox
+          pipx inject --pip-args=--constraint=.github/workflows/constraints.txt nox nox-poetry
+          nox --version
+      - name: Build documentation
+        run: nox --force-color --session=docs-build
+
+      - name: Upload documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: docs/_build

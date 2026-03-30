@@ -1,0 +1,100 @@
+---
+name: Release
+on:
+  push:
+    tags:
+    - '*.*.*'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        type: boolean
+        description: Do not deploy to PyPI
+        default: true
+jobs:
+  build-sdist:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+    - run: pip install setuptools
+    - run: python setup.py sdist --verbose
+    - uses: actions/upload-artifact@v7
+      with:
+        name: arc4-sdist
+        path: dist/arc4-*.tar.gz
+  build-wheels:
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - macOS-12
+        - windows-2019
+        python-version:
+        - '3.9'
+        - '3.10'
+        - '3.11'
+        - '3.12'
+        - '3.13'
+        - 'pypy-3.9'
+        - 'pypy-3.10'
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "${{ matrix.python-version }}"
+    - run: pip install setuptools wheel
+    - run: python setup.py bdist_wheel
+    - uses: actions/upload-artifact@v7
+      with:
+        name: arc4-wheels-${{ matrix.os }}-${{ matrix.python-version }}
+        path: dist/*whl
+  build-manylinux-wheels:
+    runs-on: ubuntu-24.04
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+        - cp39-cp39
+        - cp310-cp310
+        - cp311-cp311
+        - cp312-cp312
+        - cp313-cp313
+        - pp39-pypy39_pp73
+        - pp310-pypy310_pp73
+    steps:
+    - uses: actions/checkout@v6
+    - run: pip install setuptools
+    - run: /opt/python/${{ matrix.python-version }}/bin/pip wheel .
+    - run: auditwheel repair arc4-*-linux*.whl --plat manylinux_2_28_x86_64
+    - uses: actions/upload-artifact@v7
+      with:
+        name: arc4-wheels-manylinux-${{ matrix.python-version }}
+        path: wheelhouse/arc4-*-manylinux*.whl
+  deploy:
+    if: ${{ github.event_name == 'push' || github.event.inputs.dry-run != 'true' }}
+    needs:
+    - build-sdist
+    - build-wheels
+    - build-manylinux-wheels
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+    - run: pip install twine
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: arc4-*
+        merge-multiple: true
+        path: artifact
+    - run: twine upload --verbose artifact/*
+      env:
+        TWINE_NON_INTERACTIVE: 1
+        TWINE_REPOSITORY_URL: https://upload.pypi.org/legacy/
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}

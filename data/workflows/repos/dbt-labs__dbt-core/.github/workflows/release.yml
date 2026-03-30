@@ -1,0 +1,283 @@
+# **what?**
+# Release workflow provides the following steps:
+# - checkout the given commit;
+# - validate version in sources and changelog file for given version;
+# - bump the version and generate a changelog if needed;
+# - merge all changes to the target branch if needed;
+# - run unit and integration tests against given commit;
+# - build and package that SHA;
+# - release it to GitHub and PyPI with that specific build;
+# - release it to Docker
+#
+# **why?**
+# Ensure an automated and tested release process
+#
+# **when?**
+# This workflow can be run manually on demand or can be called by other workflows
+
+name: "Release to GitHub, PyPI & Docker"
+run-name: "Release ${{ inputs.version_number }} to GitHub, PyPI & Docker"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "The branch to release from"
+        type: string
+        required: true
+      version_number:
+        description: "The release version number (i.e. 1.0.0b1)"
+        type: string
+        required: true
+      test_run:
+        description: "Test run (Publish release as draft)"
+        type: boolean
+        default: true
+        required: false
+      nightly_release:
+        description: "Nightly release to dev environment"
+        type: boolean
+        default: false
+        required: false
+      only_docker:
+        description: "Only release Docker image, skip GitHub & PyPI"
+        type: boolean
+        default: false
+        required: false
+  workflow_call:
+    inputs:
+      target_branch:
+        description: "The branch to release from"
+        type: string
+        required: true
+      version_number:
+        description: "The release version number (i.e. 1.0.0b1)"
+        type: string
+        required: true
+      test_run:
+        description: "Test run (Publish release as draft)"
+        type: boolean
+        default: true
+        required: false
+      nightly_release:
+        description: "Nightly release to dev environment"
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: write # this is the permission that allows creating a new release
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  MIN_HATCH_VERSION: "1.11.0"
+
+jobs:
+  job-setup:
+    name: Log Inputs
+    runs-on: ${{ vars.UBUNTU_LATEST }}
+    outputs:
+      use_hatch: ${{ steps.use_hatch.outputs.use_hatch }}
+    steps:
+      - name: "[DEBUG] Print Variables"
+        run: |
+          echo Inputs
+          echo The branch to release from:         ${{ inputs.target_branch }}
+          echo The release version number:         ${{ inputs.version_number }}
+          echo Test run:                           ${{ inputs.test_run }}
+          echo Nightly release:                    ${{ inputs.nightly_release }}
+          echo Only Docker:                        ${{ inputs.only_docker }}
+
+      # In version env.HATCH_VERSION we started to use hatch for build tooling.  Before that we used setuptools.
+      # This needs to check if we're using hatch or setuptools based on the version being released.  We should
+      # check if the version is greater than or equal to env.HATCH_VERSION.  If it is, we use hatch, otherwise we use setuptools.
+      - name: "Check if using hatch"
+        id: use_hatch
+        run: |
+          # Extract major.minor from versions like 1.11.0a1 -> 1.11
+          INPUT_MAJ_MIN=$(echo "${{ inputs.version_number }}" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
+          HATCH_MAJ_MIN=$(echo "${{ env.MIN_HATCH_VERSION }}" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
+
+          if [ $(echo "$INPUT_MAJ_MIN >= $HATCH_MAJ_MIN" | bc) -eq 1 ]; then
+            echo "use_hatch=true" >> $GITHUB_OUTPUT
+          else
+            echo "use_hatch=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "Notify if using hatch"
+        run: |
+          if [ ${{ steps.use_hatch.outputs.use_hatch }} = "true" ]; then
+            echo "::notice title="Using Hatch": $title::Using Hatch for release"
+          else
+            echo "::notice title="Using Setuptools": $title::Using Setuptools for release"
+          fi
+
+  bump-version-generate-changelog:
+    name: Bump package version, Generate changelog
+    needs: [job-setup]
+    if: ${{ !inputs.only_docker }}
+
+    uses: dbt-labs/dbt-release/.github/workflows/release-prep.yml@main
+
+    with:
+      version_number: ${{ inputs.version_number }}
+      hatch_directory: "core"
+      target_branch: ${{ inputs.target_branch }}
+      env_setup_script_path: "scripts/env-setup.sh"
+      test_run: ${{ inputs.test_run }}
+      nightly_release: ${{ inputs.nightly_release }}
+      use_hatch: ${{ needs.job-setup.outputs.use_hatch == 'true' }} # workflow outputs are strings...
+
+    secrets: inherit
+
+  log-outputs-bump-version-generate-changelog:
+    name: "[Log output] Bump package version, Generate changelog"
+    if: ${{ !failure() && !cancelled() && !inputs.only_docker }}
+
+    needs: [bump-version-generate-changelog]
+
+    runs-on: ${{ vars.UBUNTU_LATEST }}
+
+    steps:
+      - name: Print variables
+        run: |
+          echo Final SHA     : ${{ needs.bump-version-generate-changelog.outputs.final_sha }}
+          echo Changelog path: ${{ needs.bump-version-generate-changelog.outputs.changelog_path }}
+
+  build-test-package:
+    name: Build, Test, Package
+    if: ${{ !failure() && !cancelled() && !inputs.only_docker }}
+    needs: [job-setup, bump-version-generate-changelog]
+
+    uses: dbt-labs/dbt-release/.github/workflows/build.yml@main
+
+    with:
+      sha: ${{ needs.bump-version-generate-changelog.outputs.final_sha }}
+      version_number: ${{ inputs.version_number }}
+      hatch_directory: "core"
+      changelog_path: ${{ needs.bump-version-generate-changelog.outputs.changelog_path }}
+      build_script_path: "scripts/build-dist.sh"
+      package_test_command: "dbt --version"
+      test_run: ${{ inputs.test_run }}
+      nightly_release: ${{ inputs.nightly_release }}
+      use_hatch: ${{ needs.job-setup.outputs.use_hatch == 'true' }} # workflow outputs are strings...
+
+  github-release:
+    name: GitHub Release
+    if: ${{ !failure() && !cancelled() && !inputs.only_docker }}
+
+    needs: [job-setup, bump-version-generate-changelog, build-test-package]
+
+    uses: dbt-labs/dbt-release/.github/workflows/github-release.yml@main
+
+    with:
+      sha: ${{ needs.bump-version-generate-changelog.outputs.final_sha }}
+      version_number: ${{ inputs.version_number }}
+      changelog_path: ${{ needs.bump-version-generate-changelog.outputs.changelog_path }}
+      test_run: ${{ inputs.test_run }}
+      use_hatch: ${{ needs.job-setup.outputs.use_hatch == 'true' }} # workflow outputs are strings...
+
+  pypi-release:
+    name: PyPI Release
+
+    needs: [job-setup, github-release]
+
+    uses: dbt-labs/dbt-release/.github/workflows/pypi-release.yml@main
+
+    with:
+      version_number: ${{ inputs.version_number }}
+      test_run: ${{ inputs.test_run }}
+      use_hatch: ${{ needs.job-setup.outputs.use_hatch == 'true' }} # workflow outputs are strings...
+
+    secrets:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      TEST_PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+
+  determine-docker-package:
+    # dbt-postgres exists within dbt-core for versions 1.7 and earlier but is a separate package for 1.8 and later.
+    # determine if we need to release dbt-core or both dbt-core and dbt-postgres
+    name: Determine Docker Package
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ${{ vars.UBUNTU_LATEST }}
+    needs: [pypi-release]
+    outputs:
+      matrix: ${{ steps.determine-docker-package.outputs.matrix }}
+    steps:
+      - name: "Audit Version And Parse Into Parts"
+        id: semver
+        uses: dbt-labs/actions/parse-semver@v1
+        with:
+          version: ${{ inputs.version_number }}
+
+      - name: "Determine Packages to Release"
+        id: determine-docker-package
+        run: |
+          if [ ${{ steps.semver.outputs.minor }} -ge 8 ]; then
+            json_output={\"package\":[\"dbt-core\"]}
+          else
+            json_output={\"package\":[\"dbt-core\",\"dbt-postgres\"]}
+          fi
+          echo "matrix=$json_output" >> $GITHUB_OUTPUT
+
+  docker-release:
+    name: "Docker Release for ${{ matrix.package }}"
+    needs: [determine-docker-package]
+    # We cannot release to docker on a test run because it uses the tag in GitHub as
+    # what we need to release but draft releases don't actually tag the commit so it
+    # finds nothing to release
+    if: ${{ !failure() && !cancelled() && (!inputs.test_run || inputs.only_docker) }}
+    strategy:
+      matrix: ${{fromJson(needs.determine-docker-package.outputs.matrix)}}
+
+    permissions:
+      packages: write
+
+    uses: dbt-labs/dbt-release/.github/workflows/release-docker.yml@main
+    with:
+      package: ${{ matrix.package }}
+      version_number: ${{ inputs.version_number }}
+      test_run: ${{ inputs.test_run }}
+
+  slack-notification:
+    name: Slack Notification
+    if: ${{ failure() && (!inputs.test_run || inputs.nightly_release) }}
+
+    needs:
+      [
+        bump-version-generate-changelog,
+        build-test-package,
+        github-release,
+        pypi-release,
+        docker-release,
+      ]
+
+    uses: dbt-labs/dbt-release/.github/workflows/slack-post-notification.yml@main
+    with:
+      status: "failure"
+
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEV_CORE_ALERTS }}
+
+  testing-slack-notification:
+    # sends notifications to #slackbot-test
+    name: Testing - Slack Notification
+    if: ${{ failure() && inputs.test_run && !inputs.nightly_release }}
+
+    needs:
+      [
+        bump-version-generate-changelog,
+        build-test-package,
+        github-release,
+        pypi-release,
+        docker-release,
+      ]
+
+    uses: dbt-labs/dbt-release/.github/workflows/slack-post-notification.yml@main
+    with:
+      status: "failure"
+
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_TESTING_WEBHOOK_URL }}

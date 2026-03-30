@@ -1,0 +1,163 @@
+---
+name: Release
+
+on:
+    schedule:
+        - cron: 0 4 * * *
+    workflow_dispatch:
+        inputs:
+            force:
+                description: force build
+                required: true
+                type: boolean
+                default: false
+
+jobs:
+    modify:
+        name: Modifying source code
+        runs-on: ubuntu-latest
+        outputs:
+            new_commits: ${{ steps.update.outputs.new_commits }}
+        steps:
+            - uses: actions/checkout@v6
+              with:
+                  submodules: true
+            - name: Update submodule
+              continue-on-error: true
+              id: update
+              env:
+                  FORCE_BUILD: ${{ github.event.inputs.force }}
+              run: |
+                  git submodule update --remote upstream
+                  git config user.name "Sophie Keller"
+                  git config user.email 90475612+skeller00@users.noreply.github.com
+                  if git commit -am "Committing changes from upstream"; then
+                    echo "new_commits=true" >> $GITHUB_OUTPUT
+                    git push
+                  else
+                    echo "There are no new commits, I'll go back to sleep :sleeping:" >> $GITHUB_STEP_SUMMARY
+                    echo "new_commits=$FORCE_BUILD" >> $GITHUB_OUTPUT
+                  fi
+            - name: Running modifications
+              if: steps.update.outputs.new_commits == 'true'
+              run: |
+                  sed -i \
+                    -e "s/version=version/version=\"$(date +%Y.%m.%d)\"/g" upstream/setup.py \
+                  upstream/setup.py
+                  sed -i \
+                    -e "s/name = snowflake-connector-python/name= snowflake-connector-python-nightly/" \
+                    -e "s/description = .*/description = Nigthly build of Snowflake Connector for Python/" \
+                    -e "s/Source=.*/Source=https:\/\/github.com\/keller00\/snowflake-connector-python-nightlies\//" \
+                  upstream/setup.cfg
+            - uses: actions/upload-artifact@v7
+              if: steps.update.outputs.new_commits == 'true'
+              with:
+                  name: modified_source
+                  path: upstream
+    build-sdist:
+        name: Build sdist
+        runs-on: ubuntu-latest
+        needs: modify
+        if: needs.modify.outputs.new_commits == 'true' && needs.modify.result == 'success'
+        steps:
+            - uses: actions/setup-python@v6
+              with:
+                  python-version: 3.x
+            - uses: actions/download-artifact@v8
+              with:
+                  name: modified_source
+            - name: Install build tool
+              run: python -m pip install build
+            - name: Build sdist
+              run: python -m build --sdist --outdir dist
+            - name: Show built sdist
+              run: ls -lh dist
+            - uses: actions/upload-artifact@v7
+              with:
+                  path: dist
+                  name: sdist
+
+    build-wheel:
+        name: Build ${{ matrix.os }} py${{ matrix.python }}
+        runs-on: ${{ matrix.os }}-latest
+        needs: modify
+        if: needs.modify.outputs.new_commits == 'true' && needs.modify.result == 'success'
+        defaults:
+            run:
+                shell: bash
+        strategy:
+            matrix:
+                os: [windows, macos, ubuntu]
+                python: ['39', '310', '311', '312', '313']
+        steps:
+            - uses: actions/download-artifact@v8
+              with:
+                  name: modified_source
+            - if: matrix.os == 'ubuntu'
+              uses: docker/setup-qemu-action@v4
+              with:
+                  # xref https://github.com/docker/setup-qemu-action/issues/188
+                  # xref https://github.com/tonistiigi/binfmt/issues/215
+                  image: tonistiigi/binfmt:qemu-v8.1.5
+                  platforms: all
+            - uses: pypa/cibuildwheel@v2.23.3
+              env:
+                  CIBW_SKIP: '*-musllinux*'
+                  CIBW_BUILD: cp${{ matrix.python }}-*
+                  CIBW_ARCHS_MACOS: x86_64 arm64 universal2
+                  CIBW_ARCHS_WINDOWS: AMD64
+                  CIBW_ARCHS_LINUX: x86_64 aarch64
+                  MACOSX_DEPLOYMENT_TARGET: 10.14
+              with:
+                  output-dir: dist
+            - name: Show built wheels
+              run: ls -lh dist
+            - uses: actions/upload-artifact@v7
+              with:
+                  path: dist
+                  name: wheel-${{ matrix.os }}-py${{ matrix.python }}
+    release:
+        name: Release built wheels
+        runs-on: ubuntu-latest
+        needs: [build-wheel, build-sdist]
+        if: needs.build-wheel.result == 'success' && needs.build-sdist.result == 'success'
+        permissions:
+            # IMPORTANT: this permission is mandatory for trusted publishing
+            id-token: write
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-python@v6
+              with:
+                  python-version: 3.x
+            - uses: actions/download-artifact@v8
+              with:
+                  path: dist
+                  pattern: wheel-*
+                  merge-multiple: true
+            - uses: actions/download-artifact@v8
+              with:
+                  name: sdist
+                  path: dist
+            - name: Show all built artifacts
+              run: ls -lh dist
+            - name: Publish a Python distribution to PyPI
+              continue-on-error: true
+              id: upload
+              uses: pypa/gh-action-pypi-publish@release/v1
+              with:
+                  attestations: false
+            # - name: Make space
+            #   if: steps.upload.outcome == 'failure'
+            #   shell: bash
+            #   run: |
+            #       pip install -r scripts/requirements.txt
+            #       python scripts/delete_old_releases.py 2
+            #   env:
+            #       PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
+            #       PYPI_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+            # - name: Publish a Python distribution to PyPI again
+            #   id: upload2
+            #   if: steps.upload.outcome == 'failure'
+            #   uses: pypa/gh-action-pypi-publish@release/v1
+            #   with:
+            #       attestations: false

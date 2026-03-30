@@ -1,0 +1,71 @@
+# CI/CD Workflow Guidelines
+
+## Security: Pin Actions by Commit Hash
+
+**ALWAYS pin GitHub Actions to specific commit SHAs** instead of version tags for enhanced security. This prevents supply chain attacks where tags could be moved to malicious commits.
+
+Example:
+
+```yaml
+# Correct - Pinned by hash with version comment
+- uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # 5.0.0
+- uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # 4.6.2
+
+# Incorrect - Using version tag
+- uses: actions/checkout@v4
+- uses: actions/upload-artifact@v4.6.2
+```
+
+The comment after the hash helps maintainability by showing which version is pinned.
+
+## Reusable Workflow Pattern
+
+- Main `ci.yml` calls separate workflows (`lint.yml`, `test.yml`, etc.)
+- Extract actual logic into separate workflows that `ci.yml` calls
+- Use `uses: ./.github/workflows/workflow-name.yml` pattern
+
+## Required Checks Pattern
+
+- All workflows must pass before merge via "Check required jobs" pattern
+- Update the `required` job dependencies when adding new workflows
+- Branch protection relies on this "Check required jobs" validation
+
+## Test Matrix Requirements
+
+- Test matrix should cover primary platforms (Ubuntu, macOS, Windows)
+- Consider impact on binary distribution pipeline
+- Cross-platform testing is essential
+
+## Branch Protection
+
+- Main branches (`master`, `1.x`, `release/**`) are protected
+- Merge strategy: Primarily squash merging, some rebase merging allowed
+- Restrict pushes to protected branches (force use of PRs)
+
+## Adding New Workflows
+
+When adding new CI checks:
+
+1. Create separate reusable workflow file
+2. Call it from main `ci.yml`
+3. Add to `required` job dependencies
+4. Test across platform matrix
+
+## Specific Workflows
+
+- `lint.yml`: Rustfmt, Clippy, cross-platform
+- `test.yml`: Rust tests with feature matrix
+- `test_node.yml`: JavaScript/Node.js tests
+- `swift-test.yml`: Apple catalog parsing tests
+
+## Release Process
+
+- Uses `.craft.yml` for release automation
+- Platform-specific binary builds
+- npm package publishing coordination
+- Docker image releases (edge/latest tags)
+
+## Environment Variables in CI
+
+- `RUSTFLAGS: -Dwarnings` enforced in CI
+- Cross-platform matrix: Ubuntu 24.04, macOS 14, Windows 2022

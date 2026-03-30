@@ -1,0 +1,71 @@
+name: Build and publish Ruby gem
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# https://github.com/oxidize-rb/actions/tree/main/cross-gem
+# https://github.com/gjtorikian/commonmarker/blob/main/.github/workflows/tag_and_release.yml
+# https://github.com/yettoapp/actions/blob/main/.github/workflows/ruby_gem_release.yml
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        platform:
+        - x86_64-linux
+        - aarch64-linux
+        - x86_64-darwin
+        - arm64-darwin
+        - x64-mingw-ucrt
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Patches
+      run: |
+        # Name must match or else `RbSys::PackageNotFoundError: Could not find Cargo package metadata for nil. Please check that nil matches the crate name in your Cargo.toml.`
+        # We edit it here instead of just updating our repo code as Cargo workspace names must be different.
+        sed -i 's%^name = ".*$%name = "minify_html"%' ./minify-html-ruby/ext/minify_html/Cargo.toml
+
+        # rb-sys-dock doesn't support local path deps: https://github.com/oxidize-rb/rb-sys/issues/296
+        ver=$(jq -r .version minify-html-nodejs/package.json)
+        sed -i 's%^minify-html = .*$%minify-html = "'$ver'"%' ./minify-html-ruby/ext/minify_html/Cargo.toml
+
+        # This is required or else `error: could not find `Cargo.toml` in `/home/runner/work/.../minify-html-ruby` or any parent directory`.
+        cat <<'EOD'>./minify-html-ruby/Cargo.toml
+        [workspace]
+        members = ["ext/minify_html"]
+        EOD
+
+        cp ./README.md ./minify-html-ruby/.
+
+    - name: Set up Ruby and Rust
+      uses: oxidize-rb/actions/setup-ruby-and-rust@main
+      with:
+        ruby-version: "3.4"
+        bundler-cache: false
+        cargo-cache: true
+        cargo-vendor: true
+        cache-version: v0-${{ matrix.platform }}
+
+    - name: Cross compile
+      id: gem
+      uses: oxidize-rb/actions/cross-gem@v1
+      with:
+        platform: ${{ matrix.platform }}
+        ruby-versions: "2.7,3.0,3.1,3.2,3.3,3.4"
+        working-directory: ./minify-html-ruby
+
+    - name: Publish gem
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        mkdir -p "$HOME/.gem"
+        cat << 'EOF' > "$HOME/.gem/credentials"
+        ---
+        :rubygems_api_key: ${{ secrets.RUBYGEMS_API_KEY }}
+        EOF
+        chmod 0600 "$HOME/.gem/credentials"
+        gem push ${{ steps.gem.outputs.gem-path }}

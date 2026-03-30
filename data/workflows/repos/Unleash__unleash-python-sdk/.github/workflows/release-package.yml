@@ -1,0 +1,39 @@
+name: Release package
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          make install
+      - name: Build package
+        run: |
+          make build
+      - name: Publish package to Pypi
+        uses: pypa/gh-action-pypi-publish@release/v1
+        env:
+          repository-url: https://pypi.org/project/UnleashClient/
+      - name: Build docs
+        run: |
+          make install-docs
+          cd docs
+          make html
+      - name: Deploy docs
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/_build/html

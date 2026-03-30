@@ -1,0 +1,29 @@
+name: Check nitypes
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  check_nitypes:
+    name: Check nitypes
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        # Type checking requires an up-to-date NumPy.
+        # The latest NumPy only supports 3.11 and later
+        python-version: [3.11, 3.14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up Python
+        uses: ni/python-actions/setup-python@aa64e60612cb078b0c2ada666becbd70d4817d55 # v0.7.1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up Poetry
+        uses: ni/python-actions/setup-poetry@aa64e60612cb078b0c2ada666becbd70d4817d55 # v0.7.1
+      - name: Analyze Python project
+        uses: ni/python-actions/analyze-project@aa64e60612cb078b0c2ada666becbd70d4817d55 # v0.7.1
+      - name: Bandit security checks
+        run:  poetry run bandit -c pyproject.toml -r src/nitypes

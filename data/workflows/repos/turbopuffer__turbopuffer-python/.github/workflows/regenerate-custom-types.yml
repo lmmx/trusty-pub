@@ -1,0 +1,42 @@
+name: Regenerate Custom Types
+
+on:
+  push:
+    branches:
+      - next
+      - preview/**
+
+jobs:
+  regenerate:
+    name: regenerate custom types
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.10.2'
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Regenerate custom types
+        run: ./scripts/gen
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/turbopuffer/types/custom.py
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: regenerate custom types"
+            git push
+          else
+            echo "No changes to custom types"
+          fi

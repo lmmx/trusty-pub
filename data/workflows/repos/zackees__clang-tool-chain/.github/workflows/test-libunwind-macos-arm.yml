@@ -1,0 +1,97 @@
+name: libunwind-macos-arm
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-libunwind-macos-arm:
+    name: Libunwind (macOS ARM64)
+    runs-on: macos-latest  # ARM runner
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Display platform information
+      run: |
+        echo "Platform: macOS ARM64"
+        uname -a
+        python --version
+        arch
+
+    - name: Download and install toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      timeout-minutes: 20
+
+    - name: Verify installation
+      run: |
+        uv run clang-tool-chain info
+
+    - name: Verify system libunwind exists
+      run: |
+        # macOS uses system libunwind
+        echo "Checking for system libunwind headers..."
+        ls -la /usr/include/libunwind.h 2>/dev/null && echo "OK: system libunwind.h found" || echo "INFO: No system libunwind.h (may use SDK version)"
+        ls -la /usr/include/unwind.h 2>/dev/null && echo "OK: system unwind.h found" || echo "INFO: No system unwind.h (may use SDK version)"
+
+        # Check SDK for libunwind
+        xcrun --show-sdk-path
+        SDK_PATH=$(xcrun --show-sdk-path)
+        echo "SDK path: $SDK_PATH"
+        ls -la "$SDK_PATH/usr/include/libunwind.h" 2>/dev/null && echo "OK: SDK libunwind.h found" || echo "WARNING: SDK libunwind.h not found"
+        ls -la "$SDK_PATH/usr/include/unwind.h" 2>/dev/null && echo "OK: SDK unwind.h found" || echo "WARNING: SDK unwind.h not found"
+
+        echo "Checking for system libunwind library..."
+        ls -la /usr/lib/system/libunwind.dylib 2>/dev/null && echo "OK: system libunwind.dylib found" || echo "INFO: libunwind may be in libSystem"
+
+    - name: Test libunwind header compilation
+      run: |
+        # Test that we can compile code using system libunwind
+        cat > test_unwind.c << 'EOF'
+        // UNW_LOCAL_ONLY enables local unwinding symbols
+        #define UNW_LOCAL_ONLY
+        #include <libunwind.h>
+        #include <stdio.h>
+
+        void print_backtrace(void) {
+            unw_cursor_t cursor;
+            unw_context_t context;
+            unw_getcontext(&context);
+            unw_init_local(&cursor, &context);
+            printf("Backtrace initialized successfully\n");
+        }
+
+        int main() {
+            print_backtrace();
+            return 0;
+        }
+        EOF
+
+        echo "Compiling with system libunwind..."
+        uv run clang-tool-chain-c test_unwind.c -o test_unwind -lunwind
+
+        echo "Running test..."
+        ./test_unwind
+
+    - name: Run libunwind tests
+      run: |
+        # Run comprehensive libunwind tests for macOS ARM64
+        uv run pytest tests/test_libunwind_headers.py -v -x

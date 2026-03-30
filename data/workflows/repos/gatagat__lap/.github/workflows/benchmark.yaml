@@ -1,0 +1,30 @@
+name: Benchmark
+
+on: [workflow_dispatch]
+
+jobs:
+  build_and_test:
+    name: "${{ matrix.os }} + python ${{ matrix.python-version }}"
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["windows-latest", "ubuntu-22.04", "macos-15-intel"]
+        python-version: ["3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install lap from GitHub (dynamic branch)
+        shell: bash
+        run: |
+          BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          pip install "git+https://github.com/gatagat/lap.git@$BRANCH"
+      - name: Install scipy
+        run: pip install scipy
+      - name: 📊 Run benchmark_simple.py
+        run: |
+          cd benchmark
+          python benchmark_simple.py

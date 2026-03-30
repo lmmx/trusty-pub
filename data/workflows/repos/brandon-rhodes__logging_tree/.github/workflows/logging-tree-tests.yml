@@ -1,0 +1,21 @@
+name: logging_tree tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python: [python2, python3]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Print Python version
+      run: ${{matrix.python}} --version
+    - name: Test
+      run: ${{matrix.python}} -m unittest discover -v logging_tree

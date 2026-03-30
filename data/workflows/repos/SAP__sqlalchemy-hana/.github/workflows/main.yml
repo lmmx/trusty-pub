@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  ci-approval:
+    if: ${{ github.event_name != 'push' }}
+    environment: testing
+    runs-on: ubuntu-latest
+    steps:
+    -   name: Log
+        run: echo 'Running tests was approved'
+  ci-pre-commit:
+    needs: [ci-approval]
+    # run this job if it was approved by ci-approval or ci-approval was skipped and we are in a push event
+    if: ${{ success() || ( needs.ci-approval.result == 'skipped' && github.event_name == 'push' ) }}
+    runs-on: ubuntu-latest
+    steps:
+    -   uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+    -   uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+    -   name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version-file: pyproject.toml
+    -   name: Install project
+        run: uv sync --all-groups --all-extras
+    -   name: run pre-commit
+        run: uv run pre-commit run --all
+    -   name: Check for uncommitted changes
+        run: |
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "Changed files after pre-commit!"
+            git status --porcelain --untracked-files=all
+            exit 1
+          fi
+  ci-test:
+    needs: [ci-approval]
+    # run this job if we have a PR
+    if: ${{ github.event_name == 'pull_request_target' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        sqlalchemy-version: [2.0.*]
+        async-mode: [non-async]
+        include:
+        -   python-version: '3.14'
+            sqlalchemy-version: 2.0.*
+            async-mode: async
+    runs-on: ubuntu-latest
+    steps:
+    -   uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+    -   uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+    -   name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version-file: pyproject.toml
+    -   name: Install project
+        run: uv sync --all-groups --all-extras
+    -   name: Install sqlalchemy
+        run: uv pip install sqlalchemy==${{ matrix.sqlalchemy-version }}
+    -   name: run tests (with coverage)
+        run: |
+          PYTEST_DBURI=$(uv run --no-sync python -m test.ci_setup setup ${{ secrets.TEST_DBURI }} ${{ matrix.async-mode }})
+          echo "::add-mask::$PYTEST_DBURI"
+          export PYTEST_ADDOPTS="--dburi $PYTEST_DBURI"
+          uv run --no-sync pytest -v --cov sqlalchemy_hana --cov test --cov-report xml --cov-fail-under 0 test/
+          uv run --no-sync python test/ci_setup.py teardown ${{ secrets.TEST_DBURI }} $PYTEST_DBURI
+    -   name: Rename coverage file
+        run: |
+          UUID=$(uuidgen)
+          echo "UUID=${UUID}" >> $GITHUB_ENV
+          mv .coverage .coverage.${UUID}
+    -   name: upload coverage file
+        uses: actions/upload-artifact@v7
+        with:
+          name: .coverage.${{ env.UUID }}
+          path: .coverage.${{ env.UUID }}
+          if-no-files-found: error
+          include-hidden-files: true
+  ci-coverage-reporting:
+    needs: ci-test
+    runs-on: ubuntu-latest
+    # for non-PR events, no tests are executed, so we can skip coverage reporting
+    if: ${{ github.event_name == 'pull_request_target' }}
+    steps:
+    -   name: Fail if predecessor jobs failed
+        if: ${{ needs.ci-test.result != 'success' }}
+        run: |
+          echo "Predecessor job(s) failed:"
+          echo "  ci-test: ${{ needs.ci-test.result }}"
+          exit 1
+    -   uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+    -   uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+    -   name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version-file: pyproject.toml
+    -   name: Download coverage files
+        uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+          path: coverage_files
+    -   name: Prepare coverage files
+        run: |
+          uv sync --all-groups
+          cd coverage_files
+          uv run coverage combine
+          mv .coverage ../.coverage
+          cd ..
+          uv run coverage xml
+    -   name: run diff-cover
+        run: uv run diff-cover --config-file pyproject.toml coverage.xml
+    -   name: Upload to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: coverage.xml

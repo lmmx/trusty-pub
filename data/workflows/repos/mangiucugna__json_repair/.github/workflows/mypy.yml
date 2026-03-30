@@ -1,0 +1,26 @@
+name: Mypy Type Check
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install the latest version of uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        activate-environment: true
+
+    - name: Run mypy
+      run: uv run --group typecheck --frozen mypy src/
+
+    - name: Run ty
+      run: uv run --group typecheck --frozen ty check src/ tests/

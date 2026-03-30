@@ -1,0 +1,56 @@
+name: 'tests'
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        environment: [
+            ci-py310-min-dependencies,
+            ci-py310-min-optional-dependencies,
+            ci-py310-min-keras,
+            ci-py310-min-tensorflow,
+            ci-py311-sklearn-1-4,
+            ci-py311-sklearn-1-5,
+            ci-py312-sklearn-1-6,
+            ci-py311-latest-keras,
+            ci-py311-latest-tensorflow,
+            ci-py314-latest-dependencies,
+            ci-py314-latest-optional-dependencies,
+        ]
+        exclude:
+            - os: windows-latest
+              environment: ci-py310-min-keras
+            - os: windows-latest
+              environment: ci-py310-min-tensorflow
+            - os: windows-latest
+              environment: ci-py311-latest-keras
+            - os: windows-latest
+              environment: ci-py311-latest-tensorflow
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          pixi-version: v0.51.0
+          environments: ${{ matrix.environment }}
+          # we can freeze the environment and manually bump the dependencies to the
+          # latest version time to time.
+          frozen: true
+
+      - name: Run tests
+        run: pixi run -e ${{ matrix.environment }} tests -n 3
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5.5.2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: scikit-learn-contrib/imbalanced-learn

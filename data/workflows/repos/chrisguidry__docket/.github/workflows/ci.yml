@@ -1,0 +1,271 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Core, Python ${{ matrix.python-version }}, ${{ matrix.backend.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        backend:
+          - name: "Memory"
+            redis-version: "memory"
+            redis-py-version: ">=5"
+          - name: "Redis 6"
+            redis-version: "6.2"
+            redis-py-version: ">=5,<6"
+          - name: "Redis 7"
+            redis-version: "7.4"
+            redis-py-version: ">=5"
+          - name: "Redis 8"
+            redis-version: "8.6"
+            redis-py-version: ">=5"
+          - name: "Redis 8 Cluster"
+            redis-version: "8.6-cluster"
+            redis-py-version: ">=5"
+          - name: "Valkey 8"
+            redis-version: "valkey-8.1"
+            redis-py-version: ">=5"
+        include:
+          - python-version: "3.10"
+            cov-threshold: 100
+            pytest-args: ""
+          # Python 3.11 coverage reporting is unstable, so use 98% threshold
+          - python-version: "3.11"
+            cov-threshold: 98
+            pytest-args: ""
+          - python-version: "3.12"
+            cov-threshold: 100
+            pytest-args: ""
+          - python-version: "3.13"
+            cov-threshold: 100
+            pytest-args: ""
+          - python-version: "3.14"
+            cov-threshold: 100
+            pytest-args: ""
+          # Memory backend: coverage threshold is lower due to pytest-xdist
+          # coverage data combination issues.
+          - backend:
+              name: "Memory"
+              redis-version: "memory"
+              redis-py-version: ">=5"
+            cov-threshold: 95
+            pytest-args: ""
+          # Debug hanging tests in 3.12 cluster mode
+          - python-version: "3.12"
+            backend:
+              name: "Redis 8 Cluster"
+              redis-version: "8.6-cluster"
+              redis-py-version: ">=5"
+            pytest-args: "-v -s -W ignore::ResourceWarning"
+          # Cluster mode emits ResourceWarning about unclosed sockets during
+          # test teardown. The warnings appear related to redis-py's cluster
+          # pub/sub connection management. Ignoring until upstream fixes land.
+          - python-version: "3.10"
+            backend:
+              name: "Redis 8 Cluster"
+              redis-version: "8.6-cluster"
+              redis-py-version: ">=5"
+            pytest-args: "-W ignore::ResourceWarning"
+          - python-version: "3.11"
+            backend:
+              name: "Redis 8 Cluster"
+              redis-version: "8.6-cluster"
+              redis-py-version: ">=5"
+            pytest-args: "-W ignore::ResourceWarning"
+          - python-version: "3.13"
+            backend:
+              name: "Redis 8 Cluster"
+              redis-version: "8.6-cluster"
+              redis-py-version: ">=5"
+            pytest-args: "-W ignore::ResourceWarning"
+          - python-version: "3.14"
+            backend:
+              name: "Redis 8 Cluster"
+              redis-version: "8.6-cluster"
+              redis-py-version: ">=5"
+            pytest-args: "-W ignore::ResourceWarning"
+          # ACL variants only run on latest Python to save CI time
+          - python-version: "3.14"
+            backend:
+              name: "Redis 8 with ACL"
+              redis-version: "8.6-acl"
+              redis-py-version: ">=5"
+            cov-threshold: 100
+            pytest-args: ""
+          - python-version: "3.14"
+            backend:
+              name: "Valkey 8 with ACL"
+              redis-version: "valkey-8.1-acl"
+              redis-py-version: ">=5"
+            cov-threshold: 100
+            pytest-args: ""
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv and set Python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync --upgrade-package 'redis${{ matrix.backend.redis-py-version }}'
+
+      - name: Run tests
+        env:
+          REDIS_VERSION: ${{ matrix.backend.redis-version }}
+        run: uv run pytest --ignore=tests/cli --cov-branch --cov-config=.coveragerc-core --cov-fail-under=${{ matrix.cov-threshold }} --cov-report=xml --cov-report=term-missing:skip-covered --junitxml=junit.xml -o junit_family=legacy ${{ matrix.pytest-args }}
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: python-${{ matrix.python-version }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+
+  test-cli:
+    name: CLI, Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv and set Python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync --upgrade-package 'redis>=5'
+
+      - name: Run CLI tests
+        env:
+          REDIS_VERSION: "8.6"
+        run: >
+          uv run pytest tests/cli/
+          -o 'addopts=--import-mode=importlib'
+          --numprocesses=logical --maxprocesses=4
+          --cov=src/docket/cli --cov=tests/cli
+          --cov-config=.coveragerc-cli
+          --cov-branch --cov-fail-under=100
+          --cov-report=xml --cov-report=term-missing:skip-covered
+          --junitxml=junit.xml -o junit_family=legacy
+          --timeout=30
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: cli-python-${{ matrix.python-version }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+
+  test-windows:
+    name: Windows, Python ${{ matrix.python-version }}
+    runs-on: windows-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - python-version: "3.10"
+            cov-threshold: 100
+          # Python 3.11 coverage reporting is unstable, so use 98% threshold
+          - python-version: "3.11"
+            cov-threshold: 98
+          - python-version: "3.12"
+            cov-threshold: 100
+          - python-version: "3.13"
+            cov-threshold: 100
+          - python-version: "3.14"
+            cov-threshold: 100
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv and set Python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync --upgrade-package 'redis>=5'
+
+      - name: Run tests
+        env:
+          REDIS_VERSION: memory
+        run: >
+          uv run pytest --ignore=tests/cli
+          --cov-branch --cov-config=.coveragerc-core
+          --cov-fail-under=${{ matrix.cov-threshold }}
+          --cov-report=xml --cov-report=term-missing:skip-covered
+          --junitxml=junit.xml -o junit_family=legacy
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: windows-python-${{ matrix.python-version }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+
+  prek:
+    name: Prek checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv and set Python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.10"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run prek
+        uses: j178/prek-action@v2

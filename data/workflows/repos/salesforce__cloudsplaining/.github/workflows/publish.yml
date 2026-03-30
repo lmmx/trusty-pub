@@ -1,0 +1,107 @@
+# .github/workflows/publish.yml
+
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b  # v7.3.0
+        with:
+          activate-environment: true
+      - run: uv sync --frozen
+
+      - name: Install the package to make sure nothing is randomly broken
+        run: just build-package
+      - name: Run pytest (unit tests)
+        run: just unit-tests
+
+
+  publish-package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b  # v7.3.0
+        with:
+          activate-environment: true
+      - run: uv sync --frozen
+
+      - name: create python package
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git fetch --tags
+          git pull origin master
+
+          uv build
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          password: ${{ secrets.PYPI_PASSWORD }}
+
+  update-brew:
+    needs: publish-package
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version-file: '.python-version'
+      - name: publish brew
+        run: |
+          sleep 5m
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          pip install homebrew-pypi-poet
+          pip install cloudsplaining -U
+          git fetch origin
+          git checkout --track origin/master
+          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)")
+          echo "latest tag: $latest_tag"
+          git pull origin "$latest_tag"
+          poet -f cloudsplaining > HomebrewFormula/cloudsplaining.rb
+          git add .
+          git commit -m "update brew formula" cloudsplaining/bin/version.py HomebrewFormula/cloudsplaining.rb || echo "No brew changes to commit"
+          git push -u origin master
+
+  bump-version:
+    runs-on: ubuntu-slim
+    needs: update-brew
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: master
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b  # v7.3.0
+        with:
+          activate-environment: true
+
+      - name: Bump version
+        run: |
+          # https://github.com/bridgecrewio/checkov/blob/master/.github/workflows/build.yml#L87-L132
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git fetch --tags
+          git pull origin master
+          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)")
+          echo "latest tag: $latest_tag"
+          new_tag=$(echo "$latest_tag" | awk -F. -v a="$1" -v b="$2" -v c="$3" '{printf("%d.%d.%d", $1+a, $2+b , $3+1)}')
+          echo "new tag: $new_tag"
+
+          uv version --offline "$new_tag"
+
+          git commit -m "Bump to ${new_tag}" pyproject.toml uv.lock || echo "No changes to commit"
+          git push origin

@@ -1,0 +1,153 @@
+name: build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  # Allow this workflow to be called from other workflows
+  workflow_call:
+    inputs:
+      #  Requires at least one input to be valid, but in practice we don't need any
+      dummy:
+        type: string
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Huggingface gets mad about us spamming them in CI, so try to run fewer versions of tests
+        python-version: ["3.10"] # , "3.11", "3.12"]
+
+    env:
+      # Increment this number to bust all caches (HuggingFace, Poetry, venv)
+      CACHE_VERSION: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          large-packages: false
+      - name: Cache Huggingface assets
+        uses: actions/cache@v4
+        with:
+          key: huggingface-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml') }}
+          path: ~/.cache/huggingface/hub
+          restore-keys: |
+            huggingface-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.python-version }}-
+      - name: Load cached Poetry installation
+        id: cached-poetry
+        uses: actions/cache@v4
+        with:
+          path: ~/.local # the path depends on the OS
+          key: poetry-${{ runner.os }}-${{ matrix.python-version }}-${{ env.CACHE_VERSION }}
+      - name: Install Poetry
+        if: steps.cached-poetry.outputs.cache-hit != 'true'
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            venv-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.python-version }}-
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction
+      - name: Install TransformerLens dev-3.x
+        run: poetry run pip install git+https://github.com/TransformerLensOrg/TransformerLens.git@dev-3.x
+      - name: Check disk space before tests
+        run: |
+          echo "=== Disk Space Summary ==="
+          df -h
+          echo ""
+          echo "=== Home Directory Size ==="
+          du -sh ~/* 2>/dev/null | sort -hr | head -20
+          echo ""
+          echo "=== Huggingface Cache Size ==="
+          du -sh ~/.cache/huggingface 2>/dev/null || echo "No HF cache yet"
+      - name: Check linting
+        run: poetry run ruff check .
+      - name: Check formatting
+        run: poetry run ruff format --check .
+      - name: type checking
+        run: poetry run pyright
+      - name: Run Unit Tests
+        #   Would use make, but want cov report in xml format
+        #   TRACK_DISK_USAGE=1 enables per-test disk usage tracking (see tests/conftest.py)
+        run: poetry run pytest -v --cov=sae_lens/ --cov-report=term-missing --cov-branch tests --cov-report=xml
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          TRACK_DISK_USAGE: "1"
+      - name: Check disk space after tests
+        if: always()
+        run: |
+          echo "=== Disk Space Summary After Tests ==="
+          df -h
+          echo ""
+          echo "=== Huggingface Cache Size ==="
+          du -sh ~/.cache/huggingface 2>/dev/null || echo "No HF cache"
+          echo ""
+          echo "=== Huggingface Cache Contents (Top 20) ==="
+          du -sh ~/.cache/huggingface/* 2>/dev/null | sort -hr | head -20 || echo "No HF cache"
+          echo ""
+          echo "=== Largest directories in home ==="
+          du -sh ~/* 2>/dev/null | sort -hr | head -20
+          echo ""
+          echo "=== Workspace size ==="
+          du -sh ${{ github.workspace }}
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: decoderesearch/SAELens
+
+  release:
+    needs: build
+    permissions:
+      contents: write
+      id-token: write
+    # https://github.community/t/how-do-i-specify-job-dependency-running-in-another-workflow/16482
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta' || github.ref == 'refs/heads/alpha') && !contains(github.event.head_commit.message, 'chore(release):')
+    runs-on: ubuntu-latest
+    concurrency: release
+    environment:
+      name: pypi
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      tag: ${{ steps.release.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Semantic Release
+        id: release
+        uses: python-semantic-release/python-semantic-release@v9.8.8
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: steps.release.outputs.released == 'true'
+      - name: Publish package distributions to GitHub Releases
+        uses: python-semantic-release/upload-to-gh-release@main
+        if: steps.release.outputs.released == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}

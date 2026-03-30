@@ -1,0 +1,479 @@
+name: 'Tools CI Tests'
+
+on:
+  # Runs on pushes to test/ branches and main
+  push:
+    branches:
+      - 'main'
+      - 'test/**'
+  # Runs on all PRs
+  pull_request:
+  # Manual Dispatch
+  workflow_dispatch:
+    inputs:
+      rebuildall:
+        type: boolean
+        default: false
+        description: rebuild all tools
+  # Releases of SC
+  release:
+    types:
+      - published
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY: ghcr.io
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_tool_builder:
+    name: 'Build base tool builder image'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      packages: write
+
+    outputs:
+      tools_matrix: ${{ steps.docker.outputs.tools_matrix }}
+      tools_with_deps_matrix: ${{ steps.docker.outputs.tools_with_deps_matrix }}
+      sc_tools: ${{ steps.docker.outputs.sc_tools }}
+      sc_runner: ${{ steps.docker.outputs.sc_runner }}
+      has_sc_tools: ${{ steps.docker.outputs.has_sc_tools }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Read-only credentials, can be accessed by external contributors
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Check if rebuild all is needed
+        if: inputs.rebuildall
+        run: echo 'REBUILDALL=--reportall' >> "$GITHUB_ENV"
+
+      - name: Generate tool docker files
+        id: docker
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install .
+          builder_name=$(python3 setup/docker/builder.py --tool builder --registry ${{ env.REGISTRY }})
+          sc_tools_name=$(python3 setup/docker/builder.py --tool tools --registry ${{ env.REGISTRY }})
+          sc_runner_name=$(python3 setup/docker/builder.py --tool runner --registry ${{ env.REGISTRY }})
+          echo "builder=${builder_name}" >> $GITHUB_OUTPUT
+          echo "has_builder=$(python3 setup/docker/builder.py --check_image ${builder_name})" >> $GITHUB_OUTPUT
+          echo "sc_tools=${sc_tools_name}" >> $GITHUB_OUTPUT
+          echo "sc_runner=${sc_runner_name}" >> $GITHUB_OUTPUT
+          echo "has_sc_tools=$(python3 setup/docker/builder.py --check_image ${sc_tools_name})" >> $GITHUB_OUTPUT
+          echo "tools_matrix=$(python3 setup/docker/builder.py $REBUILDALL --json_tools --registry ${{ env.REGISTRY }})" >> $GITHUB_OUTPUT
+          echo "tools_with_deps_matrix=$(python3 setup/docker/builder.py $REBUILDALL --json_tools --with_dependencies --registry ${{ env.REGISTRY }})" >> $GITHUB_OUTPUT
+          python3 setup/docker/builder.py --generate_files --registry ${{ env.REGISTRY }} --output_dir docker
+
+      - name: Upload docker artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: tools
+          path: docker/
+          retention-days: 1
+
+      # Read/write credentials, can only be accessed by repo members
+      - name: Log in to the Container registry
+        if: steps.docker.outputs.has_builder != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.PACKAGES_ACTOR }}
+          password: ${{ secrets.PACKAGES_TOKEN }}
+
+      - name: Build and Push SiliconCompiler Builder Docker image
+        if: steps.docker.outputs.has_builder != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: docker/sc_tool_builder
+          push: true
+          tags: ${{ steps.docker.outputs.builder }}
+
+  build_tool:
+    if: ${{ needs.build_tool_builder.outputs.tools_matrix != '{}' }}
+
+    name: Build ${{ matrix.tool }} tool
+    runs-on: ubuntu-latest
+    needs: build_tool_builder
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+        fail-fast: false
+        matrix: ${{ fromJson(needs.build_tool_builder.outputs.tools_matrix) }}
+
+    steps:
+      - name: Download docker artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tools
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.PACKAGES_ACTOR }}
+          password: ${{ secrets.PACKAGES_TOKEN }}
+
+      - name: Build and Push Tool Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./sc_${{ matrix.tool }}/
+          push: true
+          tags: |
+            ${{ matrix.name }}
+            ${{ matrix.check_name }}
+
+  build_tool_with_deps:
+    name: Build ${{ matrix.tool }} tool
+    runs-on: ubuntu-latest
+    needs: [build_tool_builder, build_tool]
+
+    if: always() && !cancelled() && needs.build_tool_builder.outputs.tools_with_deps_matrix != '{}'
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+        fail-fast: false
+        matrix: ${{ fromJson(needs.build_tool_builder.outputs.tools_with_deps_matrix) }}
+
+    steps:
+      - name: Download docker artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tools
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.PACKAGES_ACTOR }}
+          password: ${{ secrets.PACKAGES_TOKEN }}
+
+      - name: Build and Push Tool Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./sc_${{ matrix.tool }}/
+          push: true
+          tags: |
+            ${{ matrix.name }}
+            ${{ matrix.check_name }}
+
+  build_sc_tools:
+    name: Build SC Tools
+    runs-on: ubuntu-latest
+    needs: [build_tool_builder, build_tool, build_tool_with_deps]
+
+    if: always() && !cancelled() && needs.build_tool_builder.outputs.has_sc_tools != 'true'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download docker artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: tools
+
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.PACKAGES_ACTOR }}
+          password: ${{ secrets.PACKAGES_TOKEN }}
+
+      - name: Build and Push Tool Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./sc_tools/
+          push: true
+          tags: ${{ needs.build_tool_builder.outputs.sc_tools }}
+
+  runner_image:
+    needs: [build_tool_builder, build_sc_tools]
+    name: Build SC runner image
+    if: always() && !cancelled() && github.event_name == 'release'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Download docker artifacts
+      uses: actions/download-artifact@v8
+      with:
+        name: tools
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        swap-storage: true
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.PACKAGES_ACTOR }}
+        password: ${{ secrets.PACKAGES_TOKEN }}
+
+    - name: Retag primary image
+      run: |
+        docker pull ${{ needs.build_tool_builder.outputs.sc_tools }}
+        base_tag=$(echo ${{ needs.build_tool_builder.outputs.sc_tools }} | sed s/:.*//g)
+        latest_tag=${base_tag}:latest
+        docker tag ${{ needs.build_tool_builder.outputs.sc_tools }} $latest_tag
+        docker push $latest_tag
+        version_tag=${base_tag}:${{  github.ref_name }}
+        docker tag ${{ needs.build_tool_builder.outputs.sc_tools }} $version_tag
+        docker push $version_tag
+        runner_latest_tag=$(echo ${{ needs.build_tool_builder.outputs.sc_runner }} | sed s/:.*/:latest/g)
+        echo "RUNNER_TAG=${runner_latest_tag}" >> $GITHUB_ENV
+
+    - name: Build and Push Tool Docker image
+      uses: docker/build-push-action@v7
+      with:
+        context: ./sc_runner/
+        push: true
+        tags: |
+          ${{ needs.build_tool_builder.outputs.sc_runner }}
+          ${{ env.RUNNER_TAG }}
+
+  cache:
+    name: Generate cache
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          python3 -m pip install -e .[test]
+          python3 -m pip install -r ./examples/requirements.txt
+
+      - name: Gather cache
+        run: |
+          . .venv/bin/activate
+          python3 .github/workflows/bin/generate_cache.py
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: scpackage-cache
+          path: .sc/cache
+          retention-days: 1
+
+  tool_based_tests:
+    needs: [build_tool_builder, build_sc_tools, cache]
+    runs-on: ubuntu-latest
+
+    if: always() && !cancelled()
+
+    container:
+      image: ${{ needs.build_tool_builder.outputs.sc_tools }}
+
+    env:
+      SCTESTCACHE: ${{ github.workspace }}/.sc/cache/
+
+    timeout-minutes: 45
+    name: 'Tool-based tests'
+    steps:
+
+      - name: Checkout current SiliconCompiler
+        uses: actions/checkout@v6
+
+      - name: Setup tests
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+
+          python3 -m pip install -e .[test,cocotb]
+          python3 -m pip install -r ./examples/requirements.txt
+
+      - name: Restore cache
+        uses: actions/download-artifact@v8
+        with:
+          name: scpackage-cache
+          path: ${{ env.SCTESTCACHE }}
+
+      - name: Start slurm
+        run: /start_slurm.sh
+
+      - name: Run tests
+        run: |
+          source .venv/bin/activate
+
+          # change running directory
+          mkdir testrun
+          cd testrun
+
+          pytest $GITHUB_WORKSPACE -n logical -m "eda and quick" --clean --cov --cov-report=xml --durations=0
+
+      - name: Upload coverage reports to Codecov
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          name: codecov-tools
+          verbose: true
+
+  daily_tests_job_docker_linux:
+    needs: [cache, build_tool_builder, build_sc_tools]
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+
+    if: always() && !cancelled()
+
+    env:
+      SCTESTCACHE: ${{ github.workspace }}/.sc/cache/
+
+    name: 'All docker tests (linux)'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout SiliconCompiler
+        uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Fetch runner image
+        run: |
+          docker pull ${{ needs.build_tool_builder.outputs.sc_tools }}
+
+      - name: Restore cache
+        uses: actions/download-artifact@v8
+        with:
+          name: scpackage-cache
+          path: ${{ env.SCTESTCACHE }}
+
+      - name: Setup tests
+        run: |
+          ${{ steps.setup-python.outputs.python-path }} -m venv .venv
+          source .venv/bin/activate
+          python3 --version
+
+          python3 -m pip install --upgrade pip
+          python3 -m pip install .[test]
+
+      - name: Run tests
+        env:
+          SC_IMAGE: ${{ needs.build_tool_builder.outputs.sc_tools }}
+        run: |
+          source .venv/bin/activate
+
+          # change running directory
+          mkdir testrun
+          cd testrun
+
+          pytest $GITHUB_WORKSPACE -n logical -m "docker and quick" --durations=0 --clean
+
+  tools_changed_check:
+    runs-on: ubuntu-latest
+    name: Check if tools changed
+    outputs:
+      asic_changed: ${{ steps.changes.outputs.asic }}
+    steps:
+      - name: Checkout current SiliconCompiler
+        uses: actions/checkout@v6
+
+      - name: Checkout main SiliconCompiler
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: scmain
+
+      - name: Check tool updates
+        id: changes
+        run: |
+          toolsscript=.github/workflows/bin/check_tool_changes.py
+          toolsfile=siliconcompiler/toolscripts/_tools.json
+          asic_change=$(python3 $toolsscript scmain/${toolsfile} ${toolsfile} --workflow asic)
+          echo "asic=${asic_change}"
+          echo "asic=${asic_change}" >> $GITHUB_OUTPUT
+
+  run_daily_asic:
+    name: Run daily ASIC CI
+    needs: [build_sc_tools, tools_changed_check]
+    if: always() && !cancelled() && needs.tools_changed_check.outputs.asic_changed == 'Yes'
+    uses: ./.github/workflows/daily_ci.yml
+
+  server_tests:
+    needs: build_sc_tools
+    if: always() && !cancelled()
+    name: Test server
+    timeout-minutes: 90
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for Secret availability
+        id: secret-check
+        # perform secret check & put boolean result as an output
+        shell: bash
+        run: |
+          if [ "${{ secrets.ZA_TOKEN }}" != '' ]; then
+            echo "available=true" >> $GITHUB_OUTPUT;
+          else
+            echo "available=false" >> $GITHUB_OUTPUT;
+          fi
+      - name: Trigger server tests
+        if: ${{ steps.secret-check.outputs.available == 'true' }}
+        uses: convictional/trigger-workflow-and-wait@v1.6.5
+        with:
+          github_token: ${{ secrets.ZA_TOKEN }}
+          owner: ${{ secrets.SERVER_OWNER }}
+          repo: ${{ secrets.SERVER_REPO }}
+          workflow_file_name: containers.yml
+          client_payload: '{"sc-ref": "${{ github.ref }}"}'
+          wait_interval: 60
+          ref: ${{ vars.SERVER_BRANCH }}

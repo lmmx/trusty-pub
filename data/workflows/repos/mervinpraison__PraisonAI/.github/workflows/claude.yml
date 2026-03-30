@@ -1,0 +1,57 @@
+name: Claude Assistant
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned, labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude-response:
+    # Prevent certain bots from triggering this action (but allow github-actions[bot] for auto-comments)
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      github.actor != 'cursor[bot]' &&
+      github.actor != 'renovate[bot]' &&
+      !(contains(github.actor, '[bot]') && github.actor != 'github-actions[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - uses: anthropics/claude-code-action@beta
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          trigger_phrase: "@claude"
+          allowed_tools: |
+            Bash(git:*)
+            Bash(python:*)
+            Bash(pip:*)
+            Bash(conda:*)
+            Bash(pytest:*)
+            Bash(gh:*)
+            Bash(python -m pytest:*)
+            Bash(python -m pip:*)
+            Bash(poetry:*)
+            View
+            GlobTool
+            GrepTool
+            BatchTool
+            Edit
+            Replace
+            mcp__github__get_issue
+            mcp__github__get_issue_comments
+            mcp__github__update_issue
+          timeout_minutes: 30

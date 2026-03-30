@@ -1,0 +1,90 @@
+name: In pull request
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+
+  check_python_linting:
+    name: Ruff Linting & Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          src: "."
+
+  check_python_typing:
+    name: Python type checking
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.9"
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.11"
+  
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup UV with cache
+        id: setup-uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      
+      - name: Run Pyright
+        run: |
+          uv sync --extra dev
+          uv run pyright
+
+  test_compatibility:
+    name: Test Python Compatibility
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.9"
+          # We need x86 as ARM is python>= 3.11 only.
+          # https://github.com/actions/setup-python/issues/855
+          - os: macos-15-intel
+            python-version: "3.9"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup UV with cache
+        id: setup-uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Install dev extras so pytest is available.
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run Tests
+        run: uv run pytest -q

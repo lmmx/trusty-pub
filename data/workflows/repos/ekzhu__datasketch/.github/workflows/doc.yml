@@ -1,0 +1,36 @@
+name: Build Documentation
+
+# Triggers the workflow on push or pull request events
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv and setup Python
+        uses: astral-sh/setup-uv@v7
+        with:
+          activate-environment: true
+          python-version: "3.10"
+          enable-cache: true
+      - name: Install package with dependencies
+        run: |
+          # Disable Cassandra optional extensions (faster testing).
+          export CASS_DRIVER_NO_EXTENSIONS=1
+          uv sync --extra bloom
+          uv pip install sphinx sphinx-rtd-theme
+      - name: Compile documentation
+        run: |
+          cd docs
+          make html
+      - name: Deploy to GitHub pages
+        if: ${{ github.ref == 'refs/heads/master' }}
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: gh-pages
+          FOLDER: docs/_build/html
+          CLEAN: true
+      - name: Minimize uv cache
+        run: uv cache prune --ci

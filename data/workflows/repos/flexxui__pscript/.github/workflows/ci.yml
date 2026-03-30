@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+
+jobs:
+
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+          node-version: '18'
+    - name: Install dependencies
+      run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+    - name: Ruff lint
+      run: |
+          ruff check --output-format=github .
+    - name: Ruff format
+      run: |
+          ruff format --check .
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.13
+    - name: Install dev dependencies
+      run: |
+        python -m pip install --upgrade pip
+        #pip install -U -e .[docs]
+        pip install sphinx sphinx_rtd_theme
+    - name: Build docs
+      run: |
+        cd docs
+        make html SPHINXOPTS="-W --keep-going"
+
+  tests:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux py 3.8
+            os: ubuntu-latest
+            pyversion: '3.8'
+          - name: Linux py 3.9
+            os: ubuntu-latest
+            pyversion: '3.9'
+          - name: Linux py 3.10
+            os: ubuntu-latest
+            pyversion: '3.10'
+          - name: Linux py 3.11
+            os: ubuntu-latest
+            pyversion: '3.11'
+          - name: Linux py 3.12
+            os: ubuntu-latest
+            pyversion: '3.12'
+          - name: Linux py 3.13
+            os: ubuntu-latest
+            pyversion: '3.13'
+          #
+          - name: Linux pypy
+            os: ubuntu-latest
+            pyversion: 'pypy3.9'
+          - name: Windows
+            os: windows-latest
+            pyversion: '3.13'
+          - name: MacOS
+            os: macos-latest
+            pyversion: '3.13'
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.pyversion }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.pyversion }}
+      - name: Install dependencies for unit tests
+        shell: bash
+        run: |
+            python -m pip install --upgrade pip
+            pip install pytest pytest-cov
+            pip install .
+            rm -rf ./pscript ./build ./egg-info
+      - name: Test with pytest
+        run: |
+            python -c "import sys; print(sys.version, '\n', sys.prefix)";
+            pytest -v --cov pscript --cov-report=term --cov-report=html tests

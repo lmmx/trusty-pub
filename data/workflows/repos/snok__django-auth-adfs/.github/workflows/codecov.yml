@@ -1,0 +1,45 @@
+name: coverage
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  codecov:
+    # ---------------------------------------------------
+    #    Documentation and examples can be found at
+    #      https://github.com/snok/install-poetry
+    # ---------------------------------------------------
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.10.5"
+    - name: Install poetry
+      uses: snok/install-poetry@v1
+      with:
+        virtualenvs-in-project: true
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}-1
+    - name: Update poetry lock
+      run: poetry lock
+      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+    - name: Install dependencies
+      run: poetry install
+      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+    - name: Test with Django test
+      run: |
+        poetry run coverage run manage.py test -v 2
+        poetry run coverage xml
+    - name: Upload coverage
+      uses: codecov/codecov-action@v2
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: true

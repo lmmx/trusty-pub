@@ -1,0 +1,213 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "*.*.*.*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: 'recursive'
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.x'
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+
+
+  build_wheels:
+    name: Build ${{ matrix.arch }} wheels
+    needs: [lint]
+    runs-on: ${{ matrix.arch == 'universal2' && 'macos-14' || 'ubuntu-24.04' }}${{ startsWith(matrix.docker_arch, 'arm') && '-arm' || '' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: "x86_64"
+            docker_arch: "amd64"
+            test_image: quay.io/pypa/manylinux1_x86_64
+          - arch: "i686"
+            docker_arch: "386"
+            test_image: quay.io/pypa/manylinux1_i686
+          - arch: "aarch64"
+            docker_arch: "arm64"
+            test_image: quay.io/pypa/manylinux2014_aarch64
+          - arch: "ppc64le"
+            docker_arch: "ppc64le"
+            test_image: quay.io/pypa/manylinux2014_ppc64le
+          - arch: "s390x"
+            docker_arch: "s390x"
+            test_image: quay.io/pypa/manylinux2014_s390x
+          - arch: "armv7l"
+            docker_arch: "arm/v7"
+            test_image: python:3.7-slim-stretch
+          - arch: "riscv64"
+            docker_arch: "riscv64"
+            test_image: quay.io/pypa/manylinux_2_39_riscv64
+          - arch: "universal2"
+            docker_arch: "na"
+            test_image: "na"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0  # required for setuptools_scm to find tags
+          submodules: 'recursive'
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        if: runner.os == 'Linux'
+
+      - name: Install build dependencies
+        if: runner.os == 'macOS'
+        run: brew install autoconf automake
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@298ed2fb2c105540f5ed055e8a6ad78d82dd3a7e # v3.3.1
+        env:
+          CIBW_ARCHS: "${{ matrix.arch }}"
+
+      - name: Test wheel on ${{ matrix.test_image }}
+        if: runner.os == 'Linux'
+        run: |
+          cat <<EOF > check.sh
+          set -e
+          set -x
+          if ! which pipx; then
+            python3 -m pip install pipx
+            export PATH=/root/.local/bin:\$PATH
+            pipx install auditwheel
+          fi
+          WHEEL=$(find ./wheelhouse -name 'patchelf-*.whl')
+          auditwheel show \${WHEEL}
+          pipx install -f \${WHEEL}
+          patchelf --version
+          EOF
+          docker run --platform linux/${{ matrix.arch == 'i686' && 'amd64' || matrix.docker_arch }} -v $(pwd):/gha ${{ matrix.test_image }} sh -ec "cd /gha && sh ./check.sh"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: "cibw-wheels-${{ matrix.arch }}"
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    needs: [lint]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0  # required for setuptools_scm to find tags
+          submodules: 'recursive'
+          persist-credentials: false
+
+      - name: Build SDist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  test_sdist:
+    name: Test SDist with python ${{ matrix.python }}
+    needs: [build_sdist]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.7", "3.13"]
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        name: Install Python ${{ matrix.python }}
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: cibw-sdist
+          path: sdist
+
+      - name: Install SDist
+        run: pip install $(ls sdist/*.tar.gz)[test]
+
+      - name: Test installed SDist
+        run: pip check && pytest ./tests
+
+  check_dist:
+    if: always()
+    name: Check dist
+    needs: [build_wheels, build_sdist, test_sdist]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - run: pipx run twine check --strict dist/*
+
+  upload_pypi:
+    name: Upload to PyPI
+    needs: [build_wheels, build_sdist, test_sdist, check_dist]
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && github.repository == 'mayeut/patchelf-pypi' && startsWith(github.ref, 'refs/tags/')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/patchelf
+    permissions:
+      attestations: write  # for attestation generation
+      id-token: write  # for trusted publishing
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate artifact attestation for sdist and wheel
+        uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
+        with:
+          subject-path: "dist/patchelf-*"
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          attestations: true

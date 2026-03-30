@@ -1,0 +1,345 @@
+name: Python package
+
+on: [push, pull_request]
+
+jobs:
+  code-qc:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+    - name: Create venv
+      run: |
+           uv venv --no-project --no-config --no-managed-python rpy2-env
+    - name: Set activate venv commands (POSIX)
+      if: "!startsWith(matrix.os, 'windows')"
+      run: |
+        echo "VENV_ACTIVATE=source rpy2-env/bin/activate" >> $GITHUB_ENV
+    - name: Set activate venv command (Windows)
+      if: startsWith(matrix.os, 'windows')
+      shell: bash
+      run: |
+        echo "VENV_ACTIVATE=rpy2-env/Scripts/activate" >> $GITHUB_ENV
+    - name: Lint with flake8 rinterface
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        uv pip install flake8
+        cd rpy2-rinterface
+        ../scripts/run_linting_rinterface.sh
+    - name: Lint with flake8 robjects
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        uv pip install flake8
+        cd rpy2-robjects
+        ../scripts/run_linting_robjects.sh
+    - name: Set up R ${{ matrix.r-version }}
+      uses: r-lib/actions/setup-r@v2
+      with:
+        r-version: release
+    - name: Check type hints rinterface
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        cd rpy2-rinterface
+        uv pip install '.[types]'
+        ../scripts/run_mypy_rinterface.sh
+    - name: Check type hints robjects
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        cd rpy2-rinterface
+        uv pip install .
+        cd ..
+        cd rpy2-robjects
+        uv pip install --pre '.[types]'
+        ../scripts/run_mypy_robjects.sh
+  build-sdist:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    - name: Set up R ${{ matrix.r-version }}
+      uses: r-lib/actions/setup-r@v2
+      with:
+        r-version: release
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+    - name: Create venv
+      run: |
+           uv venv --no-project --no-config --no-managed-python rpy2-env
+    - name: Set activate venv commands (POSIX)
+      if: "!startsWith(matrix.os, 'windows')"
+      run: |
+        echo "VENV_ACTIVATE=source rpy2-env/bin/activate" >> $GITHUB_ENV
+    - name: Set activate venv command (Windows)
+      if: startsWith(matrix.os, 'windows')
+      shell: bash
+      run: |
+        echo "VENV_ACTIVATE=rpy2-env/Scripts/activate" >> $GITHUB_ENV
+    - name: Install dependencies
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        uv pip install setuptools build
+    - name: Build sdist rinterface
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        cd rpy2-rinterface
+        python -m build -o dist/ --sdist .
+    - name: Upload sdist rinterface
+      uses: actions/upload-artifact@v4
+      with:
+        name: rpy2-rinterface-sdist
+        path: rpy2-rinterface/dist/rpy2_rinterface-*.tar.gz
+    - name: Build sdist robjects
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        cd rpy2-robjects
+        python -m build -o dist/ --sdist .
+    - name: Upload sdist robjects
+      uses: actions/upload-artifact@v4
+      with:
+        name: rpy2-robjects-sdist
+        path: rpy2-robjects/dist/rpy2_robjects-*.tar.gz
+    - name: Build sdist rpy2
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        python -m build -o dist/ --sdist .
+    - name: Upload sdist rpy2
+      uses: actions/upload-artifact@v4
+      with:
+        name: rpy2-sdist
+        path: dist/rpy2-*.tar.gz
+  build-api-wheel:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.9, "3.10", "3.11", "3.12", "3.13", "3.14"]
+        r-version: ["4.4", release]
+        os: ["windows-latest", ubuntu-latest, macos-15]
+        exclude:
+          - os: "macos-15"
+            r-version: "4.4"
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Set up R ${{ matrix.r-version }}
+      uses: r-lib/actions/setup-r@v2
+      with:
+        r-version: ${{ matrix.r-version }}
+        use-public-rspm: true
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+    - name: Create venv
+      run: |
+           uv venv --no-project --no-config --no-managed-python rpy2-env
+    - name: Print R config (POSIX-only)
+      if: "!startsWith(matrix.os, 'windows')"
+      run: R CMD config --all
+    - name: Set env commands (POSIX)
+      if: "!startsWith(matrix.os, 'windows')"
+      run: |
+        echo "VENV_ACTIVATE=source rpy2-env/bin/activate" >> $GITHUB_ENV
+        echo "R_LIBRARY=export LD_LIBRARY_PATH=$(python -m rpy2.situation LD_LIBRARY_PATH):${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+    - name: Set virtualenv activation command (Windows)
+      if: startsWith(matrix.os, 'windows')
+      shell: bash
+      run: |
+        echo "VENV_ACTIVATE=rpy2-env/Scripts/activate" >> $GITHUB_ENV
+        echo "R_LIBRARY=''" >> $GITHUB_ENV
+    - name: Install dependencies
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        uv pip install setuptools build
+    - name: Build wheel rinterface (Windows)
+      if: startsWith(matrix.os, 'windows')
+      continue-on-error: true
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        cd rpy2-rinterface
+        echo '[build]' > setup.cfg
+        echo 'compiler = mingw32' >> setup.cfg
+        set RPY2_API_FORCE=True
+        python -m build -C--global-option=--verbose -o dist/ --wheel .
+    - name: Build wheel rinterface (non-Windows)
+      if: "!startsWith(matrix.os, 'windows')"
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        cd rpy2-rinterface
+        python -m build -o dist/ --wheel .
+    - uses: actions/upload-artifact@v4
+      with:
+        name: rpy2-rinterface-${{ matrix.os }}-py${{ matrix.python-version }}-r${{ matrix.r-version }}
+        path: rpy2-rinterface/dist/rpy2_rinterface-*.whl
+  build-noabi-wheel:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10"]
+        r-version: [release]
+        os: ["windows-latest", ubuntu-latest, macos-15]
+        package: [{dir: ".", name: "rpy2"}, {dir: "rpy2-robjects", name: "rpy2-robjects"}]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Set up R ${{ matrix.r-version }}
+      uses: r-lib/actions/setup-r@v2
+      with:
+        r-version: ${{ matrix.r-version }}
+        use-public-rspm: true
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+    - name: Create venv
+      run: |
+           uv venv --no-project --no-config --no-managed-python rpy2-env
+    - name: Set activate venv commands (POSIX)
+      if: "!startsWith(matrix.os, 'windows')"
+      run: |
+        echo "VENV_ACTIVATE=source rpy2-env/bin/activate" >> $GITHUB_ENV
+    - name: Set activate venv command (Windows)
+      if: startsWith(matrix.os, 'windows')
+      shell: bash
+      run: |
+        echo "VENV_ACTIVATE=rpy2-env/Scripts/activate" >> $GITHUB_ENV
+    - name: Install dependencies
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        uv pip install setuptools build
+    - name: Build wheel
+      run: |
+        ${{ env.VENV_ACTIVATE }}
+        cd "${{ matrix.package.dir }}"
+        python -m build -o dist/ --wheel .
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.package.name }}-${{ matrix.os }}
+        path: ${{ matrix.package.dir }}/dist/*.whl
+  test:
+    needs: [build-api-wheel, build-noabi-wheel]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.9, "3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: ["windows-latest", ubuntu-latest, macos-15]
+        r-version: ["release", "devel"]
+        cffi_mode: ["ANY"]
+        include:
+          # Windows
+          - python-version: "3.12"
+            os: "windows-latest"
+            r-version: "devel"
+            experimental: true
+          - python-version: "3.13"
+            os: "windows-latest"
+            r-version: "devel"
+            experimental: true
+          - python-version: "3.14"
+            os: "windows-latest"
+            r-version: "devel"
+            experimental: true
+          # Windows, R-release
+          - python-version: "3.9"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.10"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+            cffi_mode: "ABI"
+          - python-version: "3.11"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.11"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+            cffi_mode: "ABI"
+          - python-version: "3.12"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.12"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+            cffi_mode: "ABI"
+          - python-version: "3.13"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.13"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+            cffi_mode: "API"
+          - python-version: "3.14"
+            os: "windows-latest"
+            r-version: "release"
+            experimental: false
+            cffi_mode: "API"
+          # Linux/Ubuntu
+          - python-version: "3.9"
+            os: "ubuntu-latest"
+            experimental: false
+          - python-version: "3.10"
+            os: "ubuntu-latest"
+            experimental: false
+          - python-version: "3.11"
+            os: "ubuntu-latest"
+            experimental: false
+          - python-version: "3.12"
+            os: "ubuntu-latest"
+            experimental: true
+          - python-version: "3.13"
+            os: "ubuntu-latest"
+            experimental: false
+          - python-version: "3.14"
+            os: "ubuntu-latest"
+            experimental: false
+          # MacOS-15
+          - python-version: "3.9"
+            os: "macos-15"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.10"
+            os: "macos-15"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.11"
+            os: "macos-15"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.12"
+            os: "macos-15"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.13"
+            os: "macos-15"
+            r-version: "release"
+            experimental: false
+          - python-version: "3.14"
+            os: "macos-15"
+            r-version: "release"
+            experimental: false
+    uses: ./.github/workflows/test.yml
+    with:
+      os: ${{ matrix.os }}
+      python-version: ${{ matrix.python-version }}
+      r-version: ${{ matrix.r-version }}
+      experimental: ${{ matrix.experimental }}
+      cffi_mode: ${{ matrix.cffi_mode }}

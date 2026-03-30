@@ -1,0 +1,49 @@
+name: check-build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PYTHONUTF8: "1"
+
+# only run one at a time per branch
+concurrency:
+  group: check-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-14' }}
+        name: Install Mac OS requirements
+        run: brew install bash
+      - if: matrix.os == 'windows-latest'
+        name: Install Windows requirements
+        run: choco install wget unzip
+      - name: Install python dependencies
+        run: pip install ".[dev,ja,ko]"
+      - name: Lint with Mypy
+        run: mypy sacrebleu scripts test
+      - name: Lint with Ruff
+        uses: chartboost/ruff-action@v1
+      - name: Python pytest test suite
+        run: python -m pytest
+      - name: CLI bash test suite
+        shell: bash
+        run: ./test.sh
+      - name: Build
+        run: |
+          pip install build
+          python -m build .

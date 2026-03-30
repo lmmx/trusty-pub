@@ -1,0 +1,34 @@
+name: "Mac Specific Commands"
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - comfy_cli/**
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    env:
+      PYTHONIOENCODING: "utf8"
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.12
+
+      - name: Install Dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -e .
+          comfy --skip-prompt --workspace ./ComfyUI install --fast-deps --m-series --skip-manager
+          comfy --here launch -- --cpu --quick-test-for-ci

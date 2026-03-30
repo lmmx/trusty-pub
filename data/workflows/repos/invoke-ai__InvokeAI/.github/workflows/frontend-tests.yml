@@ -1,0 +1,65 @@
+# Runs frontend tests.
+#
+# Checks for changes to frontend files before running the tests.
+# If always_run is true, always runs the tests.
+
+name: 'frontend tests'
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    types:
+      - 'ready_for_review'
+      - 'opened'
+      - 'synchronize'
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      always_run:
+        description: 'Always run the tests'
+        required: true
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      always_run:
+        description: 'Always run the tests'
+        required: true
+        type: boolean
+        default: true
+
+defaults:
+  run:
+    working-directory: invokeai/frontend/web
+
+jobs:
+  frontend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # expected run time: <2 min
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check for changed frontend files
+        if: ${{ inputs.always_run != true }}
+        id: changed-files
+        # Pinned to the _hash_ for v45.0.9 to prevent supply-chain attacks.
+        # See:
+        # - CVE-2025-30066
+        # - https://www.stepsecurity.io/blog/harden-runner-detection-tj-actions-changed-files-action-is-compromised
+        # - https://github.com/tj-actions/changed-files/issues/2463
+        uses: tj-actions/changed-files@a284dc1814e3fd07f2e34267fc8f81227ed29fb8
+        with:
+          files_yaml: |
+            frontend:
+              - 'invokeai/frontend/web/**'
+
+      - name: install dependencies
+        if: ${{ steps.changed-files.outputs.frontend_any_changed == 'true' || inputs.always_run == true }}
+        uses: ./.github/actions/install-frontend-deps
+
+      - name: vitest
+        if: ${{ steps.changed-files.outputs.frontend_any_changed == 'true' || inputs.always_run == true }}
+        run: 'pnpm test:no-watch'
+        shell: bash

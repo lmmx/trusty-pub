@@ -1,0 +1,27 @@
+name: 🌼 Release Sanity Check
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups --all-extras
+
+      - name: Verify README Examples
+        run: uv run python docs/readme/README_examples.py
+
+      - name: Build and Check Metadata
+        run: |
+          uv build
+          uvx twine check dist/*

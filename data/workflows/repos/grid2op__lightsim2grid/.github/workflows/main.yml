@@ -1,0 +1,660 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '*'
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  manylinux_build:
+    # build wheels for some linux
+    name: Build linux ${{ matrix.python.name }} wheel on ${{ matrix.cont.name}}
+    runs-on: ${{matrix.cont.runner}}
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+    strategy:
+      matrix:
+        python:
+          # - {
+          #   name: cp37,
+          #   abi: cp37m,
+          #   version: '3.7',
+          # }
+          - {
+            name: cp38,
+            abi: cp38,
+            version: '3.8',
+          }
+          - {
+            name: cp39,
+            abi: cp39,
+            version: '3.9',
+          }
+          - {
+            name: cp310,
+            abi: cp310,
+            version: '3.10',
+          }
+          - {
+            name: cp311,
+            abi: cp311,
+            version: '3.11',
+          }
+          - {
+            name: cp312,
+            abi: cp312,
+            version: '3.12',
+          }
+          - {
+            name: cp313,
+            abi: cp313,
+            version: '3.13',
+          }
+          - {
+            name: cp314,
+            abi: cp314,
+            version: '3.14',
+          }
+
+        cont:
+          - {
+            name: manylinux_2_28_x86_64, 
+            val: quay.io/pypa/manylinux_2_28_x86_64,
+            arch: amd64,
+            runner: ubuntu-latest
+          }
+          # - {
+          #   name: manylinux_2_28_aarch64, 
+          #   val: quay.io/pypa/manylinux_2_28_aarch64,
+          #   arch: arm64,
+          #   runner: ubuntu-24.04-arm
+          # }
+
+    container: 
+      image: ${{matrix.cont.val}}
+      # does not work if not manylinux2014_x86_64...
+      # does not work if not manylinux_2_28_x86_64...
+
+    steps:
+      # - name: Set up QEMU
+      #   if: matrix.cont.name == 'manylinux_2_28_aarch64'
+      #   uses: docker/setup-qemu-action@v2
+      #   with:
+      #     platforms: arm64
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup path
+        run: echo "/opt/python/${{ matrix.python.name }}-${{ matrix.python.abi }}/bin/" >> $GITHUB_PATH
+
+      - name: get python version
+        run: |
+          python3 --version
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements_compile.txt
+          python3 -m pip freeze
+
+      - name: Compile SuiteSparse
+        run: 
+          make
+
+      - name: Build lightsim2grid wheel
+        run: |
+          # export __O3_OPTIM=1
+          python3 setup.py bdist_wheel
+          auditwheel repair dist/*.whl
+
+      - name: Build source archive
+        if: matrix.python.name == 'cp312'
+        run: python3 setup.py sdist
+
+      - name: Install lightsim2grid wheel
+        run: |
+          python3 -m pip install wheelhouse/*.whl --user
+          python3 -m pip freeze
+
+      - name: Check package can be imported (bare install, default numpy)
+        run: |
+          mkdir tmp_for_import_checking
+          cd tmp_for_import_checking
+          python3 -c "import lightsim2grid"
+          python3 -c "from lightsim2grid import *"
+          python3 -c "from lightsim2grid.newtonpf import newtonpf"
+          python3 -c "from lightsim2grid.timeSerie import TimeSeriesCPP"
+          python3 -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysisCPP"
+          python3 -c "from lightsim2grid.securityAnalysis import SecurityAnalysisCPP"
+          python3 -c "from lightsim2grid.gridmodel import GridModel"
+
+      - name: Check package can be imported (bare install, numpy < 2)
+        if: matrix.python.name != 'cp37' && matrix.python.name != 'cp38' && matrix.python.name != 'cp313'
+        run: |
+          python3 -m pip install "numpy<2"
+          cd tmp_for_import_checking
+          python3 -c "import lightsim2grid"
+          python3 -c "from lightsim2grid import *"
+          python3 -c "from lightsim2grid.newtonpf import newtonpf"
+          python3 -c "from lightsim2grid.timeSerie import TimeSeriesCPP"
+          python3 -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysisCPP"
+          python3 -c "from lightsim2grid.securityAnalysis import SecurityAnalysisCPP"
+          python3 -c "from lightsim2grid.gridmodel import GridModel"
+      
+      - name: Fix urllib3 (python 3.7)
+        if: matrix.python.name == 'cp37'
+        run:
+          pip install urllib3==1.26.6
+          # otherwise urllib3 v2.0 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'OpenSSL 1.0.2k-fips  26 Jan 2017'
+
+      - name: Install grid2op
+        if: matrix.python.name != 'cp313' # pandapower does not support 3.13, so grid2op does not so I cannot test that for 3.13
+        run: | 
+          python3 -m pip install grid2op pandapower lxml  # lxml missing import see https://github.com/e2nIEE/pandapower/issues/2752
+          python3 -m pip freeze
+
+      - name: Check extra can be imported can be imported (with grid2op)
+        if: matrix.python.name != 'cp313' # pandapower does not support 3.13, so grid2op does not so I cannot test that for 3.13
+        run: |
+          cd tmp_for_import_checking
+          python3 -v -c "from lightsim2grid import LightSimBackend"
+          python3 -c "from lightsim2grid.timeSerie import TimeSerie"
+          python3 -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysis"
+          python3 -c "from lightsim2grid.physical_law_checker import PhysicalLawChecker"
+          python3 -c "from lightsim2grid.securityAnalysis import SecurityAnalysis"
+          python3 -c "from lightsim2grid.gridmodel import init_from_pandapower"
+      
+      - name: Check LightSimBackend can be used to create env
+        if: matrix.python.name != 'cp313' # pandapower does not support 3.13, so grid2op does not so I cannot test that for 3.13
+        run: |
+          cd tmp_for_import_checking
+          python3 -v -c "from lightsim2grid import LightSimBackend; import grid2op; env = grid2op.make('l2rpn_case14_sandbox', test=True, backend=LightSimBackend())"
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightsim2grid-wheel-linux-${{ matrix.python.name }}-${{ matrix.cont.name }}
+          path: wheelhouse/*.whl
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        if: matrix.python.name == 'cp312'
+        with:
+          name: lightsim2grid-sources
+          path: dist/*.tar.gz
+
+  windows_build:
+    # build wheels for windows
+    name: Build windows ${{ matrix.python.name }} wheel for ${{ matrix.win_arch.msvc}}
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        python:
+          # - {
+          #   name: cp37,
+          #   version: '3.7',
+          # }
+          - {
+            name: cp38,
+            version: '3.8',
+          }
+          - {
+            name: cp39,
+            version: '3.9',
+          }
+          - {
+            name: cp310,
+            version: '3.10',
+          }
+          - {
+            name: cp311,
+            version: '3.11',
+          }
+          - {
+            name: cp312,
+            version: '3.12',
+          }
+          - {
+            name: cp313,
+            version: '3.13',
+          }
+          - {
+            name: cp314,
+            version: '3.14',
+          }
+        win_arch:
+          - {
+            name: "AMD64",
+            msvc: x64
+          }
+          # - {
+          #   name: "x86",
+          #   msvc: x86
+          # }
+    env:
+      RUNNER_OS: windows-2022
+      PYTHON_VERSION: ${{ matrix.python.version }}
+
+    steps:
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Python ${{ matrix.python.version }} ${{ matrix.win_arch.msvc}}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python.version }}
+          architecture: ${{ matrix.win_arch.msvc}}
+
+      - name: Setup MSVC ${{ matrix.win_arch.msvc}}
+        uses: bus1/cabuild/action/msdevshell@e22aba57d6e74891d059d66501b6b5aed8123c4d # v1
+        with:
+          architecture: ${{ matrix.win_arch.msvc}}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade setuptools
+          python -m pip install -r requirements_compile.txt
+
+      - name: Compile SuiteSparse cmake
+        run: |
+          cd build_cmake
+          python generate_c_files.py
+          mkdir build
+          cd build
+          cmake -DCMAKE_INSTALL_PREFIX=..\built -DCMAKE_BUILD_TYPE=Release ..
+          cmake --build . --config Release
+          cmake --install . --prefix ..\built
+          cd ..
+          cd ..
+          set __O3_OPTIM=1
+          python setup.py build
+
+      - name: Build wheel
+        run: python setup.py bdist_wheel
+
+      - name: Install wheel
+        shell: bash
+        run: python -m pip install dist/*.whl --user
+
+      - name: Check package can be imported (bare install, default numpy)
+        run: |
+          mkdir tmp_for_import_checking
+          cd tmp_for_import_checking
+          python3 -c "import lightsim2grid"
+          python3 -c "from lightsim2grid import *"
+          python3 -c "from lightsim2grid.newtonpf import newtonpf"
+          python3 -c "from lightsim2grid.timeSerie import TimeSeriesCPP"
+          python3 -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysisCPP"
+          python3 -c "from lightsim2grid.securityAnalysis import SecurityAnalysisCPP"
+          python3 -c "from lightsim2grid.gridmodel import GridModel"
+
+      - name: Check package can be imported (bare install, numpy < 2)
+        if: matrix.python.name != 'cp37' && matrix.python.name != 'cp38' && matrix.python.name != 'cp313' && matrix.python.name != 'cp314'
+        run: |
+          python3 -m pip install "numpy<2"
+          cd tmp_for_import_checking
+          python3 -c "import lightsim2grid"
+          python3 -c "from lightsim2grid import *"
+          python3 -c "from lightsim2grid.newtonpf import newtonpf"
+          python3 -c "from lightsim2grid.timeSerie import TimeSeriesCPP"
+          python3 -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysisCPP"
+          python3 -c "from lightsim2grid.securityAnalysis import SecurityAnalysisCPP"
+          python3 -c "from lightsim2grid.gridmodel import GridModel"
+          python3 -m pip install --upgrade numpy
+
+      - name: Check LightSimBackend can be imported (with grid2op)
+        if: matrix.python.name != 'cp314' # pandapower does not support 3.14, so grid2op does not so I cannot test that for 3.14
+        run: |
+          python -m pip install grid2op lxml   # lxml missing import see https://github.com/e2nIEE/pandapower/issues/2752
+          cd tmp_for_import_checking
+          python -c "from lightsim2grid import LightSimBackend"
+          python -c "from lightsim2grid import LightSimBackend; import grid2op; env = grid2op.make('l2rpn_case14_sandbox', test=True, backend=LightSimBackend())"
+          python -c "from lightsim2grid.timeSerie import TimeSerie"
+          python -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysis"
+          python -c "from lightsim2grid.physical_law_checker import PhysicalLawChecker"
+          python -c "from lightsim2grid.securityAnalysis import SecurityAnalysis"
+          python -c "from lightsim2grid.gridmodel import init_from_pandapower"
+          
+      - name: Check LightSimBackend can be used to create env
+        if: matrix.python.name != 'cp314' # pandapower does not support 3.14, so grid2op does not so I cannot test that for 3.14
+        run: |
+          cd tmp_for_import_checking
+          python3 -v -c "from lightsim2grid import LightSimBackend; import grid2op; env = grid2op.make('l2rpn_case14_sandbox', test=True, backend=LightSimBackend())"
+
+      # - name: Debug windows CI
+      #   run: |
+      #     python -m unittest lightsim2grid.tests.test_n1contingencyrewards.TestN1ContingencyReward_Base.test_do_nothing
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightsim2grid-wheel-win-${{ matrix.python.name }}-${{ matrix.win_arch.msvc}}
+          path: dist/*.whl
+
+  macos_build_37_:
+    ## build wheel for python 3.7 and above for macos (only >= 3.10 for arm64 )
+    name: Build darwin ${{ matrix.python.name }} wheel on ${{ matrix.runner.arch}}
+    runs-on: ${{ matrix.runner.name }}
+    strategy:
+      matrix:
+        python:
+          # - {
+          #   name: cp37,
+          #   version: '3.7',
+          # }
+          - {
+            name: cp38,
+            version: '3.8',
+          }
+          - {
+            name: cp39,
+            version: '3.9',
+          }
+          - {
+            name: cp310,
+            version: '3.10',
+          }
+          - {
+            name: cp311,
+            version: '3.11',
+          }
+          - {
+            name: cp312,
+            version: '3.12',
+          }
+          - {
+            name: cp313,
+            version: '3.13',
+          }
+          - {
+            name: cp314,
+            version: '3.14',
+          }
+        runner:
+          - {
+            name: macos-15-intel,
+            arch: x86_64
+          }
+          - {
+            name: macos-14,
+            arch: arm64
+          }
+        exclude:
+          - python:  # does not work
+              name: cp37  
+            runner:
+              arch: arm64
+          - python:  # does not work
+              name: cp38  
+            runner: 
+              arch: arm64
+          - python:  # does not work
+              name: cp39
+            runner:
+              arch: arm64
+
+    env:
+      RUNNER_OS: ${{ matrix.runner.name }}
+      PYTHON_VERSION: ${{ matrix.python.version }}
+
+    steps:
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python.version }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade setuptools  # for python >= 3.12
+          python -m pip install -r requirements_compile.txt
+
+      - name: Compile SuiteSparse make
+        run: |
+          make
+          export __O3_OPTIM=1
+          python setup.py build
+
+      - name: Build wheel (x86_64)
+        if: matrix.runner.arch == 'x86_64'
+        run: python setup.py bdist_wheel --plat-name=macosx_10_9_x86_64
+
+      - name: Build wheel (arm64)
+        if: matrix.runner.arch == 'arm64'
+        run: python setup.py bdist_wheel --plat-name=macosx_11_0_arm64
+
+      - name: Install wheel
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl --user
+          python -m pip freeze
+
+      - name: Check package can be imported (bare install, default numpy)
+        run: |
+          mkdir tmp_for_import_checking
+          cd tmp_for_import_checking
+          python3 -c "import lightsim2grid"
+          python3 -c "from lightsim2grid import *"
+          python3 -c "from lightsim2grid.newtonpf import newtonpf"
+          python3 -c "from lightsim2grid.timeSerie import TimeSeriesCPP"
+          python3 -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysisCPP"
+          python3 -c "from lightsim2grid.securityAnalysis import SecurityAnalysisCPP"
+          python3 -c "from lightsim2grid.gridmodel import GridModel"
+
+      - name: Check package can be imported (bare install)
+        if: matrix.python.name != 'cp37' && matrix.python.name != 'cp38'
+        run: |
+          cd tmp_for_import_checking
+          python3 -c "import lightsim2grid"
+          python3 -c "from lightsim2grid import *"
+          python3 -c "from lightsim2grid.newtonpf import newtonpf"
+          python3 -c "from lightsim2grid.timeSerie import TimeSeriesCPP"
+          python3 -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysisCPP"
+          python3 -c "from lightsim2grid.securityAnalysis import SecurityAnalysisCPP"
+          python3 -c "from lightsim2grid.gridmodel import GridModel"
+      
+      - name: Fix urllib3 (python 3.7)
+        if: matrix.python.name == 'cp37'
+        run:
+          pip install urllib3==1.26.6
+          # otherwise urllib3 v2.0 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'OpenSSL 1.0.2k-fips  26 Jan 2017'
+
+      - name: Install grid2op
+        if: matrix.python.name != 'cp314' || matrix.runner.arch != 'x86_64'
+        # grid2op does not work on darwin cp34 wheel on macos on x86_64
+        # probably because of pandapower
+        run: | 
+          python -m pip install grid2op lxml   # lxml missing import see https://github.com/e2nIEE/pandapower/issues/2752
+          python -m pip freeze
+
+      - name: Check extra can be imported can be imported (with grid2op)
+        if: matrix.python.name != 'cp314' || matrix.runner.arch != 'x86_64'
+        # grid2op does not work on darwin cp34 wheel on macos on x86_64
+        # probably because of pandapower
+        run: |
+          cd tmp_for_import_checking
+          python -v -c "from lightsim2grid import LightSimBackend"
+          python -c "from lightsim2grid.timeSerie import TimeSerie"
+          python -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysis"
+          python -c "from lightsim2grid.physical_law_checker import PhysicalLawChecker"
+          python -c "from lightsim2grid.securityAnalysis import SecurityAnalysis"
+          python -c "from lightsim2grid.gridmodel import init_from_pandapower"
+      
+      - name: Check LightSimBackend can be used to create env
+        if: matrix.python.name != 'cp314' || matrix.runner.arch != 'x86_64'
+        # grid2op does not work on darwin cp34 wheel on macos on x86_64
+        # probably because of pandapower
+        run: |
+          cd tmp_for_import_checking
+          python -v -c "from lightsim2grid import LightSimBackend; import grid2op; env = grid2op.make('l2rpn_case14_sandbox', test=True, backend=LightSimBackend())"
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightsim2grid-wheel-darwin-${{ matrix.python.name }}-${{ matrix.runner.arch}}
+          path: dist/*.whl
+
+  exotic_build:
+    # build wheel using emulation for "exotic"things
+    # see https://github.com/cvxpy/cvxpy/blob/master/.github/workflows/build.yml
+    name: Build ${{ matrix.runner.name }} ${{ matrix.python.name }} wheel with cibuildwheel
+    runs-on: ${{ matrix.runner.name }}
+    strategy:
+      matrix:
+        runner:
+          - {
+            name: macos-14,  # host on arm64
+            whl_nm: macos_arm64,
+            cibuildwheel: macos
+          }
+          - {
+            name: windows-2022,  # host on x86_64
+            whl_nm: windows_arm64,
+            cibuildwheel: windows
+          }
+          # - {
+          #   name: ubuntu-latest,  # host on x86_64  # takes forever, like 20 mins x 2 at least
+          #   whl_nm: linux_arm64,
+          #   cibuildwheel: linux
+          # }
+        python:
+          - {
+            name: cp38,
+            version: '3.8',
+          }
+          - {
+            name: cp39,
+            version: '3.9',
+          }
+          - {
+            name: cp310,
+            version: '3.10',
+          }
+          - {
+            name: cp311,
+            version: '3.11',
+          }
+          - {
+            name: cp312,
+            version: '3.12',
+          }
+          - {
+            name: cp313,
+            version: '3.13',
+          }
+          - {
+            name: cp314,
+            version: '3.14',
+          }
+        exclude:
+          - python: 
+              name: cp310  # because already done natively above
+            runner:
+              name: macos-14
+          - python: 
+              name: cp311  # because already done natively above
+            runner:
+              name: macos-14
+          - python: 
+              name: cp312  # because already done natively above
+            runner:
+              name: macos-14
+          - python: 
+              name: cp313  # because already done natively above
+            runner:
+              name: macos-14
+          - python: 
+              name: cp314  # because already done natively above
+            runner:
+              name: macos-14
+          - python: 
+              name: cp38  # does not work
+            runner:
+              name: windows-2022
+    env:
+      RUNNER_OS: ${{ matrix.runner.name }}
+      PYTHON_VERSION: ${{ matrix.python.version }}
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130  # v3.7.0
+        with:
+          platforms: all
+
+      - name: Compile with cibuildwheel
+        uses: pypa/cibuildwheel@63fd63b352a9a8bdcc24791c9dbee952ee9a8abc  # v3.3.0
+        env:
+          CIBW_PLATFORM: "${{ matrix.runner.cibuildwheel}}"
+          CIBW_BUILD: "${{ matrix.python.name}}-*"
+          CIBW_ARCHS_LINUX: aarch64 
+          CIBW_ARCHS_MACOS: arm64 
+          CIBW_ARCHS_WINDOWS: ARM64 
+          CIBW_ENVIRONMENT: __O3_OPTIM=1
+          CIBW_BEFORE_ALL: python -m pip install --upgrade setuptools wheel pybind11 pip && python -m pip install "numpy>=2; python_version >= '3.9'"  "numpy; python_version < '3.9'"
+          CIBW_BEFORE_BUILD_MACOS: make clean && CC=clang CXX=clang++ make  # no need to cross compile this because host is already arm64 based
+          CIBW_BEFORE_BUILD_LINUX: make clean && make  # maybe we need to cross compile this (host x64) but maybe not (qemu) ?
+          CIBW_BEFORE_BUILD_WINDOWS: > 
+            cd build_cmake &&
+            python generate_c_files.py &&
+            mkdir build &&
+            cd build  &&
+            cmake -DCMAKE_INSTALL_PREFIX=..\built -DCMAKE_BUILD_TYPE=Release -DCMAKE_GENERATOR_PLATFORM=arm64 .. &&
+            cmake --build . --config Release &&
+            cmake --install . --prefix ..\built
+          CIBW_TEST_REQUIRES: grid2op pandapower
+          CIBW_TEST_SKIP: "*-macosx_arm64 *-win_arm64" # to silence warning "While arm64 wheels can be built on x86_64, they cannot be tested."
+          CIBW_TEST_COMMAND: >
+            python -c "import lightsim2grid" &&
+            python -c "from lightsim2grid import *" &&
+            python -c "from lightsim2grid.newtonpf import newtonpf" &&
+            python -c "from lightsim2grid.timeSerie import TimeSeriesCPP, TimeSerie" &&
+            python -c "from lightsim2grid.contingencyAnalysis import ContingencyAnalysisCPP, ContingencyAnalysis" &&
+            python -c "from lightsim2grid.securityAnalysis import SecurityAnalysisCPP, SecurityAnalysis" &&
+            python -c "from lightsim2grid.gridmodel import GridModel, init_from_pandapower" &&
+            python -c "from lightsim2grid import LightSimBackend" &&
+            python -c "from lightsim2grid.physical_law_checker import PhysicalLawChecker"
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightsim2grid-wheel-exotic-${{ matrix.runner.whl_nm}}-${{ matrix.python.name }}
+          path: ./wheelhouse/*.whl
+
+  package:
+    name: Package wheels
+    runs-on: ubuntu-latest
+    needs: [exotic_build, macos_build_37_, windows_build, manylinux_build]
+
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: download
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightsim2grid-wheels
+          path: |
+            download/**/*.whl
+            download/**/*.tar.gz

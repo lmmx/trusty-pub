@@ -1,0 +1,118 @@
+name: ci
+on:
+  push: ~
+  pull_request: ~
+jobs:
+  build:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "pypy-3.8", "pypy-3.9", "pypy-3.10" ]
+        regex: [ "1", "0" ]
+
+    steps:
+      - name: Setup python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Git User config
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "github-actions"
+
+      - name: Install Dependencies
+        run: |
+          pip install -e .[dev,test]
+          pip install coveralls
+
+      - name: Install regex
+        run: |
+          pip install regex
+        if: ${{ matrix.regex == '1' }}
+
+      - run: pylint rebulk
+
+      - run: coverage run -m pytest
+        env:
+          REBULK_REGEX_ENABLED: ${{ matrix.regex }}
+
+      - run: python setup.py build
+
+      - name: Coveralls
+        run: coveralls
+        env:
+          COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+
+  commitlint:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v5
+
+  release:
+    if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
+    needs: build
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ 3.12 ]
+
+    steps:
+      - name: Setup python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Git User config
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "github-actions"
+
+      - name: Install Dependencies
+        run: pip install -e .[dev,test]
+
+      - name: Install python-semantic-release and twine
+        run: pip install python-semantic-release twine
+
+      - name: Bump version
+        run: semantic-release version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to pypi
+        run: twine upload --username "__token__" --password "${PYPI_TOKEN}" dist/*
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+
+      - name: Publish release
+        run: semantic-release publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge master to develop
+        uses: robotology/gh-action-nightly-merge@v1.4.0
+        with:
+          stable_branch: 'master'
+          development_branch: 'develop'
+          allow_ff: true
+          user_name: github-actions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

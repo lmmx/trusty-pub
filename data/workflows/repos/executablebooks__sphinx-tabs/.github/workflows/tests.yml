@@ -1,0 +1,75 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: continuous-integration
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+  # Run weekly to check for breaking changes in unpinned dependencies
+  schedule:
+    - cron: '0 18 * * 5'
+
+jobs:
+
+  py-tests:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install .[testing]
+    - name: Run pytest
+      run: |
+        pytest --cov=sphinx_tabs --cov-report=xml --cov-report=term-missing
+
+  js-tests:
+
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Use Node.js 15
+      uses: actions/setup-node@v6
+      with:
+        node-version: '15'
+    - name: Install jest
+      run: npm install jest@26.6.3
+    - name: Run JS tests
+      run: npm test
+
+  publish:
+
+    name: Publish to PyPi
+    needs: [py-tests, js-tests]
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v6
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v6
+      with:
+        python-version: 3.12
+    - name: Build package
+      run: |
+        python -m pip install -U pip build
+        python -m build --sdist --wheel .
+    - name: Publish
+      uses: pypa/gh-action-pypi-publish@v1.13.0
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_KEY }}

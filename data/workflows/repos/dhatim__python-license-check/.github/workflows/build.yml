@@ -1,0 +1,29 @@
+name: build
+on:
+    push:
+        branches: [ '*' ]
+    pull_request:
+        branches: [ '*' ]
+jobs:
+    build:
+        runs-on: ubuntu-24.04
+        strategy:
+            matrix:
+                python-version: [ '3.8', '3.9', '3.10', '3.11' ]
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: set up Python ${{ matrix.python-version }}
+                uses: actions/setup-python@v5
+                with:
+                    python-version: ${{ matrix.python-version }}
+            -   name: install dependencies
+                run: |
+                    python -m pip install --upgrade pip
+                    pip install -U tox tox-gh-actions setuptools wheel
+                    pip install -r test-requirements.txt
+            -   name: test with tox
+                env:
+                    PYTEST_ADDOPTS: "--strict --cov --cov-report=term-missing --cov-report=xml"
+                run: tox
+            -   name: codecov
+                uses: codecov/codecov-action@v5

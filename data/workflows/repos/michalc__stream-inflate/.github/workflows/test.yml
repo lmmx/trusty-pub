@@ -1,0 +1,57 @@
+name: Test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-source-package-and-wheels:
+    uses: ./.github/workflows/build-source-package-and-wheels.yml
+    with:
+      github-ref-name: 'v0.0.0.dev0'
+
+  test:
+    name: Test
+    strategy:
+      matrix:
+        include:
+          - python-version: "3.7.7"
+            os: "ubuntu-24.04"
+          - python-version: "3.8.2"
+            os: "ubuntu-24.04"
+          - python-version: "3.9.0"
+            os: "ubuntu-24.04"
+          - python-version: "3.10.0"
+            os: "ubuntu-24.04"
+          - python-version: "3.11.1"
+            os: "ubuntu-24.04"
+          - python-version: "3.12.0"
+            os: "ubuntu-24.04"
+          - python-version: "3.13.0"
+            os: "ubuntu-24.04"
+          - python-version: "3.14.0"
+            os: "ubuntu-24.04"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v3"
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@v6
+        with:
+          # Pin to be able to install older Python
+          version: ${{ matrix.python-version == '3.7.7' && '0.6.17' || '0.10.6' }}
+          python-version: ${{ matrix.python-version }}
+          activate-environment: true
+      - name: "Install python dependencies"
+        # Suspect code coverage is contributing factor to cancellation in GitHub actions, but seems fine on Python 3.14
+        run: |
+          CC=clang STREAM_INFLATE_CODE_COVERAGE=${{ matrix.python-version == '3.14.0' && '1' || '0' }} uv pip install '.[dev]'
+          CC=clang STREAM_INFLATE_CODE_COVERAGE=${{ matrix.python-version == '3.14.0' && '1' || '0' }}  python setup.py build_ext --inplace
+      - name: "Run tests"
+        run: |
+          pytest --cov -v
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

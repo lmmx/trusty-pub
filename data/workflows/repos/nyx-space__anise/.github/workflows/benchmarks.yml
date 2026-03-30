@@ -1,0 +1,67 @@
+name: Benchmark ANISE versus SPICE
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ephem_type2_chebyshev:
+    name: SPICE versus ANISE Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        
+      - name: Download data
+        run: |
+          wget -O data/de421.bsp http://public-data.nyxspace.com/anise/de421.bsp
+          wget -O data/de430.bsp http://public-data.nyxspace.com/anise/de430.bsp
+          wget -O data/de440s.bsp http://public-data.nyxspace.com/anise/de440s.bsp
+          wget -O data/de440.bsp http://public-data.nyxspace.com/anise/de440.bsp
+          wget -O data/pck08.pca http://public-data.nyxspace.com/anise/v0.5/pck08.pca
+          wget -O data/gmat-hermite.bsp http://public-data.nyxspace.com/anise/ci/gmat-hermite.bsp
+          wget -O data/gmat-hermite-big-endian.bsp http://public-data.nyxspace.com/anise/ci/gmat-hermite-big-endian.bsp
+          wget -O data/variable-seg-size-hermite.bsp http://public-data.nyxspace.com/anise/ci/variable-seg-size-hermite.bsp
+          wget -O data/earth_latest_high_prec.bpc http://public-data.nyxspace.com/anise/ci/earth_latest_high_prec-2023-09-08.bpc
+          wget -O data/lro.bsp http://public-data.nyxspace.com/nyx/examples/lrorg_2023349_2024075_v01_LE.bsp
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install CSPICE
+        run: sh dev-env-setup.sh && cd .. # Return to root
+
+      - uses: taiki-e/install-action@cargo-binstall
+      - name: Install iai-callgrind-runner
+        run: |
+          version=$(cargo metadata --format-version=1 |\
+            jq '.packages[] | select(.name == "iai-callgrind").version' |\
+            tr -d '"'
+          )
+          cargo binstall --no-confirm iai-callgrind-runner --version $version
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+
+      - name: Bench JPL Ephemerides
+        run: cargo bench --bench "*_jpl_ephemerides" --workspace --exclude anise-py
+      
+      - name: Bench Spacecraft (Hermite type 13)
+        run: cargo bench --bench "*_spacecraft_ephemeris" --workspace --exclude anise-py
+      
+      - name: Bench Binary planetary constants
+        run: cargo bench --bench "crit_bpc_rotation" --workspace --exclude anise-py
+      
+      - name: Bench planetary constants ANISE file
+        run: cargo bench --bench "crit_planetary_data" --workspace --exclude anise-py
+
+      - name: Save benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jpl-development-ephemerides-benchmark
+          path: target/criterion/**/report/

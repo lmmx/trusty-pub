@@ -1,0 +1,454 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - labeled
+      - unlabeled
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    paths:
+      - setup.py
+      - setup.cfg
+      - pyproject.toml
+      - MANIFEST.in
+      - CMakeLists.txt
+      - include/**
+      - src/**
+      - tests/**
+      - optree/**
+      - .github/workflows/tests.yml
+  # Allow to trigger the workflow manually
+  workflow_dispatch:
+    inputs:
+      nightly-pybind11:
+        description: "Use nightly pybind11"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CMAKE_BUILD_TYPE: "Debug"
+  OPTREE_CXX_WERROR: "ON"
+  _GLIBCXX_USE_CXX11_ABI: "1"
+  FULL_TEST_PYTHON_VERSIONS: "3.12;3.13"
+  PYTHONDEVMODE: "1"
+  PYTHONUNBUFFERED: "1"
+  PYTHON: "python" # to be updated
+  PYTHON_TAG: "py3" # to be updated
+  VENV_BIN_NAME: "bin" # to be updated
+  COLUMNS: "100"
+  FORCE_COLOR: "1"
+  CLICOLOR_FORCE: "1"
+  PIP_EXTRA_INDEX_URL: "https://download.pytorch.org/whl/cpu"
+
+jobs:
+  test:
+    name: >-
+      Test for
+      ${{ startsWith(matrix.python-version, 'pypy') && 'PyPy' || 'CPython' }} ${{ matrix.python-version }}
+      on ${{ matrix.runner }}
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+        python-version:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.13t"
+          - "3.14"
+          - "3.14t"
+          - "pypy-3.11"
+      fail-fast: false
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          update-environment: true
+          allow-prereleases: true
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements*.txt
+            */requirements*.txt
+
+      - name: Set up Environment
+        shell: bash
+        run: |
+          set -x
+
+          if [[ "${{ runner.os }}" == 'Windows' ]]; then
+            echo "CMAKE_BUILD_TYPE=Release" | tee -a "${GITHUB_ENV}"
+            echo "VENV_BIN_NAME=Scripts" | tee -a "${GITHUB_ENV}"
+          fi
+          ${{ env.PYTHON }} -VV
+          echo "::group::Upgrade pip"
+          ${{ env.PYTHON }} -m pip install --upgrade pip setuptools wheel rich
+          echo "::endgroup::"
+          echo "::group::Python sysconfig"
+          ${{ env.PYTHON }} -c 'import rich, sysconfig; rich.print(sysconfig.get_config_vars())'
+          echo "::endgroup::"
+
+          if [[ "${{ matrix.python-version }}" == *t* ]]; then
+            echo "PYTHON_GIL=0" | tee -a "${GITHUB_ENV}"
+          fi
+
+          export PYTHON_TAG="$(
+            echo 'import sys, sysconfig; print(
+              "{0.name[0]}p{1.major}{1.minor}{2}".format(
+                sys.implementation,
+                sys.version_info,
+                getattr(sys, "abiflags", "t" if sysconfig.get_config_var("Py_GIL_DISABLED") else ""),
+              ).lower(),
+            )' | ${{ env.PYTHON }} -
+          )"
+          echo "PYTHON_TAG=${PYTHON_TAG}" | tee -a "${GITHUB_ENV}"
+
+      - name: Install System CMake (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -yqq cmake which
+          which -a cmake
+
+      - name: Install System CMake (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update --quiet --force
+          brew list --formula cmake >/dev/null && brew uninstall --formula cmake || true
+          brew install --formula cmake
+          which -a cmake
+
+      - name: Install System CMake (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install cmake cmake.install --no-progress --force --yes
+          Write-Output "PATH=${Env:PATH}"
+          Get-Command -All cmake
+          $Env:PATH = ( "${Env:PATH}".Split(';') | Where-Object { $_ -notmatch '^(\w+:)?\\Strawberry(\\|$)' } ) -join ';'
+          Write-Output "PATH=${Env:PATH}"
+          Write-Output "PATH=${Env:PATH}" | Out-File -FilePath "${Env:GITHUB_ENV}" -Encoding utf8 -Append
+          Get-Command -All cmake
+
+      - name: Enable core dump generation (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo sysctl -w kernel.core_pattern="core.${PYTHON_TAG}.%P"
+          sudo sysctl -w kernel.core_uses_pid=0
+          sudo sysctl -w fs.suid_dumpable=1
+          sysctl kernel.core_pattern kernel.core_uses_pid fs.suid_dumpable
+
+      - name: Enable core dump generation (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sudo sysctl -w kern.corefile="core.${PYTHON_TAG}.%P"
+          sudo sysctl -w kern.coredump=1
+          sudo sysctl -w kern.sugid_coredump=1
+          sysctl kern.corefile kern.coredump kern.sugid_coredump
+
+      - name: Enable core dump generation (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install windowsdriverkit11 --no-progress --force --yes
+          $pwd = Get-Location
+          $Env:_NT_SOURCE_PATH = "${pwd}"
+          $Env:_NT_SYMBOL_PATH = "cache*${pwd}\.symcache;${Env:_NT_SOURCE_PATH};srv*https://msdl.microsoft.com/download/symbols"
+          Get-ChildItem -Path "${Env:ProgramFiles(x86)}\Windows Kits" -Directory | Sort-Object -Property Name
+          $WindowsKitsDir = "${Env:ProgramFiles(x86)}\Windows Kits\10"
+          $DebuggersDir = "${WindowsKitsDir}\Debuggers\x64"
+          Get-ChildItem -Path "${DebuggersDir}"
+          $Env:PATH = "${DebuggersDir};${Env:PATH}"
+          $PYTEST = 'cdb -gG -o -c ".dump /ma /u core.dmp; !py; g; q" ${{ env.PYTHON }} -X dev -m pytest -Walways'
+          Write-Output "_NT_SOURCE_PATH=${Env:_NT_SOURCE_PATH}" | Out-File -FilePath "${Env:GITHUB_ENV}" -Encoding utf8 -Append
+          Write-Output "_NT_SYMBOL_PATH=${Env:_NT_SYMBOL_PATH}" | Out-File -FilePath "${Env:GITHUB_ENV}" -Encoding utf8 -Append
+          Write-Output "PATH=${Env:PATH}" | Out-File -FilePath "${Env:GITHUB_ENV}" -Encoding utf8 -Append
+          Write-Output "PYTEST=${PYTEST}" | Out-File -FilePath "${Env:GITHUB_ENV}" -Encoding utf8 -Append
+
+          cdb -version
+
+      - name: Use nightly pybind11
+        shell: bash
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.nightly-pybind11 == 'true') ||
+          (
+            github.event_name == 'pull_request' &&
+            contains(github.event.pull_request.labels.*.name, 'test-with-nightly-pybind11')
+          )
+        run: |
+          ${{ env.PYTHON }} -m pip install --force-reinstall "$(${{ env.PYTHON }} .github/workflows/set_setup_requires.py)"
+          echo "::group::pyproject.toml"
+          cat pyproject.toml
+          echo "::endgroup::"
+
+      - name: Test installable with C++17
+        shell: bash
+        if: runner.os != 'Windows'
+        run: |
+          (
+            set -ex
+            ${{ env.PYTHON }} -m venv venv
+            source venv/bin/activate
+            OPTREE_CXX_WERROR=OFF CMAKE_CXX_STANDARD=17 \
+              ${{ env.PYTHON }} -m pip install -v .
+            pushd tests
+            ${{ env.PYTHON }} -X dev -Walways -Werror -c 'import optree'
+            popd
+            rm -rf venv
+          )
+
+          if [[ "$?" -ne 0 ]]; then
+            echo "::error::Failed to install with C++17." >&2
+            exit 1
+          fi
+          CORE_DUMP_FILES="$(
+            find . -type d -path "./venv" -prune \
+              -o '(' -iname "core.*.[1-9]*" -o -iname "core_*.dmp" ')' -print
+          )"
+          if [[ -n "${CORE_DUMP_FILES}" ]]; then
+            echo "::error::Coredump files found, indicating a crash during tests." >&2
+            echo "Coredump files:" >&2
+            ls -alh ${CORE_DUMP_FILES} >&2
+            exit 1
+          fi
+
+      - name: Test buildable without Python frontend
+        if: runner.os != 'Windows'
+        run: |
+          (
+            set -ex
+            ${{ env.PYTHON }} -m venv venv
+            source venv/bin/activate
+            make cmake-build && make clean
+            rm -rf venv
+          )
+
+      - name: Install test dependencies
+        shell: bash
+        run: |
+          if [[ ";${FULL_TEST_PYTHON_VERSIONS};" == *";${{ matrix.python-version }};"* ]]; then
+            ${{ env.PYTHON }} -m pip install -r tests/requirements.txt
+          fi
+
+      - name: Install OpTree (with system CMake)
+        run: ${{ env.PYTHON }} -m pip install -v --editable '.[test]'
+
+      - name: Check installable with CMake from PyPI (with venv'ed CMake)
+        shell: bash
+        run: |
+          PYTHON_EXE=("${{ env.PYTHON }}")
+          if [[ "${{ runner.os }}" == 'Windows' ]]; then
+            PYTHON_EXE=(
+              cdb -gG -o -c ".dump /ma /u core.dmp; !py; g; q"
+              "${{ env.PYTHON }}"
+            )
+          fi
+
+          (
+            set -ex
+            ${{ env.PYTHON }} -m venv venv
+            source "venv/${VENV_BIN_NAME}/activate"
+            ${{ env.PYTHON }} -m pip install -v cmake
+            ${{ env.PYTHON }} -m pip install -v .
+            pushd tests
+            "${PYTHON_EXE[@]}" -X dev -Walways -Werror -c 'import optree'
+            popd
+            rm -rf venv
+          )
+
+          if [[ "$?" -ne 0 ]]; then
+            echo "::error::Failed to install with CMake from PyPI." >&2
+            exit 1
+          fi
+          CORE_DUMP_FILES="$(
+            find . -type d -path "./venv" -prune \
+              -o '(' -iname "core.*.[1-9]*" -o -iname "core_*.dmp" ')' -print
+          )"
+          if [[ -n "${CORE_DUMP_FILES}" ]]; then
+            echo "::error::Coredump files found, indicating a crash during tests." >&2
+            echo "Coredump files:" >&2
+            ls -alh ${CORE_DUMP_FILES} >&2
+            exit 1
+          fi
+
+      - name: Check installable with CMake from PyPI (no system CMake)
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == 'Linux' ]]; then
+            sudo apt-get remove cmake -y
+          elif [[ "${{ runner.os }}" == 'macOS' ]]; then
+            brew uninstall --formula cmake --force
+          elif [[ "${{ runner.os }}" == 'Windows' ]]; then
+            choco uninstall cmake cmake.install --force --yes || true
+          fi
+          PYTHON_EXE=("${{ env.PYTHON }}")
+          if [[ "${{ runner.os }}" == 'Windows' ]]; then
+            PYTHON_EXE=(
+              cdb -gG -o -c ".dump /ma /u core.dmp; !py; g; q"
+              "${{ env.PYTHON }}"
+            )
+          fi
+
+          (
+            set -ex
+            ${{ env.PYTHON }} -m venv venv
+            source "venv/${VENV_BIN_NAME}/activate"
+            ${{ env.PYTHON }} -m pip install -v .
+            pushd tests
+            "${PYTHON_EXE[@]}" -X dev -Walways -Werror -c 'import optree'
+            popd
+            rm -rf venv
+          )
+
+          if [[ "$?" -ne 0 ]]; then
+            echo "::error::Failed to install with CMake from PyPI (no system CMake)." >&2
+            exit 1
+          fi
+          CORE_DUMP_FILES="$(
+            find . -type d -path "./venv" -prune \
+              -o '(' -iname "core.*.[1-9]*" -o -iname "core_*.dmp" ')' -print
+          )"
+          if [[ -n "${CORE_DUMP_FILES}" ]]; then
+            echo "::error::Coredump files found, indicating a crash during tests." >&2
+            echo "Coredump files:" >&2
+            ls -alh ${CORE_DUMP_FILES} >&2
+            exit 1
+          fi
+
+      - name: Test with pytest
+        shell: bash
+        run: |
+          set -x
+          ulimit -c unlimited
+          ulimit -a
+          PYTESTOPTS=(
+            "--exitfirst"
+            "--cov-report=xml:coverage-${{ env.PYTHON_TAG }}-${{ runner.os }}.xml"
+            "--junit-xml=junit-${{ env.PYTHON_TAG }}-${{ runner.os }}.xml"
+          )
+          make test PYTESTOPTS="${PYTESTOPTS[*]}"
+
+          CORE_DUMP_FILES="$(
+            find . -type d -path "./venv" -prune \
+              -o '(' -iname "core.*.[1-9]*" -o -iname "core_*.dmp" ')' -print
+          )"
+          if [[ -n "${CORE_DUMP_FILES}" ]]; then
+            echo "::error::Coredump files found, indicating a crash during tests." >&2
+            echo "Coredump files:" >&2
+            ls -alh ${CORE_DUMP_FILES} >&2
+            exit 1
+          fi
+
+      - name: List generated files
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          find . -type f -name '*.py[co]' -delete
+          find . -depth -type d -name "__pycache__" -exec rm -r "{}" +
+          if git status --ignored --porcelain | grep -qvE '/$'; then
+            ls -alh $(git status --ignored --porcelain | grep -vE '/$' | grep -oE '\S+$')
+          fi
+
+      - name: Collect backtraces from coredumps (if any)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          CORE_DUMP_FILES="$(
+            find . -type d -path "./venv" -prune \
+              -o '(' -iname "core.*.[1-9]*" -o -iname "core_*.dmp" ')' -print
+          )"
+          if [[ -n "${CORE_DUMP_FILES}" ]]; then
+            echo "Found core dumps:"
+            ls -alh ${CORE_DUMP_FILES}
+            BACKTRACE_COMMAND=""
+            if [[ "${{ runner.os }}" == 'Linux' ]]; then
+              echo "::group::Install GDB"
+              (
+                export DEBIAN_FRONTEND=noninteractive
+                sudo apt-get update -qq && sudo apt-get install -yqq gdb
+              )
+              echo "::endgroup::"
+              BACKTRACE_COMMAND="gdb --exec ${{ env.PYTHON }} --core '{}' -ex 'bt -full' -ex 'q'"
+            elif [[ "${{ runner.os }}" == 'macOS' ]]; then
+              echo "::group::Install LLDB"
+              brew update --quiet --force
+              brew list --formula llvm >/dev/null || brew install --formula llvm
+              echo "::endgroup::"
+              BACKTRACE_COMMAND="$(brew --prefix llvm)/bin/lldb --file ${{ env.PYTHON }} --core '{}' -o 'bt all' -o 'q'"
+            elif [[ "${{ runner.os }}" == 'Windows' ]]; then
+              BACKTRACE_COMMAND="cdb -z '{}' -c \"!py; !analyze -vv; .ecxr; kP; q\""
+            fi
+            if [[ -n "${BACKTRACE_COMMAND}" ]]; then
+              echo "Collecting backtraces:"
+              find . -type d -path "./venv" -prune \
+                -o -iname "core.*.[1-9]*" \
+                -exec bash -xc "
+                  echo '::group::backtrace from: {}';
+                  ${BACKTRACE_COMMAND};
+                  echo '::endgroup::';
+                " ';'
+              find . -type d -path "./venv" -prune \
+                -o -iname "core_*.dmp" \
+                -exec bash -xc "
+                  echo '::group::backtrace from: {}';
+                  ${BACKTRACE_COMMAND};
+                  echo '::endgroup::';
+                " ';'
+            fi
+            echo "::warning::Coredump files found, see backtraces above for details." >&2
+            exit 1
+          fi
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: tests/coverage-${{ env.PYTHON_TAG }}-${{ runner.os }}.xml
+          flags: unittests,unittests-${{ env.PYTHON_TAG }}-${{ runner.os }}
+          name: codecov
+          verbose: true
+          fail_ci_if_error: false
+
+      - name: Upload JUnit results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: tests/junit-${{ env.PYTHON_TAG }}-${{ runner.os }}.xml
+          flags: junit,junit-${{ env.PYTHON_TAG }}-${{ runner.os }}
+          name: junit
+          report_type: test_results
+          verbose: true
+          fail_ci_if_error: false
+
+      - name: Upload core dump file
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coredump-${{ env.PYTHON_TAG }}-${{ runner.os }}
+          path: |
+            tests/core.*
+            tests/core_*.dmp
+          if-no-files-found: ignore

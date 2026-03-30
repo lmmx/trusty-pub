@@ -1,0 +1,19 @@
+name: Security check - Semgrep
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - staging
+      - main
+      - master
+      - qa
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: r7kamura/semgrepper@v0
+        continue-on-error: true

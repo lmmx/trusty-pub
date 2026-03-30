@@ -1,0 +1,202 @@
+name: ANISE Rust
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  RUST_BACKTRACE: 1
+  RUST_LOG: info
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup ANISE tests
+        uses: ./.github/actions/setup-anise
+
+      - name: Run cargo check
+        run: cargo check --workspace --exclude anise-gui --exclude anise-py
+
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup ANISE tests
+        uses: ./.github/actions/setup-anise
+
+
+      - name: Test debug
+        env:
+          LAGRANGE_BSP: gmat-lagrange.bsp
+        run: cargo test --workspace --exclude anise-gui --exclude anise-py
+
+      - name: Test release
+        env:
+          LAGRANGE_BSP: gmat-lagrange.bsp
+        run: cargo test --release --workspace --exclude anise-gui --exclude anise-py
+      
+      - name: Test rust_embed build
+        run: |
+          # Clean up the data folder as if we were on crates.io
+          cd anise # Build only the Rust library
+          cargo build --features embed_ephem
+          cargo build --features embed_ephem --release
+          cargo doc --features embed_ephem
+
+      - name: Build no default features
+        run: cd anise && cargo test --no-run --no-default-features
+
+  lints:
+    name: Lints
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Run cargo clippy
+        run: cargo clippy -p anise -- -D warnings
+
+  validation:
+    name: Validation
+    runs-on: ubuntu-latest
+    needs: [check, test, lints]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup ANISE tests
+        uses: ./.github/actions/setup-anise
+
+      - name: CLI SPK
+        run: |
+          cargo build --bin anise-cli --workspace --exclude anise-py
+          ./target/debug/anise-cli inspect data/gmat-hermite.bsp
+          ./target/debug/anise-cli inspect data/de440.bsp
+
+      - name: Rust-SPICE occultation validation
+        run: cargo test validate_gh_283_multi_barycenter_and_los --release --workspace --exclude anise-gui --exclude anise-py -- --nocapture --include-ignored
+
+      - name: Rust-SPICE JPL DE validation
+        run: RUST_BACKTRACE=1 cargo test validate_jplde --features validation --release --workspace --exclude anise-gui --exclude anise-py -- --nocapture --include-ignored --test-threads 1
+
+      - name: Rust-SPICE hermite validation
+        run: RUST_BACKTRACE=1 cargo test validate_hermite_type13_ --features validation --release --workspace --exclude anise-gui --exclude anise-py -- --nocapture --include-ignored --test-threads 1
+
+      - name: Rust-SPICE Lagrange validation
+        env:
+          LAGRANGE_BSP: gmat-lagrange.bsp
+        run: RUST_BACKTRACE=1 cargo test validate_lagrange_type9_with_varying_segment_sizes --features validation --release --workspace --exclude anise-gui --exclude anise-py -- --nocapture --include-ignored --test-threads 1
+
+      - name: Rust-SPICE Modified Difference validation
+        run: RUST_BACKTRACE=1 cargo test validate_modified_diff_type01 --features validation --release --workspace --exclude anise-gui --exclude anise-py -- --nocapture --include-ignored --test-threads 1
+
+      - name: Rust-SPICE PCK validation
+        run: RUST_BACKTRACE=1 cargo test validate_iau_rotation_to_parent --release --workspace --exclude anise-gui --exclude anise-py -- --nocapture --ignored
+
+      - name: Rust-SPICE BPC validation
+        run: |
+          RUST_BACKTRACE=1 cargo test validate_bpc_ --release --workspace --exclude anise-gui --exclude anise-py -- --nocapture --include-ignored --test-threads 1
+          RUST_BACKTRACE=1 cargo test de440s_translation_verif_venus2emb --release --workspace --exclude anise-gui --exclude anise-py -- --nocapture --include-ignored --test-threads 1
+
+      # Now analyze the results and create pretty plots
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Validation analysis
+        run: |
+          cd anise/tests/test_analysis
+          pip install -r requirements.txt
+          python spk_validation_plots.py
+
+      - name: Save validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-artifacts
+          path: target/*.html
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup ANISE tests
+        uses: ./.github/actions/setup-anise
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate coverage report
+        env:
+          LAGRANGE_BSP: gmat-lagrange.bsp
+          RUSTFLAGS: --cfg __ui_tests
+        run: |
+          cd anise # Prevent the workspace flag
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov test --no-report -- --test-threads=1
+          cargo llvm-cov test --no-report --tests -- compile_fail
+          cargo llvm-cov test --no-report validate_gh_283_multi_barycenter_and_los -- --nocapture --ignored
+          cargo llvm-cov test --no-report validate_iau_rotation_to_parent -- --nocapture --ignored
+          cargo llvm-cov test --no-report validate_bpc_to_iau_rotations -- --nocapture --ignored
+          cargo llvm-cov test --no-report validate_jplde_de440s_no_aberration --features validation -- --nocapture --ignored
+          cargo llvm-cov test --no-report validate_jplde_de440s_aberration_lt --features validation -- --nocapture --ignored
+          cargo llvm-cov test --no-report validate_jplde_de440_type3_no_aberration --features validation -- --nocapture --ignored
+          cargo llvm-cov test --no-report validate_hermite_type13_from_gmat --features validation -- --nocapture --ignored
+          cargo llvm-cov test --no-report validate_lagrange_type9_with_varying_segment_sizes --features validation -- --nocapture --ignored
+          cargo llvm-cov test --no-report validate_modified_diff_type01 --features validation -- --nocapture --ignored
+          cargo llvm-cov test --no-report ut_embed --features embed_ephem
+          cargo llvm-cov report --lcov > ../lcov.txt
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v3
+        env:
+          TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: ./lcov.txt
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [check, test, validation, lints]
+    if: github.ref_type == 'tag'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Publish to crates.io
+        env:
+          TOKEN: ${{ secrets.CRATESIO_API_TOKEN }}
+        run: |
+          cd anise # Jump into the package
+          cargo login $TOKEN
+          cargo publish

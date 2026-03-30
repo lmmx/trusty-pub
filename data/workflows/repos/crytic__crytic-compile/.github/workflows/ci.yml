@@ -1,0 +1,98 @@
+---
+name: CI scripts
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "windows-2025"]
+        python: >-
+          ${{
+            (github.event_name == 'pull_request' && fromJSON('["3.10", "3.14"]'))
+            || fromJSON('["3.10", "3.11", "3.12", "3.13", "3.14"]')
+          }}
+        type:
+          - brownie
+          - buidler
+          - dapp
+          - embark
+          - hardhat
+          - solc
+          - truffle
+          - waffle
+          - foundry
+          - standard
+          - vyper
+          - solc_multi_file
+          - hardhat_multi_file
+          - hardhat_v3
+        include:
+          # buidler requires older NodeJS
+          - type: buidler
+            node-version: 12
+
+          - type: hardhat_v3
+            node-version: 22
+        exclude:
+          # Currently broken, tries to pull git:// which is blocked by GH
+          - type: embark
+          # Requires nix
+          - os: windows-2025
+            type: dapp
+          # Explore foundry support in windows
+          - os: windows-2025
+            type: foundry
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up shell
+        if: runner.os == 'Windows'
+        run: |
+          printf 'C:\\msys64\\mingw64\\bin\n' >> "$GITHUB_PATH"
+          printf 'C:\\msys64\\usr\\bin\n' >> "$GITHUB_PATH"
+      - name: Set up Node
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: ${{ matrix.node-version || '20' }}
+      - name: Set up Python ${{ matrix.python }}
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
+        with:
+          python-version: ${{ matrix.python }}
+          activate-environment: true
+      - name: Install dependencies
+        run: |
+          uv pip install .
+          solc-select use 0.5.7 --always-install
+      - name: Set up nix
+        if: matrix.type == 'dapp'
+        uses: cachix/install-nix-action@1ca7d21a94afc7c957383a2d217460d980de4934  # v31.10.1
+      - name: Set up cachix
+        if: matrix.type == 'dapp'
+        uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1  # v16
+        with:
+          name: dapp
+      - name: Install Foundry
+        if: matrix.type == 'foundry'
+        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10  # v1
+      - name: Run Tests
+        env:
+          TEST_TYPE: ${{ matrix.type }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          bash "scripts/ci_test_${TEST_TYPE}.sh"

@@ -1,0 +1,57 @@
+name: Validate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.9', '3.11' ]
+    name: Python ${{ matrix.python-version }}
+    timeout-minutes: 10
+    env:
+      SHIPPO_TOKEN: ${{ secrets.SHIPPO_TOKEN }}
+    concurrency:
+      group: python-sdk-check
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        id: setup_python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.0.0
+      - name: cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ./.venv
+          key: python-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('setup.py') }}
+      - name: Install dependencies
+        run: |
+          make install
+      - name: Check
+        run: make check
+      - name: Test Reports
+        if: always()
+        uses: xportation/junit-coverage-report@main
+        with:
+          junit-path: build/test_results/report.xml
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.python-version }}
+          path: |
+            build/test_results

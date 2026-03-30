@@ -1,0 +1,86 @@
+name: Publish PyPI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-js:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [22.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'yarn'
+          cache-dependency-path: ./app/yarn.lock
+      - name: Try Compiling
+        working-directory: ./
+        run: |
+          chmod u+x ./scripts/compile.sh
+          ./scripts/compile.sh
+      - name: Uploading dist
+        if: ${{ matrix.node-version == '22.x' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pygwalker-app
+          path: ./pygwalker/templates/dist/*
+
+  build-py:
+    needs: [build-js]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12']
+        os-version: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os-version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download PyGWalkerApp
+        uses: actions/download-artifact@v4
+        with:
+          name: pygwalker-app
+          path: ./pygwalker/templates/dist
+      - name: Use Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Try building
+        working-directory: ./
+        run: |
+          pip install build twine
+          python -m build .
+      - name: Uploading packages
+        if: ${{ matrix.python-version == '3.12' && matrix.os-version == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pygwalker
+          path: ./dist/*
+      - name: Uploading PyPI
+        if: ${{ matrix.python-version == '3.12' && matrix.os-version == 'ubuntu-latest' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags')) }}
+        uses: pypa/gh-action-pypi-publish@v1.12.4
+        with:
+          # PyPI user
+          # Password for your PyPI user or an access token
+          password: ${{ secrets.PYPI_TOKEN }}
+          # The target directory for distribution
+          packages-dir: dist
+          # Check metadata before uploading
+          verify-metadata: true
+          # Do not fail if a Python package distribution exists in the target package index
+          skip-existing: true
+          # Show verbose output.
+          verbose: true
+          # Show hash values of files to be uploaded
+          print-hash: true

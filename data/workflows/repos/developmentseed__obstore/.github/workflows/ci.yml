@@ -1,0 +1,54 @@
+name: Rust
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cargo fmt
+        run: |
+          cargo fmt --all -- --check
+          cd pyo3-object_store && cargo fmt --all -- --check && cd ..
+          cd pyo3-bytes && cargo fmt --all -- --check && cd ..
+
+      - name: "clippy --all"
+        run: |
+          cargo clippy --all --all-features --tests -- -D warnings
+          cd pyo3-object_store && cargo clippy --all --all-features --tests -- -D warnings && cd ..
+          cd pyo3-bytes && cargo clippy --all --all-features --tests -- -D warnings && cd ..
+
+      - name: "cargo check"
+        run: cargo check --all --all-features
+
+      - name: "cargo test"
+        run: |
+          cargo test --all
+          cargo test --all --all-features

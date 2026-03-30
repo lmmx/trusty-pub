@@ -1,0 +1,28 @@
+name: Test
+
+on:
+  pull_request:
+  schedule:
+    - cron:  '0 0 * * 0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test-suite.yaml
+    with:
+      test-type: pyathena
+
+  test-sqla:
+    needs: [test]
+    uses: ./.github/workflows/test-suite.yaml
+    with:
+      test-type: sqla
+
+  test-sqla-async:
+    needs: [test-sqla]
+    uses: ./.github/workflows/test-suite.yaml
+    with:
+      test-type: sqla_async

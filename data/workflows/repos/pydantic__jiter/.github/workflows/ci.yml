@@ -1,0 +1,664 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "**"
+  pull_request: {}
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      MSRV: ${{ steps.resolve-msrv.outputs.MSRV }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: resolve MSRV
+        id: resolve-msrv
+        run: echo MSRV=`python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["rust-version"])'` >> $GITHUB_OUTPUT
+
+  test:
+    needs: [resolve]
+    name: test rust-${{ matrix.rust-version }} on ${{ matrix.runs-on }}, Python ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        rust-version: [stable]
+        runs-on: [ubuntu, macos]
+        python-version: [""]
+        include:
+          - rust-version: ${{ needs.resolve.outputs.MSRV }}
+            runs-on: ubuntu
+          - rust-version: stable
+            runs-on: ubuntu
+            python-version: "3.13t"
+          - rust-version: nightly
+            runs-on: ubuntu
+
+    runs-on: ${{ matrix.runs-on }}-latest
+
+    env:
+      RUNS_ON: ${{ matrix.runs-on }}-latest
+      RUST_VERSION: ${{ matrix.rust-version }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version || '3.13' }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust-version }}
+
+      - name: Generate MSRV-compatible lockfile
+        if: matrix.rust-version == needs.resolve.outputs.MSRV
+        run: |
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo +stable update
+
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: install cargo-careful
+        if: matrix.rust-version == 'nightly'
+        uses: taiki-e/install-action@cargo-careful
+
+      - if: matrix.rust-version == 'nightly'
+        run: cargo careful t -F python
+
+      - run: cargo llvm-cov -F python --codecov --output-path codecov.json
+        env:
+          RUST_BACKTRACE: 1
+
+      - uses: codecov/codecov-action@v4
+        with:
+          env_vars: RUNS_ON,RUST_VERSION
+          files: codecov.json
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  test-python:
+    name: test jiter-python ${{ matrix.python-version }}
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.13t", "graalpy-25.0"]
+
+    env:
+      RUNS_ON: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set up python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install python dependencies
+        run: pip install -r crates/jiter-python/tests/requirements.txt
+
+      - name: Build jiter-python
+        run: |
+          source <(cargo llvm-cov show-env --export-prefix)
+          cargo llvm-cov clean --workspace --profraw-only
+          pip install -e crates/jiter-python --config-settings=build-args='--profile dev'
+
+      - name: Run tests
+        run: |
+          source <(cargo llvm-cov show-env --export-prefix)
+          pytest crates/jiter-python/tests
+          python crates/jiter-python/bench.py jiter jiter-cache --fast
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Coverage report
+        run: |
+          source <(cargo llvm-cov show-env --export-prefix)
+          cargo llvm-cov report --codecov --output-path codecov.json
+
+      - uses: codecov/codecov-action@v4
+        with:
+          files: codecov.json
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+          cache-target: release
+          bins: cargo-codspeed
+
+      - run: python crates/jiter/benches/generate_big.py
+
+      - run: cargo codspeed build -F python -p jiter
+
+      - uses: CodSpeedHQ/action@v3
+        with:
+          run: cargo codspeed run
+          token: ${{ secrets.CODSPEED_TOKEN }}
+
+  fuzz:
+    name: fuzz on ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runs-on: [ubuntu, macos]
+
+    runs-on: ${{ matrix.runs-on }}-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@nightly
+      - id: cache-rust
+        uses: Swatinem/rust-cache@v2
+      - if: steps.cache-rust.outputs.cache-hit != 'true'
+        run: cargo install cargo-fuzz
+      - run: |
+          # cargo fuzz defaults to musl targets, which is seeming incomatible with sanitizers according to CI failures
+          RUST_TARGET=$(rustc -Vv | grep host | cut -d ' ' -f 2)
+          cargo fuzz run --target=$RUST_TARGET --fuzz-dir crates/fuzz compare_to_serde --release -- -max_total_time=300s
+
+  fuzz-skip:
+    name: fuzz skip
+    # we only run this on ubuntu since architecture should make no difference
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@nightly
+      - id: cache-rust
+        uses: Swatinem/rust-cache@v2
+      - if: steps.cache-rust.outputs.cache-hit != 'true'
+        run: cargo install cargo-fuzz
+
+      - run: |
+          # cargo fuzz defaults to musl targets, which is seeming incomatible with sanitizers according to CI failures
+          RUST_TARGET=$(rustc -Vv | grep host | cut -d ' ' -f 2)
+          cargo fuzz run --target=$RUST_TARGET --fuzz-dir crates/fuzz compare_skip --release -- -max_total_time=300s
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --all-files --verbose
+        env:
+          PRE_COMMIT_COLOR: always
+          SKIP: test
+
+      - run: cargo doc -F python
+
+  build-sdist:
+    name: build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          rust-toolchain: stable
+          working-directory: crates/jiter-python
+      - name: verify sdist lockfile for locked vendoring
+        run: |
+          set -euxo pipefail
+          sdist_path=$(echo crates/jiter-python/dist/*.tar.gz)
+          sdist_name=$(basename "$sdist_path" .tar.gz)
+          mkdir sdist-check
+          tar -xzf "$sdist_path" -C sdist-check
+          cd "sdist-check/$sdist_name"
+          cargo vendor --locked > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi_files_sdist
+          path: crates/jiter-python/dist
+
+  build:
+    name: build on ${{ matrix.os }} (${{ matrix.target }} - ${{ matrix.interpreter || 'all' }}${{ matrix.os == 'linux' && format(' - {0}', matrix.manylinux == 'auto' && 'manylinux' || matrix.manylinux) || '' }})
+    # only run on push to main and on release
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'Full Build')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows] # windows and macos builds added manually
+        target: [i686]
+        manylinux: [auto]
+        include:
+          # manylinux for various platforms
+          # x86_64 and aarch64 are PGO optimized below
+          - os: linux
+            manylinux: auto
+            target: i686
+          - os: linux
+            manylinux: auto
+            target: armv7
+          - os: linux
+            manylinux: auto
+            target: ppc64le
+          - os: linux
+            manylinux: auto
+            target: s390x
+          - os: linux
+            manylinux: auto
+            target: riscv64
+
+          # manylinux graalpy on major architectures
+          - os: linux
+            manylinux: auto
+            target: x86_64
+            interpreter: graalpy3.11 graalpy3.12
+          - os: linux
+            manylinux: auto
+            target: aarch64
+            interpreter: graalpy3.11 graalpy3.12
+
+          # musllinux
+          - os: linux
+            manylinux: musllinux_1_1
+            target: x86_64
+          - os: linux
+            manylinux: musllinux_1_1
+            target: aarch64
+            runs-on: ubuntu-24.04-arm
+
+          # macos;
+          # all versions x86_64
+          # 3.9 can't be run on the arm hardware for PGO
+          - os: macos
+            target: x86_64
+            interpreter: 3.9 3.10 3.11 3.12 3.13 3.14 graalpy3.11 graalpy3.12
+          - os: macos
+            target: aarch64
+            interpreter: 3.9 graalpy3.11 graalpy3.12
+
+          # windows 11 arm supports 3.11 and up
+          - os: windows
+            target: aarch64
+            runs-on: windows-11-arm
+            interpreter: "3.11 3.12 3.13 3.13t 3.14 3.14t"
+
+    runs-on: ${{ matrix.runs-on || format('{0}-latest', (matrix.os == 'linux' && 'ubuntu') || matrix.os)  }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: install rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist --interpreter ${{ matrix.interpreter || '3.9 3.10 3.11 3.12 3.13 3.14 3.14t' }}
+          rust-toolchain: stable
+          working-directory: crates/jiter-python
+
+      - run: ${{ (matrix.os == 'windows' && 'dir') || 'ls -lh' }} crates/jiter-python/dist/
+
+      - run: |
+          pip install --upgrade twine
+          twine check --strict crates/jiter-python/dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi_files_${{ matrix.os }}_${{ matrix.target }}_${{ matrix.interpreter || 'all' }}_${{ matrix.manylinux }}
+          path: crates/jiter-python/dist
+
+  build-pgo:
+    name: build pgo-optimized on ${{ matrix.platform.os }} / ${{ matrix.interpreter }}
+    # only run on push to main and on release
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'Full Build')
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          [
+            { os: linux, runs-on: ubuntu-latest },
+            { os: linux_aarch64, runs-on: ubuntu-24.04-arm },
+            { os: windows, runs-on: windows-latest },
+            { os: macos, runs-on: macos-latest },
+          ]
+        interpreter:
+          ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+        exclude:
+          # macos arm only supported from 3.10 and up
+          - platform:
+              os: macos
+            interpreter: "3.9"
+
+    runs-on: ${{ matrix.platform.runs-on }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: setup-python
+        name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.interpreter }}
+          allow-prereleases: true
+
+      - name: install rust stable
+        id: rust-toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools
+
+      - name: build pgo wheel
+        uses: ./.github/actions/build-pgo-wheel
+        with:
+          interpreter: ${{ matrix.interpreter }}
+          rust-toolchain: ${{ steps.rust-toolchain.outputs.name }}
+
+      - run: ${{ (startsWith(matrix.platform.os, 'windows') && 'dir') || 'ls -lh' }} crates/jiter-python/dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi_files_${{ matrix.platform.os }}_${{ matrix.interpreter }}
+          path: crates/jiter-python/dist
+
+  build-wasm-emscripten:
+    # only run on push to main and on release
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'Full Build')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: setup-python
+        name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.12
+
+      - name: install rust nightly
+        uses: dtolnay/rust-toolchain@master
+        with:
+          components: rust-src
+          targets: wasm32-unknown-emscripten
+          # might be able to unpin when pydodide uses emscripten 4, see below
+          toolchain: nightly-2025-02-17
+
+      - name: cache rust
+        uses: Swatinem/rust-cache@v2
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          # NOTE!: as per https://github.com/pydantic/pydantic-core/pull/149 this version needs to match the version
+          # in node_modules/pyodide/repodata.json, to get the version, run:
+          # `cat node_modules/pyodide/repodata.json | python -m json.tool | rg platform`
+          version: "3.1.58"
+          actions-cache-folder: emsdk-cache
+
+      - name: install deps
+        run: pip install --upgrade pip maturin
+
+      - name: build wheels
+        run: maturin build --release --target wasm32-unknown-emscripten --out dist -i 3.12
+        working-directory: crates/jiter-python
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - run: npm install
+        working-directory: crates/jiter-python
+
+      - run: npm run test
+        working-directory: crates/jiter-python
+
+      - run: |
+          ls -lh dist/
+          ls -l dist/
+        working-directory: crates/jiter-python
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm_wheels
+          path: crates/jiter-python/dist
+
+  inspect-pypi-assets:
+    needs: [build, build-sdist, build-pgo]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: get dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pypi_files_*
+          merge-multiple: true
+          path: dist
+
+      - name: list dist files
+        run: |
+          ls -lh dist/
+          ls -l dist/
+          echo "`ls dist | wc -l` files"
+
+      - name: extract and list sdist file
+        run: |
+          mkdir sdist-files
+          tar -xvf dist/*.tar.gz -C sdist-files
+          tree -a sdist-files
+
+      - name: extract and list wheel file
+        run: |
+          ls dist/*cp310-manylinux*x86_64.whl | head -n 1
+          python -m zipfile --list `ls dist/*cp310-manylinux*x86_64.whl | head -n 1`
+
+  test-builds-arch:
+    name: test build on ${{ matrix.target }}-${{ matrix.distro }}
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64, armv7, s390x, ppc64le]
+        distro: ["ubuntu22.04"]
+        include:
+          - target: aarch64
+            distro: alpine_latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: get dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pypi_files_linux_*
+          merge-multiple: true
+          path: crates/jiter-python/dist
+
+      - uses: uraimo/run-on-arch-action@v2
+        name: install & test
+        with:
+          arch: ${{ matrix.target }}
+          distro: ${{ matrix.distro }}
+          githubToken: ${{ github.token }}
+          install: |
+            set -x
+            if command -v apt-get &> /dev/null; then
+              echo "installing python & pip with apt-get..."
+              apt-get update
+              apt-get install -y --no-install-recommends python3 python3-pip python3-venv git
+            else
+              echo "installing python & pip with apk..."
+              apk update
+              apk add python3 py3-pip git
+            fi
+          run: |
+            cd crates/jiter-python
+            set -x
+            # typing-extensions isn't automatically installed because of `--no-index --no-deps`
+            python3 -m venv venv
+            source venv/bin/activate
+            python3 -m pip install --upgrade pip -r tests/requirements.txt
+            python3 -m pip install jiter --no-index --no-deps --find-links dist --force-reinstall
+            python3 -m pytest
+            python3 -c 'import jiter; print(jiter.__version__)'
+
+  test-builds-os:
+    name: test build on ${{ matrix.os }}
+    needs: [build, build-pgo]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu, macos, windows]
+
+    runs-on: ${{ matrix.os }}-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: get dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pypi_files_*
+          merge-multiple: true
+          path: crates/jiter-python/dist
+
+      - name: run tests
+        run: |
+          python3 -m pip install --upgrade pip -r tests/requirements.txt
+          python3 -m pip install jiter --no-index --no-deps --find-links dist --force-reinstall
+          python3 -m pytest
+          python3 -c 'import jiter; print(jiter.__version__)'
+        working-directory: crates/jiter-python
+
+  # https://github.com/marketplace/actions/alls-green#why used for branch protection checks
+  check:
+    if: always()
+    needs: [test, test-python, bench, fuzz, fuzz-skip, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
+
+  release:
+    needs: [check]
+    if: success() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: install rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo publish -p jiter
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  release-python:
+    needs:
+      - check
+      - test-builds-arch
+      - test-builds-os
+      - build-sdist
+      - build-wasm-emscripten
+    if: success() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: release-python
+    permissions:
+      id-token: write
+      # needed to be able to upload wasm wheels
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: get dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pypi_files_*
+          merge-multiple: true
+          path: dist
+
+      - run: |
+          pip install --upgrade twine
+          ls -l dist/
+          twine check --strict dist/*
+
+      - name: upload to pypi
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+      - name: get wasm dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm_wheels
+          path: wasm
+
+      - name: upload to github release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            wasm/*.whl
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}

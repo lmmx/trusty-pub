@@ -1,0 +1,39 @@
+name: PR
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  MIN_PYTHON_VERSION: "3.8"
+
+jobs:
+  pre-commit:
+    uses: bridgecrewio/gha-reusable-workflows/.github/workflows/pre-commit.yaml@main
+    with:
+      python-version: "3.8"
+
+  tests:
+    needs: pre-commit
+    name: ${{ matrix.os }} / ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@65d7f2d534ac1bc67fcd62888c5f4f3d2cb2b236  # v4.7.1
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Install pytest plugin
+        run: pip install pytest-github-actions-annotate-failures
+      - name: Run pytest
+        run: pytest -s -v --capture sys --cov bc_jsonpath_ng --cov-report term-missing

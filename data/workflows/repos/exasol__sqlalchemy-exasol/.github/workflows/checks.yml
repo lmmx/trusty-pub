@@ -1,0 +1,245 @@
+name: Checks
+
+on:
+  workflow_call:
+
+jobs:
+  check-version:
+    name: Check Version
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: "3.10"
+          poetry-version: "2.3.0"
+
+      - name: Check Version
+        id: check-version
+        run: poetry run -- nox -s version:check
+
+  build-documentation-and-check-links:
+    name: Docs
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: "3.10"
+          poetry-version: "2.3.0"
+
+      - name: Build Documentation
+        id: build-documentation
+        run: poetry run -- nox -s docs:build
+
+      - name: Check Links
+        id: check-links
+        run: poetry run -- nox -s links:check
+
+  check-changelog-was-updated:
+    name: Check Changelog was Updated
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    if: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: "3.10"
+          poetry-version: "2.3.0"
+
+      - name: Check Changelog was Updated
+        id: check-changelog-was-updated
+        run: poetry run -- nox -s changelog:updated
+
+  lint-code:
+    name: Lint Code (Python-${{ matrix.python-versions }})
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-versions: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: ${{ matrix.python-versions }}
+          poetry-version: "2.3.0"
+
+      - name: Lint Code
+        id: lint-code
+        run: poetry run -- nox -s lint:code
+
+      - name: Upload Artifacts
+        id: upload-artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: lint-python${{ matrix.python-versions }}
+          path: |
+            .lint.txt
+            .lint.json
+          include-hidden-files: true
+
+  lint-typing:
+    name: Lint Typing (Python-${{ matrix.python-versions }})
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-versions: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: ${{ matrix.python-versions }}
+          poetry-version: "2.3.0"
+
+      - name: Lint Typing
+        id: lint-typing
+        run: poetry run -- nox -s lint:typing
+
+  audit-security:
+    name: Audit Security (Python-${{ matrix.python-versions }})
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-versions: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: ${{ matrix.python-versions }}
+          poetry-version: "2.3.0"
+
+      - name: Audit Security
+        id: audit-security
+        run: poetry run -- nox -s lint:security
+
+      - name: Upload Artifacts
+        id: upload-artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: security-python${{ matrix.python-versions }}
+          path: .security.json
+          include-hidden-files: true
+
+  check-format:
+    name: Check Format
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: "3.10"
+          poetry-version: "2.3.0"
+
+      - name: Check Format
+        id: check-format
+        run: poetry run -- nox -s format:check
+
+
+  build-package:
+    name: Build Package
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: "3.10"
+          poetry-version: "2.3.0"
+
+      - name: Build Package
+        id: build-package
+        run: poetry run -- nox -s package:check
+
+  run-unit-tests:
+    name: Run Unit Tests (Python-${{ matrix.python-versions }})
+    runs-on: "ubuntu-24.04"
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-versions: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out Repository
+        id: check-out-repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python & Poetry Environment
+        id: set-up-python-and-poetry-environment
+        uses: exasol/python-toolbox/.github/actions/python-environment@v6
+        with:
+          python-version: ${{ matrix.python-versions }}
+          poetry-version: "2.3.0"
+
+      - name: Run Unit Tests
+        id: run-unit-tests
+        run: poetry run -- nox -s test:unit -- --coverage
+
+      - name: Upload Artifacts
+        id: upload-artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-python${{ matrix.python-versions }}-fast
+          path: .coverage
+          include-hidden-files: true

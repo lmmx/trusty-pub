@@ -1,0 +1,159 @@
+name: dev
+
+on:
+  push:
+    branches:
+      - "*"
+      - "*/*"
+      - "**"
+      - "!main"
+      - "!master"
+    tags:
+      - "*"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: install-rust-stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: setup-rust-cache
+        uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just ci
+
+  test-python:
+    name: test-python-${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ x86_64 ]
+        python-version: [ "3.11", "pypy3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+    steps:
+      - uses: actions/checkout@v6
+      - name: install-rust-stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: setup-rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v0-rust-test-python-${{ matrix.python-version }}"
+      - name: install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: install deps
+        run: |
+          uv sync
+      - name: install ry
+        run: |
+          uv -v pip install -e .
+        env:
+          RUST_BACKTRACE: 1
+      - run: uv pip freeze
+      - run: uv run pytest
+
+  test-python-cov:
+    name: test-python-cov-${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ x86_64 ]
+        python-version: [ "3.12" ]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: install deps
+        run: |
+          uv sync
+      - run: rustc --version --verbose
+      - run: uv pip freeze
+      - name: Run coverage
+        run: |
+          source <(cargo llvm-cov show-env --sh)
+          export CARGO_TARGET_DIR=$CARGO_LLVM_COV_TARGET_DIR
+          export CARGO_INCREMENTAL=1
+          cargo llvm-cov clean --workspace
+          cargo test --workspace
+          uv run -- maturin develop --uv
+          uv run -- pytest tests --cov=ry --cov-report xml:coverage.xml
+          COV_PACKAGES=(
+            -p ry
+            -p ryo3
+            -p ryo3-aws-lc
+            -p ryo3-brotli
+            -p ryo3-bytes
+            -p ryo3-bzip2
+            -p ryo3-core
+            -p ryo3-dev
+            -p ryo3-dirs
+            -p ryo3-flate2
+            -p ryo3-fnv
+            -p ryo3-fspath
+            -p ryo3-glob
+            -p ryo3-globset
+            -p ryo3-heck
+            -p ryo3-http
+            -p ryo3-ignore
+            -p ryo3-jiff
+            -p ryo3-jiter
+            -p ryo3-json
+            -p ryo3-macro-rules
+            -p ryo3-memchr
+            -p ryo3-pydantic
+            -p ryo3-quick-maths
+            -p ryo3-regex
+            -p ryo3-reqwest
+            -p ryo3-same-file
+            -p ryo3-serde
+            -p ryo3-shlex
+            -p ryo3-size
+            -p ryo3-sqlformat
+            -p ryo3-std
+            -p ryo3-tokio
+            -p ryo3-tokio-websockets
+            -p ryo3-twox-hash
+            -p ryo3-ulid
+            -p ryo3-unindent
+            -p ryo3-url
+            -p ryo3-uuid
+            -p ryo3-walkdir
+            -p ryo3-which
+            -p ryo3-zstd
+          )
+          cargo llvm-cov report "${COV_PACKAGES[@]}" --lcov --output-path coverage.lcov
+      - uses: codecov/codecov-action@v5
+        # allow the action to fail bc idgaf about codecov but its nice to see (yolo)
+        continue-on-error: true
+        with:
+          # files: coverage.lcov,coverage.xml
+          files: coverage.lcov
+          disable_search: true
+          verbose: true
+          name: cov-python-${{ matrix.python-version }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: jessekrubin/ry

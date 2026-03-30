@@ -1,0 +1,50 @@
+# test autosar-data-py with pytest
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v4
+        - name: Set up Python
+          uses: actions/setup-python@v5
+          with:
+            python-version: '3.x'
+        - name: Install dependencies
+          run: |
+            python -m pip install --upgrade pip
+            pip install pytest
+            pip install maturin
+        - name: Install cargo-llvm-cov
+          uses: taiki-e/install-action@cargo-llvm-cov
+        - name: Build and install wheel
+          run: |
+            source <(cargo llvm-cov show-env --export-prefix)
+            maturin build --out dist --find-interpreter
+            pip install autosar-data --find-links dist
+        - name: Test with pytest
+          run: |
+            source <(cargo llvm-cov show-env --export-prefix)
+            pytest
+        - name: Collect test coverage data
+          run: |
+            source <(cargo llvm-cov show-env --export-prefix)
+            cargo llvm-cov report --lcov --output-path lcov.info
+        - name: Upload coverage reports to Codecov
+          uses: codecov/codecov-action@v3
+          env:
+            CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          with:
+            files: lcov.info

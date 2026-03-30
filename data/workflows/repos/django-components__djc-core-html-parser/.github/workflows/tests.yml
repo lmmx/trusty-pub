@@ -1,0 +1,70 @@
+name: Run tests
+
+on:
+  push:
+    branches:
+      - "main"
+      - "dev"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
+
+      # First check Rust tests
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Rust tests
+        shell: bash
+        run: |
+          # Build cargo test command with -p flags for each package
+          # We do so because the ruff submodule also contains crates and those will
+          # run if we don't limit the tests to only our packages.
+          # And `cargo test` command doesn't allow to exclude crates based on patterns.
+          #
+          # 1. Get all directories in our `crates/` folder
+          packages=$(find crates -maxdepth 1 -mindepth 1 -type d | \
+            sed 's/crates\///' | \
+            tr '\n' ' ')
+          echo "Running tests for packages: $packages"
+          # 2. Format as `cargo test -p <package> -p <package> ...`
+          cargo test $(echo "$packages" | sed 's/\([^ ]*\)/-p \1/g')
+
+      # After Rust tests pass, run Python tests next
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python dependencies
+        run: |
+          uv sync --group ci
+
+      - name: Build Python package
+        run: |
+          uv run maturin develop
+
+      - name: Run Python tests
+        run: |
+          uv run pytest

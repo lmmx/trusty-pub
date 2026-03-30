@@ -1,0 +1,53 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Python package
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.8, 3.12, 3.13]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        # also install epstopdf, latexmk, pdflatex, etc.
+        sudo apt update
+        sudo apt install latexmk plantuml texlive texlive-font-utils texlive-latex-extra
+        python -m pip install --upgrade pip
+        python -m pip install Pillow flake8 pytest sphinx
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Work around sphinxcontrib namespace package conflicts
+      run: |
+        # if we had sphinxcontrib/ directory with no __init__.py in the sys.path,
+        # importing non-native namespace package would fail even if our local
+        # module should precede the native namespace package.
+        # https://packaging.python.org/en/latest/guides/packaging-namespace-packages/#native-namespace-packages
+        python -c 'import sphinxcontrib.plantuml' || rm -f sphinxcontrib/__init__.py*
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --max-complexity=10 --statistics
+    - name: Test with pytest
+      run: |
+        python -m pytest
+    - name: Build example docs
+      run: |
+        make -C tests/fixture html
+        make -C tests/fixture latexpdf

@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  run-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+        - os: ubuntu-latest
+          pixi_environment: testpynew
+
+        - os: ubuntu-latest
+          pixi_environment: testpyold
+
+        - os: macos-latest
+          pixi_environment: testpymid
+
+        - os: windows-latest
+          pixi_environment: testpymid
+
+        - os: ubuntu-latest
+          pixi_environment: testtorch
+
+        - os: ubuntu-latest
+          pixi_environment: testjax
+
+        - os: ubuntu-latest
+          pixi_environment: testtensorflow
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          environments: ${{ matrix.pixi_environment }}
+
+      - name: Test with pytest
+        run: pixi run -e ${{ matrix.pixi_environment }} test
+
+      - name: Report to codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+

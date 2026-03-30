@@ -1,0 +1,140 @@
+# Automatically add a label to PRs based on the [Label] prefix in the title
+#
+# Usage:
+#   - PR title must start with a [Label] prefix in brackets
+#   - Example: "[BugFix] Fix memory leak" will add the "bug" label
+#   - Fails if no valid prefix is found
+#   - Labels are ONLY ADDED, never removed (preserves manual labels)
+#   - Matching is case-insensitive
+#
+# Supported prefixes -> label:
+#   [BugFix], [Fix]                     -> bug
+#   [Feature]                           -> Feature
+#   [Doc], [Docs], [Documentation]      -> documentation
+#   [Refactor], [Refactoring]           -> Refactor
+#   [CI]                                -> CI
+#   [Test], [Tests]                     -> Test
+#   [Compile]                           -> Compile
+#   [Performance], [Perf]              -> Performance
+#   [Deprecation], [Deprecated]         -> Deprecation
+#   [Setup]                             -> setup
+#   [Distributed], [Dist]              -> Distributed
+#   [Benchmark], [Benchmarks], [Bench]  -> Benchmarks
+#   [Typing], [Type]                    -> Typing
+#   [BC-breaking], [BC]                 -> BC-breaking
+#   [Formatting], [Format]             -> Formatting
+#   [Quality]                           -> Quality
+#------------------------------------------------------------
+
+name: PR Label
+
+on:
+  # Using pull_request_target to have write access for PRs from forks
+  # This is safe because we only read PR metadata (title), not code from the fork
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  add-label:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Parse and apply label from PR title
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          post_help_comment() {
+            local reason="$1"
+            local current_title="$2"
+            cat > /tmp/pr_comment.md << 'COMMENT_EOF'
+          ## PR Title Label Error
+
+          REASON_PLACEHOLDER
+
+          **Current title:** `TITLE_PLACEHOLDER`
+
+          ### Supported Prefixes
+
+          Your PR title must start with **exactly** one of these prefixes (case-insensitive):
+
+          | Prefix | Label Applied | Example |
+          |--------|---------------|---------|
+          | `[BugFix]` or `[Fix]` | bug | `[BugFix] Fix memory leak in TensorDict` |
+          | `[Feature]` | Feature | `[Feature] Add new storage backend` |
+          | `[Doc]` or `[Docs]` | documentation | `[Doc] Update installation guide` |
+          | `[Refactor]` | Refactor | `[Refactor] Clean up module imports` |
+          | `[CI]` | CI | `[CI] Fix workflow permissions` |
+          | `[Test]` or `[Tests]` | Test | `[Test] Add unit tests for nn module` |
+          | `[Compile]` | Compile | `[Compile] Fix torch.compile issue` |
+          | `[Performance]` or `[Perf]` | Performance | `[Perf] Optimize tensor operations` |
+          | `[Deprecation]` | Deprecation | `[Deprecation] Mark old function` |
+          | `[Setup]` | setup | `[Setup] Update build configuration` |
+          | `[Distributed]` or `[Dist]` | Distributed | `[Distributed] Add scatter collective` |
+          | `[Benchmark]` or `[Bench]` | Benchmarks | `[Benchmark] Add compile benchmark` |
+          | `[Typing]` or `[Type]` | Typing | `[Typing] Add type stubs` |
+          | `[BC-breaking]` or `[BC]` | BC-breaking | `[BC-breaking] Remove deprecated API` |
+          | `[Formatting]` or `[Format]` | Formatting | `[Format] Fix code style` |
+          | `[Quality]` | Quality | `[Quality] Improve error messages` |
+
+          **Note:** Matching is case-insensitive. Common variations (singular/plural) are supported.
+          COMMENT_EOF
+            sed -i 's/^ *//' /tmp/pr_comment.md
+            sed -i "s/REASON_PLACEHOLDER/$reason/" /tmp/pr_comment.md
+            sed -i "s|TITLE_PLACEHOLDER|$current_title|" /tmp/pr_comment.md
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file /tmp/pr_comment.md
+          }
+
+          echo "PR Title: $PR_TITLE"
+
+          # Check if title starts with [...]
+          if [[ ! "$PR_TITLE" =~ ^\[([^\]]+)\] ]]; then
+            echo "::error::PR title must start with [Label]. Got: '$PR_TITLE'"
+            post_help_comment "PR title must start with a label prefix in brackets (e.g., \`[BugFix]\`)." "$PR_TITLE"
+            exit 1
+          fi
+
+          # Extract the prefix
+          PREFIX="${BASH_REMATCH[1]}"
+
+          echo "Extracted prefix: $PREFIX"
+
+          # Case-insensitive matching: lowercase the prefix once
+          PREFIX_LOWER="${PREFIX,,}"
+
+          # Map prefixes to GitHub label names
+          case "$PREFIX_LOWER" in
+            bugfix|fix|bug)            LABEL="bug" ;;
+            feature|features)          LABEL="Feature" ;;
+            doc|docs|documentation)    LABEL="documentation" ;;
+            refactor|refactoring)      LABEL="Refactor" ;;
+            ci)                        LABEL="CI" ;;
+            test|tests)                LABEL="Test" ;;
+            compile)                   LABEL="Compile" ;;
+            performance|perf)          LABEL="Performance" ;;
+            deprecation|deprecated)    LABEL="Deprecation" ;;
+            setup)                     LABEL="setup" ;;
+            distributed|dist)          LABEL="Distributed" ;;
+            benchmark|benchmarks|bench) LABEL="Benchmarks" ;;
+            typing|type)               LABEL="Typing" ;;
+            bc-breaking|bc)            LABEL="BC-breaking" ;;
+            formatting|format)         LABEL="Formatting" ;;
+            quality)                   LABEL="Quality" ;;
+            *)
+              echo "::error::Unknown or invalid prefix '[$PREFIX]'."
+              post_help_comment "Unknown or invalid prefix \`[$PREFIX]\`." "$PR_TITLE"
+              exit 1
+              ;;
+          esac
+
+          echo "Mapped to label: $LABEL"
+
+          # Add the label to the PR (never remove existing labels)
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "$LABEL"
+
+          echo "Successfully added label '$LABEL' to PR #$PR_NUMBER"

@@ -1,0 +1,103 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+name: Pinot DB API Tests
+
+permissions:
+  contents: read
+  id-token: write
+
+on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - "contrib/**"
+      - "docs/**"
+      - "**.md"
+  pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - "contrib/**"
+      - "docs/**"
+      - "**.md"
+
+jobs:
+  pinot-dbapi-integration-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    name: Pinot DB API Integration Test Set
+    steps:
+      - uses: actions/checkout@v6
+      - name: Pull Pinot Docker Image
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: apachepinot/pinot:latest
+      - name: Runs Pinot Docker Image
+        uses: ./.github/actions/run-docker-image
+        with:
+          docker-image: apachepinot/pinot:latest
+          controller-forward-port: 9000
+          broker-forward-port: 8000
+          arguments: QuickStart -type MULTI_STAGE
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Setup Python Test Env
+        env:
+          CONTROLLER_PORT_FORWARD: 9000
+          BROKER_PORT_FORWARD: 8000
+        run: .github/scripts/setup_python_test_env.sh
+      - name: Run Integration Tests
+        run: make test-integration
+      - name: Clean up
+        if: always()
+        shell: bash
+        run: |
+          docker rm $(docker stop $(docker ps -a -q --filter ancestor="apachepinot/pinot:latest" --format="{{.ID}}"))
+  pinot-dbapi-unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    name: Pinot DB API Unit Test Set
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Setup Python Test Env
+        run: make init
+      - name: Run Unit Tests
+        run: |
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            make coverage
+          else
+            make test-unit
+          fi
+      - name: Upload Coverage to Codecov
+        if: ${{ matrix.python-version == '3.12' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

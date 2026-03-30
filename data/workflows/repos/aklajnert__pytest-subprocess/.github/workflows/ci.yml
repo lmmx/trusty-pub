@@ -1,0 +1,78 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: pytest-subprocess-ci
+
+on:
+  push:
+    branches:
+      - master
+
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      max-parallel: 4
+      matrix:
+        platform: [ ubuntu-latest, macos-latest, windows-latest ]
+        python-version: [ '3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14', '3.15', 'pypy3.11']
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Nox
+        uses: wntrblm/nox@2024.10.09
+        with:
+          python-versions: ${{ matrix.python-version }}
+      - name: Run tests
+        run: |
+          nox -s tests-${{ matrix.python-version }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+
+  test-uv-venv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Run tests inside uv venv
+        run: |
+          uv venv -p 3.12
+          uv pip install -e .[test]
+          uv run pytest
+
+  mypy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Nox
+        uses: wntrblm/nox@2024.10.09
+      - name: Run mypy
+        run: |
+          nox -s mypy
+  flake8:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Nox
+        uses: wntrblm/nox@2024.10.09
+      - name: Run flake8
+        run: |
+          nox -s flake8
+  check-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Nox
+        uses: wntrblm/nox@2024.10.09
+      - name: Build docs
+        run: |
+          nox -s docs

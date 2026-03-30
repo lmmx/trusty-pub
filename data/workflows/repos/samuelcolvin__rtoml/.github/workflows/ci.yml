@@ -1,0 +1,260 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "**"
+  pull_request: {}
+
+env:
+  COLUMNS: 120
+  UV_PYTHON: "3.12"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: test py${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - id: cache-rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: v1
+
+      - run: uv sync --frozen
+
+      - run: make test
+
+      - run: ls -lha
+      - run: uv run coverage xml
+
+      - uses: actions/setup-go@v1
+        with:
+          go-version: 1.16.x
+
+      - name: run toml-test
+        run: |
+          git clone --depth 1 --branch 1.0.0-beta2 https://github.com/BurntSushi/toml-test.git
+          cd toml-test
+          # TODO, fix these tests
+          rm tests/valid/datetime-local-date.*
+          rm tests/valid/datetime-local-time.*
+          rm tests/valid/datetime-local.*
+          rm tests/valid/key-empty.*
+          rm tests/invalid/control-comment-del.*
+          rm tests/invalid/integer-positive-bin.*
+          rm tests/invalid/integer-positive-hex.*
+          go build ./cmd/toml-test
+          cd ../
+          source .venv/bin/activate
+          ./toml-test/toml-test ./tests/toml_test.py
+
+      - uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          env_vars: UV_PYTHON
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen --group lint --no-dev --no-install-project
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pre-commit/action@v3.0.0
+        with:
+          extra_args: --all-files --verbose
+        env:
+          SKIP: no-commit-to-branch
+          UV_NO_SYNC: "1"
+
+      - run: make typecheck
+        env:
+          UV_NO_SYNC: "1"
+
+  # https://github.com/marketplace/actions/alls-green#why used for branch protection checks
+  check:
+    if: always()
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
+
+  build:
+    name: build os=${{ matrix.os }} target=${{ matrix.target }} int=${{ matrix.interpreter || 'all' }} ml=${{ matrix.manylinux || 'auto' }}
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'Full Build')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            target: x86_64
+          - os: linux
+            target: aarch64
+          - os: linux
+            target: i686
+          - os: linux
+            target: armv7
+          - os: linux
+            target: ppc64le
+          - os: linux
+            target: s390x
+
+          # musllinux
+          - os: linux
+            manylinux: musllinux_1_1
+            target: x86_64
+          - os: linux
+            manylinux: musllinux_1_1
+            target: aarch64
+
+          # macos
+          - os: macos
+            target: x86_64
+          - os: macos
+            target: aarch64
+
+          # windows
+          - os: windows
+            target: x86_64
+          - os: windows
+            target: i686
+            python-architecture: x86
+          - os: windows
+            target: aarch64
+            interpreter: 3.11 3.12 3.13 3.14
+
+    runs-on: ${{ (matrix.os == 'linux' && 'ubuntu') || matrix.os }}-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.python-architecture || 'x64' }}
+
+      - name: check GITHUB_REF matches package version
+        uses: samuelcolvin/check-python-version@v4.1
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu' }}
+        with:
+          version_file_path: Cargo.toml
+
+      - run: pip install -U twine
+
+      - name: build sdist
+        if: ${{ matrix.os == 'linux' && matrix.target == 'x86_64' }}
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --out dist --interpreter ${{ matrix.interpreter || '3.10 3.11 3.12 3.13 3.14' }}
+          rust-toolchain: stable
+          docker-options: -e CI
+        env:
+          # see https://github.com/PyO3/maturin/issues/2110
+          XWIN_VERSION: "16"
+
+      - run: ${{ (matrix.os == 'windows' && 'dir') || 'ls -lh' }} dist/
+
+      - run: twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi_files-${{ matrix.os }}-${{ matrix.target }}-${{ matrix.interpreter || 'all' }}-${{ matrix.manylinux || 'auto' }}
+          path: dist
+
+  inspect-pypi-assets:
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: get dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pypi_files-*
+          merge-multiple: true
+          path: dist
+
+      - name: list dist files
+        run: |
+          ls -lh dist/
+          echo "`ls dist | wc -l` files"
+
+      - name: extract and list sdist file
+        run: |
+          mkdir sdist-files
+          tar -xvf dist/*.tar.gz -C sdist-files
+          tree -a sdist-files
+
+      - name: extract and list wheel file
+        run: |
+          ls dist/*cp310-manylinux*x86_64.whl | head -n 1
+          python -m zipfile --list `ls dist/*cp310-manylinux*x86_64.whl | head -n 1`
+
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx twine check dist/*
+
+  release:
+    needs: [check, build, inspect-pypi-assets]
+    if: "success() && startsWith(github.ref, 'refs/tags/')"
+    runs-on: ubuntu-latest
+    environment: release
+
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: get dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pypi_files-*
+          merge-multiple: true
+          path: dist
+
+      - run: ls -lh dist
+
+      - run: "uv publish --trusted-publishing always dist/*"

@@ -1,0 +1,54 @@
+name: publish-pypi-deploy
+
+on:
+  release:
+    types: [ published ]
+
+jobs:
+
+  build:
+    name: Build the package
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.10'
+
+    - name: Install flit
+      run: |
+        pip install -U flit
+
+    - name: Build package
+      run: |
+        flit build
+
+    - name: Upload artifacts
+      if: ${{ success() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: wheels
+        path: dist/
+
+  deploy:
+    name: Upload release to PyPI
+    needs: [ build ]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pynetdicom/
+    permissions:
+      id-token: write
+
+    steps:
+    - name: Download the package files
+      uses: actions/download-artifact@v8
+      with:
+        path: dist/
+        merge-multiple: true
+
+    - name: Publish package to PyPi
+      uses: pypa/gh-action-pypi-publish@release/v1

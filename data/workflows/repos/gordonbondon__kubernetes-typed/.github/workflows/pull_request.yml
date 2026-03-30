@@ -1,0 +1,51 @@
+name: Test
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 6
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13.0-rc.1"] # check supported versions at https://devguide.python.org/versions/
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-test.txt') }}-${{ hashFiles('setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ hashFiles('requirements-test.txt') }}-${{ hashFiles('setup.py') }}
+            ${{ runner.os }}-pip-
+      - name: Pip install
+        run: |
+          pip install --upgrade --upgrade-strategy eager tox tox-gh-actions
+
+      - name: Cache tox
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tox
+            !**/.pytest_cache
+          key: ${{ runner.os }}-tox-${{ matrix.python-version }}-${{ hashFiles('requirements-test.txt') }}-${{ hashFiles('setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-tox-${{ matrix.python-version }}-${{ hashFiles('requirements-test.txt') }}-${{ hashFiles('setup.py') }}
+            ${{ runner.os }}-tox-${{ matrix.python-version }}-
+      - name: Run tox
+        run: |
+          tox

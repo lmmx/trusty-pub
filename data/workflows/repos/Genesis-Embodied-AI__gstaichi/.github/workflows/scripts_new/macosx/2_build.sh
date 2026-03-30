@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -ex
+
+export QUADRANTS_CMAKE_ARGS="-DQD_WITH_VULKAN:BOOL=ON -DQD_WITH_METAL:BOOL=ON -DQD_BUILD_TESTS:BOOL=ON"
+./build.py wheel

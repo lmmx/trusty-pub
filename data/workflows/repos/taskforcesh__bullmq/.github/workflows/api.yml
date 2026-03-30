@@ -1,0 +1,46 @@
+name: Api build
+on:
+  push:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required for merging branches, committing changes, and deploying to GitHub Pages
+
+    strategy:
+      matrix:
+        node-version: [lts/*]
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # check out all branches
+          fetch-depth: 0
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'yarn'
+      - name: yarn install
+        run: |
+          yarn install
+      - name: build
+        run: |
+          git config --global user.email "manast@taskforce.sh"
+          git config --global user.name "manast"
+          git checkout docs-api
+          git merge master --no-edit -m "chore: merge master branch on $(date +%F)"
+          yarn pretest
+          yarn docs:json
+          git add .
+          yarn docs:merge
+        env:
+          CI: true
+      - name: deploy
+        uses: peaceiris/actions-gh-pages@373f7f263a76c20808c831209c920827a82a2847 # v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          cname: 'api.docs.bullmq.io'

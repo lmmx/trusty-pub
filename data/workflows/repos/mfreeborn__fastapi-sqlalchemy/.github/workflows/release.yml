@@ -1,0 +1,50 @@
+name: release
+on:
+  push:
+    branches:
+        - master
+
+jobs:
+  create-pypi-release:
+    runs-on: ubuntu-latest
+
+    name: Build and publish package for Python >=3.7
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    
+    - name: Set up Python
+      uses: actions/setup-python@v1
+      with:
+        python-version: '3.11'
+    
+    - name: Install poetry
+      run: |
+          pip install poetry
+
+    - name: Build the distribution
+      run: poetry build
+
+    - name: Publish Package
+      run: poetry publish -u __token__ -p ${{ secrets.PYPI_TOKEN }}
+      
+  # create-gh-releases-release:
+  #   name: create-gh-releases-release
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     VERSION:
+  #   steps:
+  #   - name: Checkout repository
+  #     uses: actions/checkout@v2
+    
+  #   - name: Get the version
+  #     run: echo ::set-env name=VERSION::${GITHUB_REF#refs/tags/}
+    
+  #   - name: Create release
+  #     env:
+  #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     uses: actions/create-release@v1
+  #     with:
+  #       tag_name: ${{ env.VERSION }}
+  #       release_name: ${{ env.VERSION }}

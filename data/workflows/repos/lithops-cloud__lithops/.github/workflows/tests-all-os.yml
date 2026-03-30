@@ -1,0 +1,94 @@
+name: Tests all OS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  localhost_tests:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    env:
+      OBJC_DISABLE_INITIALIZE_FORK_SAFETY: YES
+
+    strategy:
+      fail-fast: False
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-22.04
+            python-version: "3.10"
+          - os: ubuntu-22.04
+            python-version: "3.11"
+
+          # macOS
+          - os: macos-latest
+            python-version: "3.10"
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.13"
+          - os: macos-15
+            python-version: "3.10"
+          - os: macos-15
+            python-version: "3.11"
+
+          # Windows
+          - os: windows-latest
+            python-version: "3.10"
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.13"
+
+    steps:
+      - name: Clone Lithops repository
+        uses: actions/checkout@v4
+
+      - name: Install Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Lithops
+        run: |
+          pip3 install -U .[tests]
+
+      - name: Create Lithops config file
+        run: |
+          mkdir -p $HOME/.lithops
+          echo "lithops:" >> $HOME/.lithops/config
+          echo "    monitoring_interval: 0.1" >> $HOME/.lithops/config
+          echo "    log_level: DEBUG" >> $HOME/.lithops/config
+          echo "    include_modules: None" >> $HOME/.lithops/config
+          echo "localhost:" >> $HOME/.lithops/config
+          echo "    version: 2" >> $HOME/.lithops/config
+
+      - name: Run Lithops tests
+        run: |
+          cd lithops/tests
+          # pytest -v --durations=0 --backend localhost --storage localhost
+          pytest -v --durations=0 -o log_cli=true --log-cli-level=DEBUG --backend localhost --storage localhost
+
+      - name: Display last 500 lines of the Lithops log file
+        if: cancelled() || failure()
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            tail -n 500 /tmp/lithops-runner/localhost-runner.log
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            tail -n 500 $TMPDIR/lithops-runner/localhost-runner.log
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            tail -n 500 "C:\Users\RUNNER~1\AppData\Local\Temp\lithops-root\localhost-runner.log"
+          fi

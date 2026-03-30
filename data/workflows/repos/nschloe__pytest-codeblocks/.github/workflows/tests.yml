@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pre-commit/action@v3.0.0
+
+  build:
+    needs: [lint]
+
+    strategy:
+      matrix:
+        platform: [ubuntu-latest]
+        python-version: ["3.7", "3.11"]
+        include:
+          - platform: macos-latest
+            python-version: "3.11"
+          - platform: windows-latest
+            python-version: "3.11"
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/checkout@v4
+      - name: Test with tox
+        run: |
+          pip install tox
+          tox -- --cov pytest_codeblocks --cov-report xml --cov-report term
+      - uses: codecov/codecov-action@v4-beta
+        if: ${{ matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest' }}

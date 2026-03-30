@@ -1,0 +1,131 @@
+name: Deploy latest.datasette.io
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+    - main
+    #   - 1.0-dev
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out datasette
+      uses: actions/checkout@v5
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+        cache: pip
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install . --group dev
+        python -m pip install sphinx-to-sqlite==0.1a1
+    - name: Run tests
+      if: ${{ github.ref == 'refs/heads/main' }}
+      run: |
+        pytest -n auto -m "not serial"
+        pytest -m "serial"
+    - name: Build fixtures.db and other files needed to deploy the demo
+      run: |-
+        python tests/fixtures.py \
+          fixtures.db \
+          fixtures-config.json \
+          fixtures-metadata.json \
+          plugins \
+          --extra-db-filename extra_database.db
+    - name: Build docs.db
+      if: ${{ github.ref == 'refs/heads/main' }}
+      run: |-
+        cd docs
+        DISABLE_SPHINX_INLINE_TABS=1 sphinx-build -b xml . _build
+        sphinx-to-sqlite ../docs.db _build
+        cd ..
+    - name: Set up the alternate-route demo
+      run: |
+        echo '
+        from datasette import hookimpl
+
+        @hookimpl
+        def startup(datasette):
+            db = datasette.get_database("fixtures2")
+            db.route = "alternative-route"
+        ' > plugins/alternative_route.py
+        cp fixtures.db fixtures2.db
+    - name: And the counters writable canned query demo
+      run: |
+        cat > plugins/counters.py <<EOF
+        from datasette import hookimpl
+        @hookimpl
+        def startup(datasette):
+            db = datasette.add_memory_database("counters")
+            async def inner():
+                await db.execute_write("create table if not exists counters (name text primary key, value integer)")
+                await db.execute_write("insert or ignore into counters (name, value) values ('counter_a', 0)")
+                await db.execute_write("insert or ignore into counters (name, value) values ('counter_b', 0)")
+                await db.execute_write("insert or ignore into counters (name, value) values ('counter_c', 0)")
+            return inner
+        @hookimpl
+        def canned_queries(database):
+            if database == "counters":
+                queries = {}
+                for name in ("counter_a", "counter_b", "counter_c"):
+                    queries["increment_{}".format(name)] = {
+                        "sql": "update counters set value = value + 1 where name = '{}'".format(name),
+                        "on_success_message_sql": "select 'Counter {name} incremented to ' || value from counters where name = '{name}'".format(name=name),
+                        "write": True,
+                    }
+                    queries["decrement_{}".format(name)] = {
+                        "sql": "update counters set value = value - 1 where name = '{}'".format(name),
+                        "on_success_message_sql": "select 'Counter {name} decremented to ' || value from counters where name = '{name}'".format(name=name),
+                        "write": True,
+                    }
+                return queries
+        EOF
+    # - name: Make some modifications to metadata.json
+    #   run: |
+    #     cat fixtures.json | \
+    #       jq '.databases |= . + {"ephemeral": {"allow": {"id": "*"}}}' | \
+    #       jq '.plugins |= . + {"datasette-ephemeral-tables": {"table_ttl": 900}}' \
+    #       > metadata.json
+    #     cat metadata.json
+    - id: auth
+      name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v3
+    - name: Deploy to Cloud Run
+      env:
+        LATEST_DATASETTE_SECRET: ${{ secrets.LATEST_DATASETTE_SECRET }}
+      run: |-
+        gcloud config set run/region us-central1
+        gcloud config set project datasette-222320
+        export SUFFIX="-${GITHUB_REF#refs/heads/}"
+        export SUFFIX=${SUFFIX#-main}
+        # Replace 1.0 with one-dot-zero in SUFFIX
+        export SUFFIX=${SUFFIX//1.0/one-dot-zero}
+        datasette publish cloudrun fixtures.db fixtures2.db extra_database.db \
+            -m fixtures-metadata.json \
+            --plugins-dir=plugins \
+            --branch=$GITHUB_SHA \
+            --version-note=$GITHUB_SHA \
+            --extra-options="--setting template_debug 1 --setting trace_debug 1 --crossdb" \
+            --install 'datasette-ephemeral-tables>=0.2.2' \
+            --service "datasette-latest$SUFFIX" \
+            --secret $LATEST_DATASETTE_SECRET
+    - name: Deploy to docs as well (only for main)
+      if: ${{ github.ref == 'refs/heads/main' }}
+      run: |-
+        # Deploy docs.db to a different service
+        datasette publish cloudrun docs.db \
+            --branch=$GITHUB_SHA \
+            --version-note=$GITHUB_SHA \
+            --extra-options="--setting template_debug 1" \
+            --service=datasette-docs-latest

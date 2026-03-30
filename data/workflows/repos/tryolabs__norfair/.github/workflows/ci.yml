@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  push:
+    branches: master
+  pull_request:
+    branches: master
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  #
+  # Builds our package and runs the tests under supported
+  # versions of Python.
+  #
+  unit-tests:
+    runs-on: ubuntu-22.04
+    strategy:
+      max-parallel: 3
+      matrix:
+        python-version: ["3.8", "3.9", "3.10"]
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install tox
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade tox
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.5.1 # to support Python 3.8
+
+      - name: Run tests
+        run: |
+          tox -e py
+
+  mot-metrics:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install tox
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade tox
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Run tests
+        run: |
+          tox -e mot-py39
+
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Build package
+        run: poetry build -f sdist
+
+      - name: Prepare package
+        run: |
+          tar xvf "dist/norfair-$(poetry version -s).tar.gz"
+          mv norfair-$(poetry version -s) norfair-dist
+
+      - name: Save artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: norfair-dist
+          path: norfair-dist
+
+  install:
+    needs: [build]
+    runs-on: ubuntu-22.04
+    strategy:
+      max-parallel: 3
+      matrix:
+        python-version: ["3.8", "3.9", "3.10"]
+    steps:
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download a single artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: norfair-dist
+          path: ./norfair-dist
+
+      - name: Install
+        run: pip install ./norfair-dist/
+
+      - name: Test
+        run: python -c "import norfair"
+
+  #
+  # Build & upload release to PyPI.
+  #
+  # Executed only if GitHub release is "published".
+  #
+  release:
+    runs-on: ubuntu-22.04
+    needs: [unit-tests, mot-metrics]
+    if: github.event_name == 'release'
+    env:
+      PYTHON_VERSION: 3.8
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: "${{ env.PYTHON_VERSION }}"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.5.1 # to support Python 3.8
+
+      - name: Release to PyPI
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          poetry config -n pypi-token.pypi "$PYPI_TOKEN"
+          poetry publish --build -n
+
+
+  deploy-doc:
+    runs-on: ubuntu-22.04
+    needs: [release]
+    if: github.event_name == 'release'
+    env:
+      PYTHON_VERSION: 3.8
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: "${{ env.PYTHON_VERSION }}"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.5.1 # to support Python 3.8
+
+      - name: Install dependencies
+        run: pip install -r docs/requirements.txt
+
+      - name: Install dependencies
+        run: python docs/deploy_docs.py

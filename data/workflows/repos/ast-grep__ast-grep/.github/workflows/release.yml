@@ -1,0 +1,123 @@
+name: Release
+
+permissions:
+  contents: write
+
+on:
+  # enable workflow_dispatch when debugging
+  workflow_dispatch: null
+  push:
+    tags:
+      - "[0-9]+.*"
+jobs:
+  push_crates_io:
+    # If you don't set an input tag, it's a dry run (no uploads).
+    if: "startsWith(github.event.ref, 'refs/tags')"
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: katyo/publish-crates@v2
+        with:
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          publish-delay: 5000
+
+  create-release:
+    # If you don't set an input tag, it's a dry run (no uploads).
+    if: "startsWith(github.event.ref, 'refs/tags')"
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          changelog: CHANGELOG.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-assets:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: i686-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: sg,ast-grep
+          tar: none
+          # (optional) On which platform to distribute the `.zip` file.
+          # [default value: windows]
+          # [possible values: all, unix, windows, none]
+          zip: all
+          target: ${{ matrix.target }}
+          archive: app-$target
+          # uncomment this for debug
+          # ref: refs/tags/debug_release
+        env:
+          # (required)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release-npm:
+    runs-on: ubuntu-22.04
+    name: Release npm cli
+    needs:
+      - upload-assets
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup node
+        uses: actions/setup-node@v6
+      - name: Download artifacts
+        uses: robinraju/release-downloader@v1.12
+        with:
+          latest: true
+          fileName: "*.zip"
+          out-file-path: artifacts
+      - name: Unzip packages
+        run: |
+          files=(aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu)
+          target_dir=(darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu)
+          length=${#files[@]}
+          for (( i=0; i<${length}; i++ ));
+          do
+            unzip "artifacts/app-${files[$i]}.zip" -d "npm/platforms/${target_dir[$i]}/"
+          done
+          # windows
+          files=(x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc)
+          target_dir=(win32-x64-msvc win32-ia32-msvc win32-arm64-msvc)
+          length=${#files[@]}
+          for (( i=0; i<${length}; i++ ));
+          do
+            unzip "artifacts/app-${files[$i]}.zip" -d "npm/platforms/${target_dir[$i]}/"
+          done
+      - run: echo //registry.npmjs.org/:_authToken=${NPM_TOKEN} > ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm
+        run: |
+          cd npm
+          for pkg in platforms/*; do
+            echo "Publishing $pkg..."
+            cd $pkg;
+            npm publish;
+            cd ../..;
+          done
+          echo "Publishing @ast-grep/cli...";
+          npm publish
+  changelog:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: "✏️ Generate release changelog"
+        uses: heinrichreimer/action-github-changelog-generator@v2.4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

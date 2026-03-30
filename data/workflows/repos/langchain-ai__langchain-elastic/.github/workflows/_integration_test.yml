@@ -1,0 +1,74 @@
+name: integration-test
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: true
+        type: string
+        description: "From which folder this pipeline executes"
+  workflow_dispatch:
+    inputs:
+      working-directory:
+        required: true
+        type: string
+        description: "From which folder this pipeline executes"
+
+permissions:
+  contents: read
+
+env:
+  POETRY_VERSION: "1.7.1"
+
+jobs:
+  build:
+    name: "make integration_tests"
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+        elasticsearch-version:
+          - "8.15.0"
+          - "8.19.0"
+          - "9.1.2"
+    services:
+      elasticsearch:
+        image: elasticsearch:${{ matrix.elasticsearch-version }}
+        env:
+          discovery.type: single-node
+          xpack.license.self_generated.type: trial
+          xpack.security.enabled: false  # disable password and TLS; never do this in production!
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl --fail http://localhost:9200/_cluster/health"
+          --health-start-period 10s
+          --health-timeout 3s
+          --health-interval 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }} + Poetry ${{ env.POETRY_VERSION }}
+        uses: "./.github/actions/poetry_setup"
+        with:
+          python-version: ${{ matrix.python-version }}
+          poetry-version: ${{ env.POETRY_VERSION }}
+          working-directory: ${{ inputs.working-directory }}
+          cache-key: integration-tests
+
+      - name: Install dependencies
+        shell: bash
+        run: poetry install --with=test_integration,test
+
+      - name: Run integration tests
+        shell: bash
+        run: make integration_test

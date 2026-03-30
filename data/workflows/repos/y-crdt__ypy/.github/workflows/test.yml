@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Run Python tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.7", "3.11"] # Empty string will trigger a build with the latest python version
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Install micromamba
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: environment-dev.yml
+          environment-name: ypy
+          create-args: python=${{ matrix.python-version }}
+
+      - name: Install Dependencies
+        run: pip install pytest maturin
+
+      - name: Build Ypy
+        run: maturin develop
+
+      - name: Run Tests
+        run: pytest

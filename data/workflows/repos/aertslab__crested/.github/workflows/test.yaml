@@ -1,0 +1,57 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 5 1,15 * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.11", "3.12", "3.13"]
+        backend: ["tensorflow", "pytorch"]
+    name: Python ${{ matrix.python }} - ${{ matrix.backend }}
+    runs-on: ${{ matrix.os }}
+    env:
+      MPLBACKEND: agg
+      PLATFORM: ${{ matrix.os }}
+      DISPLAY: :42
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          filter: blob:none
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Run tests with Hatch
+        run: hatch test -i python=${{ matrix.python }} -i backend=${{ matrix.backend }}
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+
+  check:
+    name: Tests pass in all environments
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

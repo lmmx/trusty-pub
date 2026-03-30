@@ -1,0 +1,38 @@
+name: "Test"
+on:
+  push:
+    branches:
+      - main
+      - hotfix/**
+  pull_request:
+
+jobs:
+  Pipeline:
+    runs-on: ubuntu-22.04
+    container: quintoandar/python-3-7-java
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install lint dependencies
+      run: make requirements-lint
+
+    - name: Style check
+      run: PYTHONPATH=./pip/deps make style-check
+
+    - name: Static Type check
+      run: PYTHONPATH=./pip/deps make type-check
+
+    - name: Install test dependencies
+      run: make requirements-test
+
+    - name: Install prod dependencies
+      run: make requirements-minimum
+
+    - name: Tests
+      run: |
+        echo "Setting ENVIRONMENT variable for tests"
+        export ENVIRONMENT="test" 
+        echo $ENVIRONMENT
+        echo "Running tests"
+        PYTHONPATH=./pip/deps make tests

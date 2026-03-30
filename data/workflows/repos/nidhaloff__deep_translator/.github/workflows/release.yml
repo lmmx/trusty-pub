@@ -1,0 +1,48 @@
+name: Semantic Release
+
+on:
+    workflow_dispatch:
+      inputs:
+        version:
+            description: Bump version
+            required: true
+    workflow_run:
+        workflows:
+            - "production-tests"
+        types:
+            - completed
+jobs:
+    update_release_draft:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: release-drafter/release-drafter@v5
+                env:
+                    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    release:
+        name: "Release on Pypi"
+        runs-on: ubuntu-latest
+        concurrency: release
+
+        steps:
+            -   uses: actions/checkout@v2
+
+            -   name: Install poetry
+                run: |
+                    which python
+                    which pipx
+                    pipx install poetry
+
+            -   name: View poetry version
+                run: poetry --version
+
+            -   name: Run install
+                run: poetry install
+
+            -   name: Build package
+                run: poetry build
+
+            -   name: Publish package to PyPI
+                uses: pypa/gh-action-pypi-publish@release/v1
+                with:
+                    user: __token__
+                    password: ${{ secrets.PYPI_TOKEN }}

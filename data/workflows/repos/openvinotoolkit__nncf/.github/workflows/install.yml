@@ -1,0 +1,87 @@
+name: Test install
+permissions: read-all
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: 'The pull request number'
+        default: ''
+
+jobs:
+  install-cpu:
+    name: Test install [${{ matrix.backend }} - ${{ matrix.runner }}]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:  ["torch", "onnx", "openvino"]
+        runner: ["windows-latest", "ubuntu-latest"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+            lfs: true
+            fetch-depth: 0  # Fetch full history to allow checking out any branch or PR
+      - name: Fetch and Checkout the Pull Request Branch
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pull_request_number != '' }}
+        run: |
+          git fetch origin pull/${{ github.event.inputs.pull_request_number }}/head:pr-${{ github.event.inputs.pull_request_number }}
+          git checkout pr-${{ github.event.inputs.pull_request_number }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.10"
+      - name: Install test requirements
+        run: |
+          pip install -r tests/cross_fw/examples/requirements.txt
+      - name: Print installed modules
+        run: pip list
+      - name: Run install test scope
+        run: pytest tests/cross_fw/install -rA -s --host-configuration cpu --backend ${{ matrix.backend }}
+
+  install-torch-gpu:
+    name: Test install [torch - ubuntu-gpu]
+    defaults:
+      run:
+        shell: bash
+    runs-on: aks-linux-4-cores-28gb-gpu-tesla-t4
+    timeout-minutes: 20
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install dependencies
+        run : |
+          sudo apt-get update
+          sudo apt-get --assume-yes install build-essential ninja-build libgl1-mesa-dev libglib2.0-0 wget make virtualenv
+      - name: Download CUDA
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/12.6.3/local_installers/cuda_12.6.3_560.35.05_linux.run
+          sudo sh cuda_12.6.3_560.35.05_linux.run --toolkit --silent
+      - name: Runner info
+        continue-on-error: true
+        run: |
+          nvidia-smi
+          cat /proc/cpuinfo
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          lfs: true
+      - name: Fetch and Checkout the Pull Request Branch
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pull_request_number != '' }}
+        run: |
+          git fetch origin pull/${{ github.event.inputs.pull_request_number }}/head:pr-${{ github.event.inputs.pull_request_number }}
+          git checkout pr-${{ github.event.inputs.pull_request_number }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.10.14
+      - name: Install test requirements
+        run: |
+          pip install -r tests/cross_fw/examples/requirements.txt
+      - name: Print installed modules
+        run: pip list
+      - name: Run install test scope
+        run: |
+          pytest tests/cross_fw/install -rA -s --host-configuration gpu --backend torch

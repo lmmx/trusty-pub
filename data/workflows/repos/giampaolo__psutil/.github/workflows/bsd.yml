@@ -1,0 +1,66 @@
+# Execute tests on *BSD platforms. Does not produce wheels.
+# Useful URLs:
+# https://github.com/vmactions/freebsd-vm
+# https://github.com/vmactions/openbsd-vm
+# https://github.com/vmactions/netbsd-vm
+
+on:
+  push:
+    # only run this job if the following files are modified
+    paths: &bsd_paths
+      - ".github/workflows/bsd.yml"
+      - "psutil/__init__.py"
+      - "psutil/_common.py"
+      - "psutil/_ntuples.py"
+      - "psutil/_psbsd.py"
+      - "psutil/_psposix.py"
+      - "psutil/_psutil_bsd.c"
+      - "psutil/arch/bsd/**"
+      - "psutil/arch/freebsd/**"
+      - "psutil/arch/netbsd/**"
+      - "psutil/arch/openbsd/**"
+      - "psutil/arch/posix/**"
+      - "setup.py"
+      - "tests/**"
+  pull_request:
+    paths: *bsd_paths
+name: bsd
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.sha || '' }}
+  cancel-in-progress: true
+jobs:
+  freebsd:
+    # if: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run tests
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          run: |
+            make ci-test
+
+  openbsd:
+    # if: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run tests
+        uses: vmactions/openbsd-vm@v1
+        with:
+          usesh: true
+          run: |
+            make ci-test
+
+  netbsd:
+    # if: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run tests
+        uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          run: |
+            make ci-test

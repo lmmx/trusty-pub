@@ -1,0 +1,388 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - pre
+      sdk_version:
+        description: 'SDK version to depend on (optional)'
+        required: false
+        type: string
+      wait_for_sdk:
+        description: 'Wait for SDK version on PyPI'
+        required: false
+        type: boolean
+        default: false
+      changelog:
+        description: 'Custom changelog entry (optional)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      pr_created: ${{ steps.create-pr.outputs.pull-request-number }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          uv pip install requests  # Needed for SDK version checking
+
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get current version
+        id: current
+        run: |
+          VERSION=$(grep -m1 -oP '^version = "\K[^"]+' pyproject.toml)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      - name: Bump version
+        id: bump
+        run: |
+          source .venv/bin/activate
+
+          # Make script executable
+          chmod +x scripts/bump-version.py
+
+          # Build command with all options
+          CMD="python scripts/bump-version.py ${{ github.event.inputs.bump_type }}"
+
+          # Add SDK update if specified
+          if [ -n "${{ github.event.inputs.sdk_version }}" ]; then
+            CMD="$CMD --update-sdk ${{ github.event.inputs.sdk_version }}"
+            if [ "${{ github.event.inputs.wait_for_sdk }}" = "true" ]; then
+              CMD="$CMD --wait-for-sdk"
+            fi
+          fi
+
+          # Add changelog if specified
+          if [ -n "${{ github.event.inputs.changelog }}" ]; then
+            CMD="$CMD --changelog \"${{ github.event.inputs.changelog }}\""
+          fi
+
+          # Run version bump
+          echo "Running: $CMD"
+          eval $CMD
+
+          # Update lockfile after all changes
+          uv lock --no-progress
+
+          # Get new version
+          NEW_VERSION=$(grep -m1 -oP '^version = "\K[^"]+' pyproject.toml)
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Create release branch
+        run: |
+          BRANCH_NAME="release/v${{ steps.bump.outputs.version }}"
+
+          # Clean up any existing branch from previous attempts
+          if git ls-remote --exit-code --heads origin $BRANCH_NAME; then
+            echo "⚠️  Branch $BRANCH_NAME already exists. Deleting it first..."
+            git push origin --delete $BRANCH_NAME
+          fi
+
+          # Clean up local branch if exists
+          if git show-ref --verify --quiet refs/heads/$BRANCH_NAME; then
+            git branch -D $BRANCH_NAME
+          fi
+
+          # Create fresh branch
+          git checkout -b $BRANCH_NAME
+
+          # Add all changes
+          git add -A
+
+          # Commit with co-author
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.version }}
+
+          Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+
+          # Push the branch
+          git push origin $BRANCH_NAME
+
+          # Verify the version was committed
+          COMMITTED_VERSION=$(git show HEAD:pyproject.toml | grep -m1 -oP '^version = "\K[^"]+')
+          if [ "$COMMITTED_VERSION" != "${{ steps.bump.outputs.version }}" ]; then
+            echo "❌ ERROR: Version not committed correctly!"
+            exit 1
+          fi
+
+      - name: Create Pull Request
+        id: create-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH_NAME="release/v${{ steps.bump.outputs.version }}"
+
+          # Create PR using GitHub CLI
+          PR_URL=$(gh pr create \
+            --base main \
+            --head $BRANCH_NAME \
+            --title "Release v${{ steps.bump.outputs.version }}" \
+            --body "## 🚀 Release v${{ steps.bump.outputs.version }}
+
+          This PR was automatically created by the release workflow.
+
+          ### Changes
+          - Version bumped from ${{ steps.current.outputs.version }} to ${{ steps.bump.outputs.version }}
+          - Updated CHANGELOG.md
+          - Updated uv.lock
+          ${{ github.event.inputs.sdk_version && format('- Updated SDK dependency to >={0}', github.event.inputs.sdk_version) || '' }}
+
+          ### Pre-release Checklist
+          - [ ] Review CHANGELOG.md entries
+          - [ ] Verify version numbers are correct
+          - [ ] All tests passing
+          - [ ] Documentation updated (if needed)
+          ${{ github.event.inputs.sdk_version && '- [ ] Verify SDK version is available on PyPI' || '' }}
+
+          ### Release Process
+          1. Approve and merge this PR
+          2. The release workflow will automatically:
+             - Build and test the package
+             - Publish to PyPI
+             - Create a GitHub release
+             - Tag the release
+
+          ---
+          *Triggered by @${{ github.actor }}*")
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oP '\d+$')
+          echo "pull-request-number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+  test:
+    name: Test
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    if: needs.prepare-release.result == 'success'
+    outputs:
+      version: ${{ needs.prepare-release.outputs.version }}
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: release/v${{ needs.prepare-release.outputs.version }}
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          uv sync --dev
+
+      - name: Run tests
+        run: |
+          source .venv/bin/activate
+          pytest tests/ --cov=src --cov-report=xml --cov-fail-under=80 \
+            -k "not test_launch_help_text_updated"
+
+  build:
+    name: Build Distribution
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    if: needs.prepare-release.result == 'success'
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: release/v${{ needs.prepare-release.outputs.version }}
+
+      - name: Verify version before build
+        run: |
+          EXPECTED_VERSION="${{ needs.prepare-release.outputs.version }}"
+          ACTUAL_VERSION=$(grep -m1 -oP '^version = "\K[^"]+' pyproject.toml)
+
+          echo "Expected version: $EXPECTED_VERSION"
+          echo "Actual version: $ACTUAL_VERSION"
+
+          if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "❌ ERROR: Version mismatch!"
+            echo "Expected $EXPECTED_VERSION but found $ACTUAL_VERSION"
+            exit 1
+          fi
+
+          echo "✓ Version verified: $ACTUAL_VERSION"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build package
+        run: |
+          uv build
+
+          ls -la dist/
+          if ! ls dist/*-${{ needs.prepare-release.outputs.version }}-*.whl; then
+            echo "❌ ERROR: Built package has wrong version!"
+            exit 1
+          fi
+
+          # Check with twine using tool run
+          uv tool run twine check dist/*
+
+          # Show package contents
+          echo "=== Package contents ==="
+          python -m zipfile -l dist/*.whl | head -20
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/bedrock-agentcore-starter-toolkit/
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: dist
+          path: dist/
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(ls dist/*.whl | sed -n 's/.*-\([0-9.]*\)-.*/\1/p')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Wait for PyPI availability
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          echo "Waiting for package to be available on PyPI..."
+          for i in {1..10}; do
+            if pip index versions bedrock-agentcore-starter-toolkit | grep -q "$VERSION"; then
+              echo "✓ Package version $VERSION is now available on PyPI"
+              break
+            fi
+            echo "Attempt $i/10: Package not yet available, waiting 30s..."
+            sleep 30
+          done
+
+      - name: Create and push tag
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a v${{ steps.version.outputs.version }} \
+            -m "Release v${{ steps.version.outputs.version }}"
+          git push origin v${{ steps.version.outputs.version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Bedrock AgentCore Starter Toolkit v${{ steps.version.outputs.version }}
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ## Installation
+            ```bash
+            pip install bedrock-agentcore-starter-toolkit==${{ steps.version.outputs.version }}
+            ```
+
+            ## What's Changed
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/v${{ steps.version.outputs.version }}/CHANGELOG.md) for details.
+
+            ${{ github.event.inputs.sdk_version && format('### SDK Dependency\nThis release requires `bedrock-agentcore>={0}`', github.event.inputs.sdk_version) || '' }}
+
+  summary:
+    name: Release Summary
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.publish-pypi.result }}" == "success" ]; then
+            echo "✅ **PyPI Release Successful**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Package published to: https://pypi.org/project/bedrock-agentcore-starter-toolkit/" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "To install:" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo "pip install bedrock-agentcore-starter-toolkit" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Release Failed**" >> $GITHUB_STEP_SUMMARY
+            echo "Check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+          fi

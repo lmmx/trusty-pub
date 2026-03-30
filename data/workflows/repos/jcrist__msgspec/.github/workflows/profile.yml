@@ -1,0 +1,90 @@
+name: Profile
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version of msgspec to profile from PyPI (leave empty to use artifacts)
+        type: string
+      python:
+        description: Minor version of Python to use for profiling
+        type: string
+
+jobs:
+  profile:
+    name: Profile ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }} (${{ matrix.archs }})
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: ubuntu-24.04-arm
+          archs: aarch64
+        - os: ubuntu-latest
+          archs: x86_64
+        - os: macos-latest
+          archs: arm64
+        - os: macos-15-intel
+          archs: x86_64
+        - os: windows-11-arm
+          archs: ARM64
+        - os: windows-latest
+          archs: AMD64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Load environment file
+      uses: ./.github/actions/load-env
+
+    - name: Fetch latest supported Python
+      if: inputs.python == ''
+      id: latest-supported-python
+      uses: ./.github/actions/latest-supported-python
+      with:
+        github-token: "${{ github.token }}"
+
+    - name: Install Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "${{ inputs.python || steps.latest-supported-python.outputs.version }}"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Install command runner
+      run: uv tool install rust-just
+
+    - name: Set profiling environment metadata
+      id: metadata
+      shell: bash
+      run: |-
+        python_version="${{ inputs.python || steps.latest-supported-python.outputs.version }}"
+        echo "UV_PYTHON=$python_version" >> $GITHUB_ENV
+        echo "python-version=$python_version" >> $GITHUB_OUTPUT
+        echo "env-path=$(just env-path prof)" >> $GITHUB_OUTPUT
+
+    - name: Install profiling dependencies
+      env:
+        UV_PROJECT_ENVIRONMENT: "${{ steps.metadata.outputs.env-path }}"
+      run: uv sync --only-group test-prof
+
+    - name: Download artifacts
+      if: inputs.version == ''
+      uses: actions/download-artifact@v6
+      with:
+        name: artifact-wheels-${{ matrix.os }}-${{ matrix.archs }}
+        path: dist
+        merge-multiple: true
+
+    - name: Install from ${{ inputs.version == '' && 'artifact' || format('PyPI (version {0})', inputs.version) }}
+      env:
+        VIRTUAL_ENV: "${{ steps.metadata.outputs.env-path }}"
+      run: >-
+        uv pip install${{ inputs.version == '' && ' --no-index --find-links dist' || '' }}
+        ${{ inputs.version == '' && 'msgspec' || format('msgspec=={0}', inputs.version) }}
+
+    # TODO: set up infra to commit results after each merge and then make tests compare
+    - name: Run profiling tests on Python ${{ steps.metadata.outputs.python-version }}
+      run: just test-perf all --calibrate --rounds 10000

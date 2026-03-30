@@ -1,0 +1,19 @@
+name: Environment cleanup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    uses: ./.github/workflows/test_trusted.yaml
+    with:
+      runs-on: ubuntu-latest
+      python-version: "3.11"
+      python-env: e2e
+      hatch-run: e2e:cleanup
+    secrets: inherit

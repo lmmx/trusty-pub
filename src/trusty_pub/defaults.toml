@@ -3,3 +3,6 @@ last_30_days = { repo = "hugovk/top-pypi-packages", path = "top-pypi-packages-30
 
 [data.pypi_metadata]
 semvec = { hf_path = "hf://datasets/semvec/pypi-packages/packages_data/*.parquet", output = "repo_urls.parquet" }
+
+[data.workflows]
+default = { source = "repo_urls.parquet", repos_dir = "workflows/repos", packages_dir = "workflows/packages" }

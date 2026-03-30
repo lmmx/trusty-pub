@@ -1,0 +1,45 @@
+name: CI
+on:
+  - push
+  - pull_request
+jobs:
+  test:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "2.7"
+          - "3.5"
+          - "3.6"
+          - "3.7"
+          - "3.8"
+          - "3.9"
+          - "3.10"
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ffmpeg
+        run: |
+          sudo apt update
+          sudo apt install ffmpeg
+      - name: Setup pip + tox
+        run: |
+          python -m pip install --upgrade \
+            "pip==20.3.4; python_version < '3.6'" \
+            "pip==21.3.1; python_version >= '3.6'"
+          python -m pip install tox==3.24.5 tox-gh-actions==2.9.1
+      - name: Test with tox
+        run: tox
+  black:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Black
+        run: |
+          # TODO: use standard `psf/black` action after dropping Python 2 support.
+          pip install black==21.12b0 click==8.0.2  # https://stackoverflow.com/questions/71673404
+          black ffmpeg --check --color --diff

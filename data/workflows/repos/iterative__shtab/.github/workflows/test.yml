@@ -1,0 +1,69 @@
+name: Test
+on:
+  push:
+  pull_request:
+  schedule: [{cron: '0 9 * * 1'}]  # M H d m w (Mondays at 9:00)
+  workflow_dispatch:
+jobs:
+  test:
+    if: github.event_name != 'pull_request' || !contains('OWNER,MEMBER,COLLABORATOR', github.event.pull_request.author_association)
+    name: Test py${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: [3.9, 3.14]
+    steps:
+    - uses: actions/checkout@v5
+      with: {fetch-depth: 0}
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install
+      run: pip install -U -e .[dev]
+    - run: pytest
+    - uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+  deploy:
+    needs: test
+    name: PyPI Deploy
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+      with: {fetch-depth: 0}
+    - uses: actions/setup-python@v6
+      with: {python-version: '3.x'}
+    - id: dist
+      uses: casperdcl/deploy-pypi@v2
+      with:
+        build: true
+        requirements: 'build twine packaging>=24.2' # https://github.com/pypa/twine/issues/1216
+        upload: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') }}
+    - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+      name: Release
+      run: |
+        changelog=$(git log --pretty='format:%d%n- %s%n%b---' $(git tag --sort=v:refname | tail -n2 | head -n1)..HEAD)
+        tag="${GITHUB_REF#refs/tags/}"
+        gh release create --title "shtab $tag stable" --draft --notes "$changelog" "$tag" dist/${{ steps.dist.outputs.whl }} dist/${{ steps.dist.outputs.targz }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+    - name: Docs
+      run: |
+        pushd docs
+        pip install -U -r requirements.txt
+        PYTHONPATH=. pydoc-markdown --build --site-dir=../../../dist/site
+        popd
+    - if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') || github.event_name == 'workflow_dispatch' }}
+      uses: casperdcl/push-dir@v1
+      with:
+        message: update static site
+        branch: gh-pages
+        history: false
+        dir: dist/site
+        nojekyll: true
+        name: Olivaw[bot]
+        email: 64868532+iterative-olivaw@users.noreply.github.com

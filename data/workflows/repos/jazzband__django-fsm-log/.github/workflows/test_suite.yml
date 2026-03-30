@@ -1,0 +1,108 @@
+name: test suite
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    env:
+      COVERAGE_FILE: coverage-py${{ matrix.python-version }}-dj${{ matrix.django-version }}.coverage
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+        django-version:
+          - "4.2"
+          - "5.0"
+          - "5.1"
+          - "5.2"
+          - "6.0"
+        exclude:
+          - django-version: 4.2
+            python-version: 3.12
+          - django-version: 4.2
+            python-version: 3.13
+          - django-version: 4.2
+            python-version: 3.14
+          - django-version: 5.0
+            python-version: 3.14
+          - django-version: 5.1
+            python-version: 3.14
+          - django-version: 6.0
+            python-version: 3.10
+          - django-version: 6.0
+            python-version: 3.11
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+          cache-suffix: ${{ matrix.python-version }}
+      - name: Install Python
+        run: uv python install ${{ matrix.python-version }}
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+      - run: uv sync --all-groups
+      - run: uv run --with 'django~=${{ matrix.django-version }}.0' pytest --cov
+        env:
+          DJANGO_SETTINGS_MODULE: tests.settings
+          PYTHONPATH: "."
+      - name: Save coverage file
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.COVERAGE_FILE }}
+          path: ${{ env.COVERAGE_FILE }}
+          include-hidden-files: true
+
+  codecov:
+    needs: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: "*.coverage"
+          merge-multiple: true
+      - name: Combine coverage
+        run: |
+          uv run coverage combine --keep ./*.coverage
+          uv run coverage report
+          uv run coverage xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+
+  lint: # redundant with pre-commit-ci, but we want to make the linters a part of strict status checks.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --group dev
+      - run: uvx ruff check
+      - run: uvx ruff format --check
+
+  check:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - pytest
+      - lint
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

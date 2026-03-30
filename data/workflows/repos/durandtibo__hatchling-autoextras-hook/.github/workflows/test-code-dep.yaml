@@ -1,0 +1,40 @@
+name: Test Code with Dependency Version
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        type: string
+        required: true
+      package-versions:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 2
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.14', '3.14t', '3.13', '3.13t', '3.12', '3.11', '3.10' ]
+        package-version: ${{ fromJson(inputs.package-versions) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup python environment
+        uses: durandtibo/setup-venv-uv-action@v0.0.3
+        with:
+          package-name: ${{ inputs.package-name }}
+          package-version: ${{ matrix.package-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run unit tests
+        run: |
+          inv unit-test

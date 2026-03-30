@@ -1,0 +1,54 @@
+# If a PR doesn't have a milestone assigned when it's merged, assign it the
+# one that's scheduled next.
+name: Assign Latest Milestone
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  sync:
+    permissions:
+      pull-requests: write
+      issues: write
+
+    name: Assign Latest Milestone
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        name: Run script
+        with:
+          script: |
+            if (!context.payload.pull_request.merged) {
+              console.log('PR was not merged, skipping.');
+              return;
+            }
+            if (!!context.payload.pull_request.milestone) {
+              console.log('PR has existing milestone, skipping.');
+              return;
+            }
+            if (context.payload.pull_request.user.type === 'Bot') {
+              console.log('Ignoring Bot PR');
+              return;
+            }
+            milestones = await github.rest.issues.listMilestones({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              sort: 'due_on',
+              direction: 'asc'
+            })
+
+            if (milestones.data.length === 0) {
+              console.log('There are no milestones, skipping.');
+              return;
+            }
+
+            console.log(`Adding to milestone: ${milestones.data[0].number}`);
+            result = await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.number,
+              milestone: milestones.data[0].number
+            });
+            console.log(result);

@@ -1,0 +1,33 @@
+name: Windows CI
+# This workflow is triggered on pushes to the repository.
+on: [push]
+
+jobs:
+  tests:
+    name: "Build and Test"
+    runs-on: windows-2022
+
+    steps:
+    - uses: "actions/checkout@v4"
+      with:
+        fetch-depth: 0
+    - name: Setup conda
+      run: |
+        & "$Env:CONDA\condabin\conda.bat" init powershell
+
+    - name: "Build with miniconda"
+      run: |
+        Set-PSDebug -Trace 1
+        & "$Env:CONDA\condabin\conda.bat" activate base
+        & "$Env:CONDA\condabin\conda.bat" install --yes --verbose conda-forge::glpk
+        $Env:GLPK = "$Env:CONDA_PREFIX\Library"
+        Get-ChildItem "$Env:GLPK\include"
+        python -VV
+        python -m site
+        python -m pip install --upgrade setuptools_scm
+        python setup.py bdist
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-bdist
+        path: dist/

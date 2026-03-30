@@ -1,0 +1,65 @@
+# Heavily based on the Poetry main Github Actions workflow
+# https://github.com/python-poetry/poetry/blob/1.2.0a1/.github/workflows/main.yml
+
+name: "CI"
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} / ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      matrix:
+        os: [Ubuntu, MacOS]
+        python-version: ["3.7", "3.8", "3.9", "3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        id: setup-python
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install poetry
+        run: |
+          if [[ "${{ matrix.python-version }}" == "3.7" ]]; then
+            curl -sSL https://install.python-poetry.org | python - --version 1.5.1 -y
+          else
+            curl -sSL https://install.python-poetry.org | python - -y
+          fi
+
+      - name: Update PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure poetry
+        run: poetry config virtualenvs.in-project true
+
+      - name: Set up cache
+        uses: actions/cache@v3
+        id: cache
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Ensure cache is healthy
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: timeout 10s poetry run pip --version || rm -rf .venv
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Install poetry-dotenv-plugin
+        run: poetry self add "$GITHUB_WORKSPACE"
+
+      - name: Run system tests
+        run: tests/test_system.sh

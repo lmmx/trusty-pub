@@ -1,0 +1,79 @@
+# Publish test results to gh-pages - called by test-matrix.yml
+name: Publish Results
+
+on:
+  workflow_call:
+
+jobs:
+  publish:
+    if: always()
+    runs-on: ubuntu-latest
+    environment: publish
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: |
+          VERSION=$(echo "$GITHUB_WORKFLOW_REF" | grep -oP '(?<=@refs/tags/v)[^/]+' || echo "")
+          if [ -n "$VERSION" ]; then pip install "comfy-test==$VERSION"; else pip install comfy-test; fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Enable parallel checkout
+        run: git config --global checkout.workers 0
+
+      - name: Checkout existing gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+          fetch-depth: 1
+        continue-on-error: true
+
+      - name: Prepare gh-pages structure
+        run: |
+          mkdir -p gh-pages
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BRANCH="${{ github.ref_name }}"
+            TARGET="gh-pages/$BRANCH"
+          else
+            BRANCH="_pr"
+            TARGET="gh-pages/_pr"
+          fi
+          mkdir -p "$TARGET"
+          # Only replace platform dirs that have new CI artifacts.
+          # This preserves locally-published results (e.g., linux-gpu)
+          # for platforms that didn't produce new artifacts in this run.
+          for dir in artifacts/results-*; do
+            if [ -d "$dir" ]; then
+              PLATFORM_ID=$(basename "$dir" | sed 's/results-//')
+              DEST="$TARGET/$PLATFORM_ID"
+              echo "Updating platform: $PLATFORM_ID"
+              rm -rf "$DEST"
+              mkdir -p "$DEST"
+              # Results are 2 levels deep: run_id/platform_dir/
+              cp -r "$dir"/*/*/* "$DEST/" 2>/dev/null || true
+            fi
+          done
+          touch gh-pages/.nojekyll
+          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+          echo "TARGET=$TARGET" >> $GITHUB_ENV
+
+      - name: Generate index pages
+        if: github.event_name == 'push'
+        run: |
+          comfy-test generate-index "gh-pages/$BRANCH" --repo-name "${{ github.repository }}"
+          comfy-test generate-root-index gh-pages --repo-name "${{ github.repository }}"
+
+      - name: Publish to gh-pages
+        if: github.event_name == 'push'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: gh-pages
+          force_orphan: true

@@ -1,0 +1,191 @@
+name: cli test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: marimo
+  MARIMO_SKIP_UPDATE_CHECK: 1
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      cli: ${{ steps.filter.outputs.cli }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            cli:
+              - 'marimo/**'
+              - '.github/workflows/test_cli.yaml'
+
+  build_wheel:
+    needs: changes
+    if: ${{ needs.changes.outputs.cli == 'true' }}
+    name: Build marimo wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 8 # 2024-01-18
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # so we can run --since on the main branch and turbo can do faster cache hashing
+
+      - name: 📦 Build frontend
+        uses: ./.github/actions/build-frontend
+        with:
+          turbo-token: ${{ secrets.TURBO_TOKEN }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: 🐍 Setup uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: 📦 Build marimo wheel
+        run: uv build --wheel
+
+      - name: Check for _static/_lsp directory in wheel
+        run: |
+          wheel_file=$(ls dist/*.whl)
+          files_or_dirs_to_check=(
+            "marimo/_static/"
+            "marimo/_lsp/"
+            "marimo/_tutorials/"
+            "third_party.txt"
+            "third_party_licenses.txt"
+          )
+
+          for file_or_dir in "${files_or_dirs_to_check[@]}"; do
+            if ! unzip -l "$wheel_file" | grep -q "$file_or_dir"; then
+              echo "Error: $file_or_dir not found in the wheel"
+              exit 1
+            else
+              echo "Found $file_or_dir in the wheel"
+            fi
+          done
+
+      - name: Run LSP binary
+        run: ./scripts/test-lsp.sh
+      - name: Upload wheel
+        uses: actions/upload-artifact@v6
+        with:
+          name: testwheel
+          path: dist/*.whl
+          retention-days: 1
+
+  test_pyodide:
+    needs: [changes, build_wheel]
+    if: ${{ needs.changes.outputs.cli == 'true' }}
+    name: Test Pyodide
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: testwheel
+          path: dist
+
+      - name: 🧪 Run Pyodide acceptance test
+        run: |
+          # Get version from package.json
+          pyodide_version=$(cat frontend/package.json | jq -r '.dependencies["pyodide"]')
+          echo "Pyodide version: $pyodide_version"
+          npm install pyodide@$pyodide_version
+          wheel_file=$(ls dist/*.whl)
+          echo "Testing wheel: $wheel_file"
+          node tests/_pyodide/test_pyodide_acceptance.mjs "$wheel_file"
+
+  test_cli:
+    needs: [changes, build_wheel]
+    if: ${{ needs.changes.outputs.cli == 'true' }}
+    name: Tests CLI on ${{ matrix.os }} ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10 # 2024-01-18 avg: 2.5m max: 4.5m
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        # TODO: update to latest once networking issues on macos-15 are resolved
+        # https://github.com/actions/runner-images/issues/10924
+        os: [ubuntu-latest, macos-14, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🐍 Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+          # TODO(https://github.com/astral-sh/setup-uv/issues/226): Remove this.
+          prune-cache: ${{ matrix.os != 'windows-latest' }}
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: testwheel
+
+      - name: Test CLI
+        shell: bash
+        run: |
+          uv venv
+          uv pip install --group=test-optional --group=dev marimo*.whl
+          uv run --no-project pytest -v tests/_cli/test_cli* --maxfail=2
+
+  test_examples:
+    needs: [changes]
+    name: Tests examples and smoke_tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 3 # 2024-01-18 avg: 0.3m max: 0.5m
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🐍 Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: 3.12
+
+      - name: Check example quality with marimo check
+        shell: bash
+        run: |
+          echo "Checking examples directory..."
+          uv run marimo check --ignore-scripts --strict examples/**.py
+
+      - name: Check tutorial quality with marimo check
+        shell: bash
+        run: |
+          echo "Checking tutorials..."
+          uv run marimo check --ignore-scripts --fix \
+            marimo/_tutorials/**.py >> /dev/null \
+            || echo "Errors expected"
+          # Fail if there's a git diff
+          if [[ -n "$(git status --porcelain marimo/_tutorials)" ]]; then
+            echo "marimo check found issues in tutorials."
+            git --no-pager diff marimo/_tutorials
+            exit 1
+          fi

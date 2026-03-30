@@ -1,0 +1,169 @@
+name: Release to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Check out the tag that triggered the workflow so hatch-vcs sees exact tag
+          ref: ${{ github.ref }}
+          # Required for hatch-vcs to detect version from tags
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      # Extract version early so it can be used in subsequent steps
+      - name: Set version from tag
+        id: set_version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.set_version.outputs.version }}
+        run: uv sync --extra dev --group build
+
+      - name: Run linting
+        run: uv run ruff check
+
+      - name: Run formatting check
+        run: uv run ruff format --check
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Verify we're on the tag (so hatch-vcs uses tag version)
+        run: |
+          git describe --exact-match HEAD || (echo "::error::HEAD is not exactly on tag ${{ github.ref_name }}"; exit 1)
+          echo "Building version from tag: ${{ github.ref_name }}"
+
+      - name: Clean previous builds
+        run: git clean -fd
+
+      - name: Build package
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.set_version.outputs.version }}
+        run: uv run python -m build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  publish-testpypi:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref_name, 'v')
+    environment:
+      name: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@v1.12.4
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          print-hash: true
+          skip-existing: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Wait for TestPyPI propagation
+        run: |
+          echo "⏳ Waiting for package to be available on TestPyPI..."
+          sleep 30
+
+      - name: Test installation from TestPyPI
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "🧪 Testing installation of tabpfn-common-utils==${VERSION} from TestPyPI..."
+          
+          # Create a temporary directory for testing
+          TEST_DIR=$(mktemp -d)
+          cd "$TEST_DIR"
+          
+          # Create a virtual environment
+          uv venv
+          source .venv/bin/activate
+          
+          # Install from TestPyPI using uv
+          # Use --index-url for TestPyPI and --extra-index-url for dependencies from PyPI
+          # (TestPyPI doesn't have all packages, so we need PyPI as fallback for dependencies)
+          uv pip install \
+            --index-url https://test.pypi.org/simple/ \
+            --extra-index-url https://pypi.org/simple/ \
+            --index-strategy unsafe-best-match \
+            tabpfn-common-utils==${VERSION}
+          
+          # Verify installation and version
+          INSTALLED_VERSION=$(python -c "import tabpfn_common_utils; print(tabpfn_common_utils.__version__)")
+          
+          if [ "$INSTALLED_VERSION" != "${VERSION}" ]; then
+            echo "❌ Version mismatch! Expected ${VERSION}, got ${INSTALLED_VERSION}"
+            exit 1
+          fi
+          
+          echo "✅ Successfully installed version: ${INSTALLED_VERSION}"
+          echo "✅ Installation test passed! Version ${VERSION} is correctly installed from TestPyPI"
+
+  publish-pypi:
+    needs: [build-and-test, publish-testpypi]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref_name, 'v')
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Waiting for manual approval
+        run: |
+          echo "⏳ Waiting for manual approval to publish to PyPI..."
+          echo "📦 Tag: ${{ github.ref_name }}"
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.12.4
+        with:
+          print-hash: true
+          skip-existing: true

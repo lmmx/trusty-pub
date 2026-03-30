@@ -1,0 +1,32 @@
+name: update dev deps
+
+"on":
+  schedule:
+    # First day of every third month at noon
+    - cron: "0 12 1 */3 *"
+  workflow_dispatch:
+
+jobs:
+  main:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: check out code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+      - name: install Nix
+        uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a
+      # - name: set up upterm session
+      #   uses: lhotari/action-upterm@v1
+      - name: update development dependencies
+        run: nix develop --command bash -c './update_dev_dependencies'
+      - name: create PR
+        uses: peter-evans/create-pull-request@98357b18bf14b5342f975ff684046ec3b2a07725
+        with:
+          token: ${{ secrets.DEV_DEPS_UPDATE_TOKEN }}
+          title: Update development dependencies
+          labels: automated,dependencies
+          commit-message: Update dev dependencies.
+          branch: deps
+
+permissions:
+  contents: read
+  pull-requests: write

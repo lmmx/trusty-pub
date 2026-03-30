@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "master"
+      # - "develop"
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    name: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Sync dependencies
+        run: |
+          uv --version
+          uv python pin ${{ matrix.python-version }}
+          python scripts/prepare.py
+      - name: Build
+        run: |
+          python scripts/build.py
+      - name: Test
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: python scripts/tests.py --coverage --retry 2 --args "--junitxml=junit/test-results-${{ matrix.os }}-${{ matrix.python-version }}.xml --cov-report=xml"
+      - name: Test summary
+        uses: test-summary/action@v2
+        with:
+          paths: "junit/*.xml"
+        if: always()

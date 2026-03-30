@@ -1,0 +1,57 @@
+name: Test Pyodide build
+
+on:
+  push:
+    branches:
+      # Runs on every merge to main to upload .dev0 wheels to anaconda.org
+      - main
+      - v1.**
+  pull_request:
+    branches:
+      - main
+      - v1.**
+  # Make it possible to upload wheels manually if needed
+  workflow_dispatch:
+    inputs:
+      push_wheels:
+        description: >
+          'Push wheels to Anaconda if "true". Default is "false". Warning: this will overwrite existing wheels.'
+        required: false
+        default: "false"
+  # Upload wheels to anaconda.org on a schedule
+  schedule:
+    # Run at 0300 hours on days 3 and 17 of the month
+    - cron: "0 3 3,17 * *"
+
+env:
+  FORCE_COLOR: 3
+
+jobs:
+  build_wasm_emscripten:
+    name: Build PyWavelets for Pyodide
+    runs-on: ubuntu-22.04
+    # Comment out the following line to test changes on a fork
+    if: github.repository == 'PyWavelets/pywt'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Build and test PyWavelets
+        uses: pypa/cibuildwheel@298ed2fb2c105540f5ed055e8a6ad78d82dd3a7e # v3.3.1
+        env:
+          CIBW_PLATFORM: pyodide
+          CIBW_TEST_REQUIRES: pytest matplotlib
+          CIBW_TEST_COMMAND: python -c "import pywt; pywt.test(extra_argv=['-m', 'not slow'])"
+
+        # https://anaconda.org/scientific-python-nightly-wheels/pywavelets
+        # WARNING: this job will overwrite existing wheels.
+      - name: Push wheels to Anaconda PyPI index
+        if: >-
+          (github.repository == 'PyWavelets/pywt') &&
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.push_wheels == 'true') ||
+          (github.event_name == 'schedule')
+        uses: scientific-python/upload-nightly-action@5748273c71e2d8d3a61f3a11a16421c8954f9ecf # v0.6.3
+        with:
+          artifacts_path: wheelhouse/
+          anaconda_nightly_upload_token: ${{ secrets.ANACONDA_ORG_UPLOAD_TOKEN }}

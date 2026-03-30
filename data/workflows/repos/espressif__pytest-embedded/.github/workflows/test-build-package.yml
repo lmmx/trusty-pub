@@ -1,0 +1,17 @@
+name: Test Build Python Packages
+
+on:
+  pull_request:
+
+jobs:
+  test-build-packages:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.7"
+      - name: Build packages
+        run: |
+          bash foreach.sh build

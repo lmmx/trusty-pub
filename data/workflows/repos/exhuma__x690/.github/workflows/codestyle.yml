@@ -1,0 +1,44 @@
+---
+name: Code Style
+
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+
+jobs:
+  check-style:
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: |
+          python3 -m venv env
+          ./env/bin/pip install -U pip
+          ./env/bin/pip install -e .[dev,test]
+      - name: Lint with black
+        run: |
+          # stop the build if there are Python syntax errors or undefined names
+          ./env/bin/black --check x690
+      - name: Check import ordering
+        run: |
+          set -o pipefail
+          ./env/bin/isort --check-only --diff --recursive x690 | pygmentize
+      - name: Check Types
+        run: |
+          ./env/bin/mypy --strict -p x690
+      - name: Check for unused code
+        run: |
+          set -o pipefail
+          ./env/bin/vulture vulture-whitelist.py x690 | pygmentize
+      - name: Check for obsolete vulture-whitelist items
+        run: |
+          ./env/bin/python vulture-whitelist.py

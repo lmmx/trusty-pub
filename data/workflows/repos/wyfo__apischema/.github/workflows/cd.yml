@@ -1,0 +1,69 @@
+name: CD
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build_sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/cythonize.sh
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-sdist
+          path: dist/*.tar.gz
+  build_pure_wheel:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: scripts/cythonize.sh
+    - run: NO_EXTENSION=1 pipx run build
+    - uses: actions/upload-artifact@v4
+      with:
+        name: dist-wheel
+        path: dist/*.whl
+  build_wheels:
+    name: Wheel on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12 (MacOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: scripts/cythonize.sh
+      - run: scripts/generate_tests_from_examples.py
+      - uses: pypa/cibuildwheel@v2.21.1
+        env:
+          CIBW_SKIP: pp*
+          CIBW_TEST_COMMAND: pytest {project}/tests
+          # TODO execute tests on Windows (https://github.com/wyfo/apischema/runs/4622330189)
+          CIBW_TEST_COMMAND_WINDOWS: python -c "import apischema"
+          CIBW_BEFORE_TEST: pip install -r tests/requirements.txt
+          # TODO is skipping still necessary?
+          CIBW_TEST_SKIP: "*universal2:arm64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: wheelhouse/*.whl
+  publish:
+    needs: [build_sdist, build_wheels]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: dist
+        pattern: dist-*
+        merge-multiple: true
+    - uses: pypa/gh-action-pypi-publish@v1.8.10
+      with:
+        password: ${{ secrets.PYPI_TOKEN }}

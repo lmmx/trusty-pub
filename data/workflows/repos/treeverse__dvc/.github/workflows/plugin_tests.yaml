@@ -1,0 +1,55 @@
+name: Remote Plugin Tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    timeout-minutes: 45
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        pyv: ["3.14"]
+        plugin: ["dvc-s3"]
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        path: dvc
+
+    - uses: actions/checkout@v6
+      with:
+        repository: treeverse/${{ matrix.plugin }}
+        ref: main
+        path: ${{ matrix.plugin }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.pyv }}
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "**/pyproject.toml"
+        cache-suffix: ${{ matrix.pyv }}
+
+    - name: Install plugin + DVC@PR
+      run: |
+        uv pip install "./dvc[testing]" --system
+        uv pip install -e "./${{ matrix.plugin }}[tests]" --system
+
+    - name: Run plugin tests
+      timeout-minutes: 15
+      working-directory: ${{ matrix.plugin }}
+      run: pytest -v -n=auto

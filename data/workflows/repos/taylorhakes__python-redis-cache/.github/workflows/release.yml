@@ -1,0 +1,35 @@
+name: Semantic Release
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    concurrency: release
+    permissions:
+      id-token: write
+      contents: write
+    environment: production
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GH_TOKEN }}
+    - name: Python Semantic Release
+      id: semantic_release
+      uses: taylorhakes/python-semantic-release@master
+      with:
+        github_token: ${{ secrets.GH_TOKEN }}
+    - uses: actions/setup-python@v4
+      with:
+        python-version: "3.x"
+    - name: deps
+      run: python -m pip install -U build
+    - name: build
+      run: python -m build
+    - name: Publish distribution 📦 to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      if: steps.semantic_release.outputs.released == 'true'

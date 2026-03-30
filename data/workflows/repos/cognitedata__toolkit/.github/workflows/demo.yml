@@ -1,0 +1,42 @@
+name: Deploy modules to demo project
+on:
+  push:
+    branches:
+      - main
+env:
+  PYTHON_VERSION: '3.10'
+
+
+jobs:
+  build-modules:
+    runs-on: ubuntu-latest
+    env:
+        CDF_CLUSTER: ${{ vars.CDF_CLUSTER }}
+        CDF_PROJECT: ${{ vars.CDF_PROJECT }}
+        IDP_CLIENT_ID: ${{ vars.IDP_CLIENT_ID }}
+        IDP_CLIENT_SECRET: ${{ secrets.IDP_CLIENT_SECRET }}
+        IDP_TOKEN_URL: ${{ vars.IDP_TOKEN_URL }}
+        LOGIN_FLOW: client_credentials
+    name: Loadmaster
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: Build the package
+        run: uv build
+      - name: Initialize project
+        run: uv run cdf modules init demo_project --clean --all --library-url "https://github.com/cognitedata/toolkit-data/releases/download/latest/packages.zip"
+      - name: "Pre-processing for demo environment"
+        run: uv run python ./demo/preproc.py
+      - name: "Build the templates"
+        run: uv run cdf build --config-yaml demo -o ./demo_project
+      - name: "Verify and create access rights"
+        run: uv run cdf auth verify --no-prompt
+      - name: "Deploy the templates"
+        run: |
+          uv run cdf deploy

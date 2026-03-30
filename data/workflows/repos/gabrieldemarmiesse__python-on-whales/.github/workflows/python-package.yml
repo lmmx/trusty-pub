@@ -1,0 +1,125 @@
+name: Run tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request: {}
+
+jobs:
+  render-docs:
+    name: Render docs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup uv
+        run: ./scripts/install-uv.sh
+      - name: prepare
+        run: |
+          ./scripts/ci-podman-update.sh
+          uv run ./docs/autogen.py
+          cp -r docs/generated_sources ./generated_sources
+          cp docs/mkdocs.yml ./
+      - name: Render
+        run: uv run mkdocs build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Docs
+          path: site
+
+  build-linux-lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        run: ./scripts/install-uv.sh
+      - name: Run all checks
+        run: |
+          uv run ruff check ./
+          uv run ruff format --check ./
+
+  build-linux-test-component:
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - buildx
+          - test_compose.py
+          - test_config.py
+          - test_container.py
+          - test_context.py
+          - test_image.py
+          - test_manifest.py
+          - test_network.py
+          - test_node.py
+          - test_plugin.py
+          - test_pod.py
+          - test_service.py
+          - test_stack.py
+          - test_swarm.py
+          - test_system.py
+          - test_task.py
+          - test_volume.py
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        run: ./scripts/install-uv.sh
+      - name: Setup Podman and Docker
+        run: |
+          ./scripts/ci-setup.sh
+      - name: Run tests
+        run: |
+          uv run pytest -vv --no-runtime-skip --durations=10 tests/python_on_whales/components/${{ matrix.component }}
+
+  build-linux-test-other:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        run: ./scripts/install-uv.sh
+      - name: Setup Podman and Docker
+        run: |
+          ./scripts/ci-setup.sh
+      - name: Run tests
+        run: |
+          uv run pytest -vv --no-runtime-skip --durations=10 --ignore=tests/python_on_whales/components/
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        run: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+      - name: Setup
+        run: |
+          docker info
+          docker run hello-world
+      - name: Run single test
+        run: |
+          uv run pytest -vv --no-runtime-skip -m "not podman" tests/python_on_whales/components/test_volume.py::test_simple_volume
+
+#  cost too much at the moment.
+#  build-macos:
+#    runs-on: macos-latest
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-python@v5
+#        with:
+#          python-version: 3.8
+#      - name: Setup
+#        run: |
+#          mkdir -p ~/.docker/machine/cache
+#          curl -Lo ~/.docker/machine/cache/boot2docker.iso https://github.com/boot2docker/boot2docker/releases/download/v19.03.12/boot2docker.iso
+#          brew install docker docker-machine
+#          docker-machine create --driver virtualbox default
+#          docker-machine env default
+#          eval "$(docker-machine env default)"
+#          docker info
+#          docker run hello-world
+#          pip install -U pip wheel
+#          pip install -e ./
+#          pip install -r tests/test-requirements.txt
+#      - name: Run all tests
+#        run: |
+#          python -m pytest -vv --no-runtime-skip -m "not podman" tests/

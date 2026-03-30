@@ -1,0 +1,53 @@
+name: Documentation Preview
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+
+jobs:
+  build:
+    name: Docs Ephemeral Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use python 3.9
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: cd docs && pip3 install pipenv && pipenv install
+
+      - name: Build
+        run: cd docs && pipenv run mkdocs build -f ../mkdocs.yml
+
+      - name: Archive Production Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: site
+
+  deploy:
+    name: Docs Ephemeral Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: site
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          firebaseServiceAccount: "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}"
+          expires: 2d
+          projectId: fetch-docs-preview
+          # entryPoint: docs/

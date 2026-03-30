@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_wheel:
+    name: Build wheels
+    uses: ./.github/workflows/build.yml
+
+  testpypi:
+    name: Publish package to TestPyPI
+    needs:
+      - build_wheel
+    if: |
+      github.event_name != 'workflow_dispatch' &&
+      !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork)
+    environment:
+      name: ${{ github.event_name }}
+      url: https://test.pypi.org/p/python-msilib
+    permissions:
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: wheelhouse
+          pattern: python-msilib-wheel-*
+          merge-multiple: true
+
+      - name: Publish package to TestPyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
+        with:
+          packages-dir: wheelhouse/
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          verbose: true
+
+  tests:
+    needs: build_wheel
+    runs-on: ${{ matrix.os }}-${{ matrix.os-version }}
+    strategy:
+      matrix:
+        os: [windows]
+        os-version: [latest, 11-arm]
+        python-version: ["3.13", "3.13t", "3.14", "3.14t"]
+        exclude: # provisional
+          - os-version: 11-arm
+            python-version: "3.13t"
+          - os-version: 11-arm
+            python-version: "3.14t"
+
+    defaults:
+      run:
+        shell: bash
+    env:
+      UV_NO_PROGRESS: true
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: Fetch only the required files for testing
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            pyproject.toml
+            tests
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
+        with:
+          activate-environment: true
+          cache-dependency-glob: "pyproject.toml"
+          enable-cache: true
+
+      - name: Download the wheel
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          merge-multiple: true
+          pattern: python-msilib-wheel-${{ matrix.os }}*
+          path: wheelhouse
+
+      - name: Install dependencies
+        run: |
+          uv pip install -r pyproject.toml --upgrade --group tests
+          uv pip install python-msilib -f wheelhouse \
+              --no-build --no-deps --no-index --prerelease=allow --reinstall
+
+      - name: Generate coverage report
+        run: uv run --no-project coverage run
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: cov-${{ matrix.python-version }}.${{ matrix.os }}-${{ strategy.job-index }}
+          path: .coverage.*
+          include-hidden-files: true
+
+  coverage:
+    needs:
+      - tests
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: true
+
+      - name: Download coverage data
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: cov-*
+          merge-multiple: true
+
+      - name: Coverage comment
+        id: coverage_comment
+        uses: py-cov-action/python-coverage-comment-action@7188638f871f721a365d644f505d1ff3df20d683 # v3.40
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_COVERAGE_FILES: true
+
+      - name: Store Pull Request comment to be posted
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: steps.coverage_comment.outputs.COMMENT_FILE_WRITTEN == 'true'
+        with:
+          name: python-coverage-comment-action
+          path: python-coverage-comment-action.txt

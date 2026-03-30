@@ -1,0 +1,113 @@
+name: Build and test
+
+on:
+    # Only on pushes to main or one of the release branches we build on push
+    push:
+        branches:
+            - main
+            - "[0-9].[0-9]+-branch"
+        tags:
+    # Build pull requests
+    pull_request:
+
+jobs:
+    test:
+        strategy:
+            matrix:
+                py:
+                    - "3.7"
+                    - "3.8"
+                    - "3.9"
+                    - "3.10"
+                    - "3.11"
+                    - "3.12"
+                    - "pypy-3.8"
+                os:
+                    - "ubuntu-latest"
+                    - "windows-latest"
+                    - "macos-latest"
+                architecture:
+                    - x64
+                    - x86
+                exclude:
+                    # Linux and macOS don't have x86 python
+                    - os: "ubuntu-latest"
+                      architecture: x86
+                    - os: "macos-latest"
+                      architecture: x86
+        name: "Python: ${{ matrix.py }}-${{ matrix.architecture }} on ${{ matrix.os }}"
+        runs-on: ${{ matrix.os }}
+        steps:
+            - uses: actions/checkout@v4
+            - name: Setup python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: ${{ matrix.py }}
+                  architecture: ${{ matrix.architecture }}
+            - run: pip install tox
+            - name: Running tox
+              run: tox -e py
+    test_old_pyramids:
+        strategy:
+            matrix:
+                pyramid:
+                    - "pyramid13"
+                    - "pyramid14"
+                    - "pyramid15"
+                    - "pyramid16"
+                    - "pyramid17"
+                    - "pyramid18"
+                    - "pyramid19"
+                    - "pyramid110"
+                    - "pyramid20"
+                    - "pyramid110-jinja2legacy"
+                    - "pyramid20-jinja2legacy"
+        name: "Python: py310-${{ matrix.pyramid }}"
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Setup python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.10"
+                  architecture: x64
+            - run: pip install tox
+            - name: Running tox
+              run: tox -e py310-${{ matrix.pyramid }}
+    coverage:
+        runs-on: ubuntu-latest
+        name: Validate coverage
+        steps:
+            - uses: actions/checkout@v4
+            - name: Setup python 3.10
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.10"
+                  architecture: x64
+
+            - run: pip install tox
+            - run: tox -e py310,py310-jinja2legacy,coverage
+    docs:
+        runs-on: ubuntu-latest
+        name: Build the documentation
+        steps:
+            - uses: actions/checkout@v4
+            - name: Setup python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.10"
+                  architecture: x64
+            - run: pip install tox
+            - run: tox -e docs
+    lint:
+        runs-on: ubuntu-latest
+        name: Lint the package
+        steps:
+            - uses: actions/checkout@v4
+            - name: Setup python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.10"
+                  architecture: x64
+            - run: pip install tox
+            - run: tox -e lint

@@ -1,0 +1,429 @@
+name: Wheels
+
+on:
+  push:
+  pull_request:
+  release:
+    types:
+      - published
+  schedule:
+    # At 12:00 on every day-of-month
+    - cron: "0 12 */1 * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  choose_wheel_types:
+    name: Decide which wheel types to build
+    runs-on: ubuntu-latest
+    steps:
+      - id: manylinux_x86_64
+        run: echo "wheel_types=manylinux_x86_64" >> $GITHUB_OUTPUT
+      - id: musllinux_x86_64
+        run: echo "wheel_types=musllinux_x86_64" >> $GITHUB_OUTPUT
+      - id: manylinux_aarch64
+        run: echo "wheel_types=manylinux_aarch64" >> $GITHUB_OUTPUT
+    outputs:
+      wheel_types: ${{ toJSON(steps.*.outputs.wheel_types) }}
+
+  build_wheels:
+    needs: [build_sdist, choose_wheel_types]
+    name: ${{ matrix.wheel_type }} wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        wheel_type: ${{ fromJSON(needs.choose_wheel_types.outputs.wheel_types) }}
+        include:
+          - os: ubuntu-latest
+          - wheel_type: manylinux_aarch64
+            os: ubuntu-24.04-arm
+
+    steps:
+      - name: Disable ptrace security restrictions
+        run: |
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdist
+      - name: Extract sdist
+        run: |
+          tar zxvf *.tar.gz --strip-components=1
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        env:
+          CIBW_BUILD: "cp3{9..14}{t,}-${{ matrix.wheel_type }}"
+          CIBW_ARCHS_LINUX: auto
+          CIBW_ENABLE: cpython-prerelease cpython-freethreading
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.wheel_type }}-wheels
+          path: ./wheelhouse/*.whl
+
+  test_attaching_to_eol_interpreters:
+    needs: [build_wheels]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["2.7", "3.7"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: "manylinux_x86_64-wheels"
+          path: dist
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '>=3.13'
+      - name: Set up dependencies
+        run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa
+          sudo apt-get update
+          sudo apt-get install -qy \
+            gdb \
+            python${{ matrix.python_version }}-dev \
+            python${{ matrix.python_version }}-dbg
+          sudo apt-get install -qy \
+            python${{ matrix.python_version }}-distutils || true
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements-test.txt
+          python3 -m pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Disable ptrace security restrictions
+        run: |
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: ${{ matrix.python_version }}
+        run: python3 -m pytest tests -n auto -vvv
+
+  test_attaching_to_uv_interpreters:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: "manylinux_x86_64-wheels"
+          path: dist
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          python-version: ${{ matrix.python_version }}
+          activate-environment: true
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -qy gdb
+      - name: Install Python dependencies
+        run: |
+          uv pip install -r requirements-test.txt
+          uv pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Disable ptrace security restrictions
+        run: |
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: ${{ matrix.python_version }}
+        run: python3 -m pytest tests -n auto -vvv
+
+  test_wheels:
+    needs: [build_wheels]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "${{matrix.python_version}}-dev"
+      - uses: actions/download-artifact@v8
+        with:
+          name: "manylinux_x86_64-wheels"
+          path: dist
+      - name: Set up dependencies
+        run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa
+          sudo apt-get update
+          sudo apt-get install -qy gdb
+      - name: Install Python dependencies
+        run: |
+          python${{matrix.python_version}} -m pip install --upgrade pip
+          python${{matrix.python_version}} -m pip install -r requirements-test.txt
+          python${{matrix.python_version}} -m pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Disable ptrace security restrictions
+        run: |
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: "auto"
+        run: python${{matrix.python_version}} -m pytest tests -n auto -vvv
+
+  test_aarch64_wheels:
+    needs: [build_wheels]
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.9", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "${{matrix.python_version}}-dev"
+      - uses: actions/download-artifact@v8
+        with:
+          name: "manylinux_aarch64-wheels"
+          path: dist
+      - name: Set up dependencies
+        run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa
+          sudo apt-get update
+          sudo apt-get install -qy \
+            gdb \
+            python${{matrix.python_version}}-dev \
+            python${{matrix.python_version}}-dbg
+      - name: Install Python dependencies
+        run: |
+          python${{matrix.python_version}} -m pip install --upgrade pip
+          python${{matrix.python_version}} -m pip install -r requirements-test.txt
+          python${{matrix.python_version}} -m pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Disable ptrace security restrictions
+        run: |
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: "auto"
+        run: python${{matrix.python_version}} -m pytest tests -n auto -vvv
+
+  test_free_threading:
+    needs: [build_wheels]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "${{matrix.python_version}}-dev"
+      - uses: actions/download-artifact@v8
+        with:
+          name: "manylinux_x86_64-wheels"
+          path: dist
+      - name: Set up dependencies
+        run: |
+          sudo add-apt-repository ppa:deadsnakes/ppa
+          sudo apt-get update
+          sudo apt-get install -qy \
+            gdb \
+            python${{matrix.python_version}}-dev \
+            python${{matrix.python_version}}-nogil \
+            python${{matrix.python_version}}-venv
+      - name: Install Python dependencies
+        run: |
+          python${{matrix.python_version}} -m pip install --upgrade pip
+          python${{matrix.python_version}} -m pip install -r requirements-test.txt
+          python${{matrix.python_version}} -m pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Install setuptools for the free-threading version
+        run: |
+          python${{matrix.python_version}}t -m venv --system-site-packages /tmp/pip${{matrix.python_version}}
+          /tmp/pip${{matrix.python_version}}/bin/pip install --user setuptools
+      - name: Disable ptrace security restrictions
+        run: |
+          echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: "${{matrix.python_version}}t"
+        run: python${{matrix.python_version}} -m pytest tests -n auto -vvv
+
+  test_in_alpine:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
+    container:
+      image: alpine
+      options: --cap-add=SYS_PTRACE
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up dependencies
+        run: |
+          apk add --update alpine-sdk bash alpine-sdk python3 python3-dev gdb musl-dbg python3-dbg
+      - uses: actions/download-artifact@v8
+        with:
+          name: "musllinux_x86_64-wheels"
+          path: dist
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv venv
+          venv/bin/python3 -m pip install --upgrade pip
+          venv/bin/python3 -m pip install -r requirements-test.txt
+          venv/bin/python3 -m pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: "auto"
+        run: venv/bin/python3 -m pytest tests -n auto -vvv
+
+  test_wheels_in_fedora:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
+    container:
+      image: fedora
+      options: --cap-add=SYS_PTRACE
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up dependencies
+        run: |
+          dnf install -y \
+            gdb \
+            g++ \
+            file \
+            python3 \
+            python3-devel
+          dnf debuginfo-install -y \
+            python3
+      - uses: actions/download-artifact@v8
+        with:
+          name: "manylinux_x86_64-wheels"
+          path: dist
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements-test.txt
+          python3 -m pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: "auto"
+        run: python3 -m pytest tests -n auto -vvv
+
+  test_wheels_in_arch:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
+    container:
+      image: archlinux
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up dependencies
+        run: |
+          pacman -Syu --noconfirm \
+            gdb \
+            gcc \
+            file \
+            python \
+            python-pip \
+            python-setuptools \
+            python-wheel \
+            elfutils \
+            debuginfod
+      - uses: actions/download-artifact@v8
+        with:
+          name: "manylinux_x86_64-wheels"
+          path: dist
+      - name: Install Python dependencies
+        run: |
+          python -m venv venv
+          venv/bin/python -m pip install --upgrade pip
+          venv/bin/python -m pip install -r requirements-test.txt
+          venv/bin/python -m pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: "auto"
+          DEBUGINFOD_URLS: "https://debuginfod.archlinux.org"
+        run: venv/bin/python -m pytest tests -n auto -vvv
+
+  test_wheels_in_debian:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
+    container:
+      image: debian
+      options: --cap-add=SYS_PTRACE
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up dependencies
+        run: |
+          apt-get update
+          apt-get install -qy \
+            gdb \
+            file \
+            python3-dev \
+            python3-pip \
+            python3-venv \
+            python3-dbg
+      - uses: actions/download-artifact@v8
+        with:
+          name: "manylinux_x86_64-wheels"
+          path: dist
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv venv
+          venv/bin/python3 -m pip install --upgrade pip
+          venv/bin/python3 -m pip install -r requirements-test.txt
+          venv/bin/python3 -m pip install --no-index --find-links=dist/ --only-binary=pystack pystack
+      - name: Run pytest
+        env:
+          PYTHON_TEST_VERSION: "auto"
+        run: venv/bin/python3 -m pytest tests -n auto -vvv
+
+  upload_pypi:
+    needs: [test_wheels]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          # with no name set, it downloads all of the artifacts
+          path: dist
+      - run: |
+          mv dist/sdist/*.tar.gz dist/
+          mv dist/*-wheels/*.whl dist/
+          rmdir dist/{sdist,*-wheels}
+          ls -R dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip_existing: true
+          password: ${{ secrets.PYPI_PASSWORD }}

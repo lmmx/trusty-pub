@@ -1,0 +1,138 @@
+name: Create release
+
+on:
+  push:
+    tags:
+    - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+  UV_SYSTEM_PYTHON: "1"  # make uv do global installs
+
+jobs:
+  publish-pypi:
+    runs-on: ubuntu-latest
+    name: PyPI Release
+    environment: release
+    if: github.repository_owner == 'AA-Turner'
+    permissions:
+      attestations: write  # for actions/attest
+      id-token: write  # for actions/attest & PyPI trusted publishing
+    defaults:
+      run:
+        working-directory: python/
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          enable-cache: false
+
+      - name: Install build dependencies (pypa/build, twine)
+        run: uv pip install --group package
+
+      - name: Copy licence file
+        run: cp ../LICENCE.rst LICENCE.rst
+
+      - name: Build distribution
+        run: python -m build
+
+      - name: Check distribution
+        run: twine check dist/*
+
+      - name: Create Sigstore attestations for built distributions
+        uses: actions/attest@v1
+        id: attest
+        with:
+          subject-path: "python/dist/*"
+          predicate-type: "https://docs.pypi.org/attestations/publish/v1"
+          predicate: "null"
+          show-summary: "true"
+
+      - name: Convert attestations to PEP 740
+        run: >
+          python ../utils/convert_attestations.py
+          "$BUNDLE_PATH"
+          "$SIGNER_IDENTITY"
+        env:
+          BUNDLE_PATH: "${{ steps.attest.outputs.bundle-path }}"
+          # workflow_ref example: AA-Turner/roman-numerals/.github/workflows/create-release.yml@refs/heads/master
+          # this forms the "signer identity" for the attestations
+          SIGNER_IDENTITY: "https://github.com/${{ github.workflow_ref }}"
+
+      - name: Inspect PEP 740 attestations
+        run: pypi-attestations inspect dist/*.publish.attestation
+
+      - name: Prepare attestation bundles for uploading
+        run: |
+          mkdir -p /tmp/attestation-bundles
+          cp "$BUNDLE_PATH" /tmp/attestation-bundles/
+          cp dist/*.publish.attestation /tmp/attestation-bundles/
+        env:
+          BUNDLE_PATH: "${{ steps.attest.outputs.bundle-path }}"
+
+      - name: Upload attestation bundles
+        uses: actions/upload-artifact@v6
+        with:
+          name: attestation-bundles
+          path: /tmp/attestation-bundles/
+
+      - name: Upload to PyPI
+        env:
+          TWINE_NON_INTERACTIVE: "true"
+        run: twine upload dist/* --attestations --verbose
+
+      - name: Copy licence file (roman-numerals-py meta-package)
+        run: |
+          cd roman-numerals-py/
+          cp ../../LICENCE.rst LICENCE.rst
+
+      - name: Build distribution (roman-numerals-py meta-package)
+        run: |
+          cd roman-numerals-py/
+          python -m build
+
+      - name: Check distribution (roman-numerals-py meta-package)
+        run: twine check roman-numerals-py/dist/*
+
+      - name: Upload to PyPI (roman-numerals-py meta-package)
+        env:
+          TWINE_NON_INTERACTIVE: "true"
+        run: twine upload roman-numerals-py/dist/* --verbose
+
+  publish-crates-io:
+    runs-on: ubuntu-latest
+    name: Crates.io Release
+    environment: release
+    if: github.repository_owner == 'AA-Turner'
+    permissions:
+      id-token: write  # for Crates.io trusted publishing
+    defaults:
+      run:
+        working-directory: rust/
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: mint-token
+      - run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.mint-token.outputs.token }}

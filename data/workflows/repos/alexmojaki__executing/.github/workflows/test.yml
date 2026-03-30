@@ -1,0 +1,67 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: [3.8, 3.9, '3.10', '3.11', '3.12' ,'3.13' ,3.14-dev]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python --version
+        pip install -U pip
+        pip install --upgrade coveralls setuptools setuptools_scm pep517 .[tests]
+        pip install .
+    - name: Mypy testing (<3.11)
+      run: |
+        pip install mypy==0.910
+        python -m mypy executing --exclude=executing/_position_node_finder.py
+      # fromJson because https://github.community/t/passing-an-array-literal-to-contains-function-causes-syntax-error/17213/3
+      if: ${{ !contains(fromJson('["pypy-3.6", "3.11","3.12","3.13","3.14-dev"]'), matrix.python-version) }}
+      # pypy < 3.8 very doesn't work
+    - name: Mypy testing (3.11)
+      run: |
+        pip install mypy==0.971
+        python -m mypy executing
+      # fromJson because https://github.community/t/passing-an-array-literal-to-contains-function-causes-syntax-error/17213/3
+      # TODO: enable typechecking for 3.12
+      if: ${{ contains(fromJson('["3.11"]'), matrix.python-version) }}
+      # only >=3.11 use _position_node_finder.py
+    - name: Test
+      env:
+        EXECUTING_SLOW_TESTS: 1
+      run: |
+        # COVERAGE_PROCESS_START defines the path to the coverage config for coverage-enable-subprocess
+        export COVERAGE_PROCESS_START=${GITHUB_WORKSPACE}/setup.cfg
+        coverage run -m pytest tests
+        # combine the coverage of all subprocesses
+        coverage combine
+        coverage report -m
+    - name: Coveralls Python
+      uses: AndreMiras/coveralls-python-action@v20201129
+      with:
+        parallel: true
+        flag-name: test-${{ matrix.python-version }}
+
+  coveralls_finish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Coveralls Finished
+        uses: AndreMiras/coveralls-python-action@v20201129
+        with:
+          parallel-finished: true

@@ -1,0 +1,67 @@
+name: main
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: pip3 install flake8 wheel
+    - run: python3 setup.py sdist bdist_wheel
+    - run: flake8 .
+    - uses: actions/upload-artifact@v4
+      with:
+        name: dist
+        path: dist
+
+  test:
+    needs: [build]
+    strategy:
+      matrix:
+        python-version:
+        - 3.13.3
+        - 3.12.10
+        - 3.11.12
+        - 3.10.17
+        - 3.9.22
+        - 3.8.18
+        - 3.7.17
+        - pypy-3.10
+        - pypy-3.11
+      fail-fast: false
+    runs-on: ubuntu-22.04  # Older Python versions depend on Ubuntu 22.04
+    steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist
+    - run: pip install dist/iso4217-*.whl
+    - run: |
+        set -e
+        pushd /tmp
+        python -m iso4217.test
+        popd
+
+  fakeinv:
+    if: "github.event_name == 'push'"
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist
+    - run: pip3 install dist/iso4217-*.whl sphinx-fakeinv
+    - run: mkdir -p /tmp/fakeinv/
+    - run: sphinx-fakeinv iso4217 > /tmp/fakeinv/objects.inv
+    - run: touch /tmp/fakeinv/.nojekyll
+    - uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ github.token }}
+        publish_dir: /tmp/fakeinv
+        force_orphan: true

@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  MIN_PYTHON_VERSION: "3.10"
+
+defaults:
+  run:
+    # Prevents windows runners from running on powershell
+    shell: bash
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "${{ env.MIN_PYTHON_VERSION }}"
+      - name: Set up rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Set up rustfmt
+        run: rustup component add rustfmt
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies and lint
+        run: |
+          make install
+          make lint
+
+  check-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Set up rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Check documentation
+        run: |
+          make install
+          make doc
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+        os:
+          - "ubuntu-latest"
+          - "ubuntu-24.04-arm"
+          - "macos-14"
+          - "windows-latest"
+          # windows-11-arm excluded: pyarrow is not available for Windows ARM64
+          # https://github.com/apache/arrow/issues/47195
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies and test
+        run: |
+          make install
+          make test
+
+      - name: Test with pandas<3
+        run: |
+          uv pip install "pandas<3"
+          make test-python
+
+  check-wheel-build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Only testing the build on the smallest supported Python version for abi3 wheels
+        python-version: ["3.10", "3.14t"]
+        os: ["ubuntu-latest", "macos-14", "windows-latest"]
+        architecture: [x86-64, aarch64]
+        exclude:
+          # Cross-compiling x86_64 → aarch64 on Windows doesn't work; use windows-11-arm instead
+          - os: windows-latest
+            architecture: aarch64
+        include:
+          # Windows ARM64: build natively on windows-11-arm (3.11 is the minimum available)
+          - os: windows-11-arm
+            python-version: "3.11"
+            architecture: aarch64
+          - os: windows-11-arm
+            python-version: "3.14t"
+            architecture: aarch64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Set Rust target
+        id: target
+        run: |
+          TARGET=${{
+            (matrix.os == 'macos-14' && (matrix.architecture == 'aarch64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin'))
+            || (matrix.os == 'ubuntu-latest' && (matrix.architecture == 'aarch64' && 'aarch64-unknown-linux-gnu' || 'x86_64-unknown-linux-gnu'))
+            || (matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc')
+            || (matrix.os == 'windows-11-arm' && 'aarch64-pc-windows-msvc')
+          }}
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: build (fast)
+        uses: PyO3/maturin-action@v1
+        with:
+          manylinux: auto
+          command: build
+          args: "-o dist -i python${{ matrix.python-version }}"
+          target: ${{ steps.target.outputs.target }}
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: "wheels-${{ matrix.os }}-python-${{ matrix.python-version }}-${{ matrix.architecture }}"
+          path: dist
+
+  check-sdist-build:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          manylinux: auto
+          command: sdist
+          args: "-o dist"
+      - name: upload sdist
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist

@@ -1,0 +1,44 @@
+name: pystan
+
+on: [push, pull_request]
+
+jobs:
+  tests:
+    name: pystan tests
+    timeout-minutes: 30
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      matrix:
+        include:
+          - {runs-on: ubuntu-24.04, python-version: "3.12"}
+          - {runs-on: ubuntu-24.04, python-version: "3.13"}
+          - {runs-on: ubuntu-24.04, python-version: "3.14"}
+          - {runs-on: macos-15-intel, python-version: "3.12"}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install poetry
+        run: pip install poetry~=1.7.1
+
+      # export test dependencies from pyproject.toml, install them
+      - name: Install dependencies
+        run: |
+          poetry export -f requirements.txt --without-hashes --dev -o requirements.txt \
+          && pip install -r requirements.txt
+
+      - name: Build and Install wheel
+        run: |
+          poetry build -v
+          python -m pip install dist/*.whl
+
+      - name: Check code
+        run: scripts/check
+
+      - name: Run tests
+        run: scripts/test

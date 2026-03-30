@@ -1,0 +1,325 @@
+---
+name: CI
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+
+jobs:
+  format:
+    name: Ensure code is properly formatted
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - uses: actions/cache@v5
+        with:
+          path: ~/.tox
+          key: tox-${{ hashFiles('tox.ini') }}-${{ hashFiles('setup.cfg') }}-${{ hashFiles('test-requirements.txt') }}
+
+      - run: pip install tox
+
+      - run: tox -e format -- --check
+
+  ci:
+    name: Run the integration tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        container_runtime: ["podman", "docker"]
+        without_buildah: [false]
+
+        include:
+          - python_version: "3.6"
+            container_runtime: "podman"
+            without_buildah: false
+            use_pyenv: true
+          - python_version: "3.6"
+            container_runtime: "docker"
+            without_buildah: false
+            use_pyenv: true
+
+          - python_version: "3.7"
+            container_runtime: "podman"
+            without_buildah: false
+            use_pyenv: true
+          - python_version: "3.7"
+            container_runtime: "docker"
+            without_buildah: false
+            use_pyenv: true
+
+          # also test without buildah, but only on the latest python
+          - python_version: "3.13"
+            container_runtime: "podman"
+            without_buildah: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Use standard setup-python for python 3.8+
+      - uses: actions/setup-python@v6
+        if: ${{ !matrix.use_pyenv }}
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      # Install python 3.6/3.7 via pyenv
+      - name: Install python via pyenv
+        if: ${{ matrix.use_pyenv }}
+        run: |
+          # Install pyenv dependencies
+          sudo apt-get update
+          sudo apt-get install -y make build-essential libssl-dev zlib1g-dev \
+            libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm \
+            libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+            libffi-dev liblzma-dev
+
+          # Install pyenv
+          curl https://pyenv.run | bash
+
+          # Add pyenv to PATH for subsequent steps
+          echo "$HOME/.pyenv/bin" >> $GITHUB_PATH
+          echo "$HOME/.pyenv/versions/${{ matrix.python_version }}/bin" >> $GITHUB_PATH
+
+          # Setup pyenv for current step
+          export PATH="$HOME/.pyenv/bin:$PATH"
+          eval "$(pyenv init -)"
+          eval "$(pyenv virtualenv-init -)"
+
+          # Install python version
+          pyenv install ${{ matrix.python_version }}
+          pyenv global ${{ matrix.python_version }}
+
+          # Verify installation
+          python${{ matrix.python_version }} --version
+          python${{ matrix.python_version }} -m pip --version
+
+      - uses: actions/cache@v5
+        with:
+          path: ~/.tox
+          key: tox-${{ hashFiles('tox.ini') }}-${{ hashFiles('setup.cfg') }}-${{ hashFiles('test-requirements.txt') }}
+
+      # Install tox
+      - name: Install tox (standard python)
+        if: ${{ !matrix.use_pyenv }}
+        run: pip install tox
+
+      - name: Install tox (pyenv python)
+        if: ${{ matrix.use_pyenv }}
+        run: |
+          eval "$(pyenv init -)"
+          eval "$(pyenv virtualenv-init -)"
+          python${{ matrix.python_version }} -m pip install tox
+
+      - name: remove buildah
+        if: ${{ matrix.without_buildah }}
+        run: |
+          sudo apt-get remove buildah
+          ! command -v buildah
+
+      - run: |
+          export CUR_USER="$(whoami)"
+          sudo loginctl enable-linger ${CUR_USER}
+
+      - name: Run tests
+        run: |
+          if [[ "${{ matrix.use_pyenv }}" == "true" ]]; then
+            eval "$(pyenv init -)"
+            eval "$(pyenv virtualenv-init -)"
+            export TOXPYTHON=python${{ matrix.python_version }}
+          else
+            export TOXPYTHON=$pythonLocation
+          fi
+
+          mkdir ./tmp/
+          chmod 1777 ./tmp
+          export TMPDIR="$(pwd)/tmp"
+          export PULL_ALWAYS=0
+          export CONTAINER_RUNTIME=${{ matrix.container_runtime }}
+          tox -e py$(echo $PY_VER | tr -d . ) -- -x -n auto --reruns 3
+          export PULL_ALWAYS=1
+          tox -e py$(echo $PY_VER | tr -d . ) -- -x -n auto --reruns 3 --pytest-container-log-level DEBUG
+          tox -e py$(echo $PY_VER | tr -d . ) -- -x --reruns 3 --pytest-container-log-level DEBUG
+          unset TOXPYTHON
+          tox -e coverage
+        env:
+          PY_VER: ${{ matrix.python_version }}
+
+      - name: verify that no stray containers are left
+        run: |
+          [[ $(${{ matrix.container_runtime }} ps -aq|wc -l) = '0' ]] || (${{ matrix.container_runtime }} ps -aq|xargs ${{ matrix.container_runtime }} inspect; exit 1)
+
+      - name: verify that no stray volumes are left
+        run: |
+          [[ $(${{ matrix.container_runtime }} volume ls -q|wc -l) = "0" ]]
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  build:
+    name: Build the package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: install setuptools
+        run: pip install setuptools
+
+      - name: Run the build
+        run: python setup.py sdist bdist_wheel
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: wheel
+          path: dist/pytest_container*whl
+          if-no-files-found: error
+
+  install:
+    name: Install the package
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        use_pyenv: [false]
+
+        include:
+          - python_version: "3.6"
+            use_pyenv: true
+          - python_version: "3.7"
+            use_pyenv: true
+
+    steps:
+      # Use standard setup-python for python 3.8+
+      - uses: actions/setup-python@v6
+        if: ${{ !matrix.use_pyenv }}
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      # Install python 3.6/3.7 via pyenv (since deadsnakes doesn't support 3.6 on modern Ubuntu)
+      - name: Install python via pyenv
+        if: ${{ matrix.use_pyenv }}
+        run: |
+          # Install pyenv dependencies
+          sudo apt-get update
+          sudo apt-get install -y make build-essential libssl-dev zlib1g-dev \
+            libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm \
+            libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+            libffi-dev liblzma-dev
+
+          # Install pyenv
+          curl https://pyenv.run | bash
+
+          # Add pyenv to PATH for subsequent steps
+          echo "$HOME/.pyenv/bin" >> $GITHUB_PATH
+          echo "$HOME/.pyenv/versions/${{ matrix.python_version }}/bin" >> $GITHUB_PATH
+
+          # Setup pyenv for current step
+          export PATH="$HOME/.pyenv/bin:$PATH"
+          eval "$(pyenv init -)"
+          eval "$(pyenv virtualenv-init -)"
+
+          # Install python version
+          pyenv install ${{ matrix.python_version }}
+          pyenv global ${{ matrix.python_version }}
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+
+      - name: install the wheel & run a smoke test (standard python)
+        if: ${{ !matrix.use_pyenv }}
+        run: |
+          pip install --user dist/pytest_container*whl
+          python -c "import pytest_container; print (pytest_container.__name__)"
+
+      - name: install the wheel & run a smoke test (pyenv python)
+        if: ${{ matrix.use_pyenv }}
+        run: |
+          eval "$(pyenv init -)"
+          eval "$(pyenv virtualenv-init -)"
+          python${{ matrix.python_version }} -m pip install --user dist/pytest_container*whl
+          python${{ matrix.python_version }} -c "import pytest_container; print (pytest_container.__name__)"
+
+  documentation:
+    name: Build the documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - uses: actions/cache@v5
+        with:
+          path: ~/.tox
+          key: tox-${{ hashFiles('tox.ini') }}-${{ hashFiles('setup.cfg') }}-${{ hashFiles('test-requirements.txt') }}
+
+      - run: pip install tox
+
+      - run: tox -e doc
+
+      - name: upload the build directory
+        uses: actions/upload-artifact@v6
+        with:
+          name: build
+          path: ./build/html
+
+  deploy:
+    name: deploy to the gh-pages branch
+    runs-on: ubuntu-latest
+    needs: documentation
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          name: build
+          path: ./build
+
+      - run: touch ./build/.nojekyll
+
+      - name: deploy to github pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: build
+
+  lint:
+    name: Lint the source code
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - uses: actions/cache@v5
+        with:
+          path: ~/.tox
+          key: tox-${{ hashFiles('tox.ini') }}-${{ hashFiles('setup.cfg') }}-${{ hashFiles('test-requirements.txt') }}
+
+      - run: pip install tox
+
+      # grab the previously built wheel for checking with twine
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+
+      - run: tox -e lint

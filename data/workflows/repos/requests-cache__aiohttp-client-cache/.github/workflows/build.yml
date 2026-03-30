@@ -1,0 +1,78 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+env:
+  LATEST_PY_VERSION: '3.14'
+  COVERAGE_ARGS: '--cov --cov-report=term --cov-report=xml'
+  XDIST_ARGS: '--numprocesses=auto --dist=loadfile'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - '3.14'
+          - '3.13'
+          - '3.12'
+          - '3.11'
+          - '3.10'
+          - '3.9'
+    services:
+      nginx:
+        image: kennethreitz/httpbin
+        ports:
+          - 8080:80
+
+    steps:
+      # Install dependencies, with caching
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: |
+          uv python install ${{ matrix.python-version }}
+          uv sync --all-extras --group test-server
+
+      # Start integration test databases
+      - uses: supercharge/mongodb-github-action@1.12.1
+        with:
+          mongodb-version: '5.0'
+      - uses: supercharge/redis-github-action@v2
+        with:
+          redis-version: '6'
+      - uses: rrainn/dynamodb-action@v4.0.0
+      - name: Run custom test server
+        run: |
+          cd test && uv run gunicorn -D -c server/gunicorn-cfg.py server:app
+
+      # Run tests with coverage report
+      - name: Run tests
+        run: |
+          uv run pytest -rs test/unit ${{ env.XDIST_ARGS }} ${{ env.COVERAGE_ARGS }}
+          uv run pytest -rs test/integration --cov-append ${{ env.XDIST_ARGS }} ${{ env.COVERAGE_ARGS }}
+
+      # Latest python version: send coverage report to codecov
+      - name: 'Upload coverage report to Codecov'
+        if: ${{ matrix.python-version == env.LATEST_PY_VERSION }}
+        uses: codecov/codecov-action@v5
+
+  # Run code analysis checks
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.LATEST_PY_VERSION }}
+      - name: Run style checks and linting via pre-commit hooks
+        uses: pre-commit/action@v3.0.0

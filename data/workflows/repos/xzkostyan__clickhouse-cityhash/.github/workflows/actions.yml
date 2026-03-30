@@ -1,0 +1,160 @@
+on: [push, pull_request]
+name: build
+jobs:
+  wheels-linux:
+    name: Wheels for Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.11
+          architecture: x64
+#      - name: Login to Docker Hub
+#        uses: docker/login-action@v1
+#        with:
+#          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+#          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      - name: Install cibuildwheel
+        run: |
+          pip install --upgrade pip setuptools
+          pip install cython cibuildwheel==$VERSION
+        env:
+          VERSION: 3.2.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: 'cp3{9,10,11,12,13,14}-* pp3{9,10,11}-*'
+          CIBW_ENABLE: 'pypy pypy-eol'
+      - uses: ncipollo/release-action@v1
+        name: Upload wheels
+        if: ${{ github.ref_type == 'tag' }}
+        with:
+          artifacts: "wheelhouse/*"
+          allowUpdates: true
+          draft: true
+          tag: Linux
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  wheels-macos:
+    name: Wheels for OS X
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.11
+          architecture: x64
+#      - name: Login to Docker Hub
+#        uses: docker/login-action@v1
+#        with:
+#          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+#          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      - name: Install cibuildwheel
+        run: |
+          pip install --upgrade pip setuptools
+          pip install cython cibuildwheel==$VERSION
+        env:
+          VERSION: 3.2.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: 'cp3{9,10,11,12,13,14}-* pp3{9,10,11}-*'
+          CIBW_ENABLE: 'pypy pypy-eol'
+          CIBW_ARCHS_MACOS: x86_64 arm64
+      - uses: ncipollo/release-action@v1
+        name: Upload wheels
+        if: ${{ github.ref_type == 'tag' }}
+        with:
+          artifacts: "wheelhouse/*"
+          allowUpdates: true
+          draft: true
+          tag: OS X
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  wheels-windows:
+    name: Wheels for Windows
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.11
+          architecture: x64
+#      - name: Login to Docker Hub
+#        uses: docker/login-action@v1
+#        with:
+#          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+#          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      - name: Install cibuildwheel
+        run: |
+          pip install cibuildwheel==$env:VERSION
+        env:
+          VERSION: 3.2.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: 'cp3{9,10,11,12,13,14}-* pp3{9,10,11}-*'
+          CIBW_ENABLE: 'pypy pypy-eol'
+          CIBW_BEFORE_BUILD: pip install cython
+      - uses: ncipollo/release-action@v1
+        name: Upload wheels
+        if: ${{ github.ref_type == 'tag' }}
+        with:
+          artifacts: "wheelhouse/*"
+          allowUpdates: true
+          draft: true
+          tag: Windows
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  wheels-linux-non-x86:
+    name: Wheels for Linux non-x86
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch:
+          - aarch64
+          - ppc64le
+          - s390x
+    steps:
+      - uses: actions/checkout@v2.1.0
+#      - name: Login to Docker Hub
+#        uses: docker/login-action@v1
+#        with:
+#          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+#          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.11
+          architecture: x64
+      - name: Set up QEMU
+        id: qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          image: tonistiigi/binfmt:qemu-v8.1.5
+          platforms: all
+      - name: Install cibuildwheel
+        run: |
+          pip install --upgrade pip setuptools
+          pip install cibuildwheel==$VERSION
+        env:
+          VERSION: 3.2.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: 'cp3{9,10,11,12,13,14}-* pp3{9,10,11}-*'
+          CIBW_ENABLE: 'pypy pypy-eol'
+          CIBW_ARCHS: ${{ matrix.arch }}
+      - uses: ncipollo/release-action@v1
+        name: Upload wheels
+        if: ${{ github.ref_type == 'tag' }}
+        with:
+          artifacts: "wheelhouse/*"
+          allowUpdates: true
+          draft: true
+          tag: Linux non-x86
+          token: ${{ secrets.GITHUB_TOKEN }}

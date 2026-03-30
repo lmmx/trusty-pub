@@ -1,0 +1,75 @@
+# This workflow publishes releases to upstream registries (crates.io
+# for Rust crates).
+#
+# The release process is somewhat convoluted due to interdependencies
+# between packages (most notably, Ruby gem requires eppo_core to be
+# published beforehand and ruby-sdk/Cargo.lock to be updated with the
+# proper hash), so we cannot release all packages in one go.
+#
+# To workaround these complications, the release process is staged and
+# packages are released based on the release tag name.
+#
+# The following names are supported:
+# - eppo_core@*.*.* to publish eppo_core to crates.io.
+# - rust-sdk@*.*.* to publish Rust SDK.
+name: Publish Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to Crates.io
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref_name, 'eppo_core@') || startsWith(github.ref_name, 'rust-sdk@') }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - run: npm ci
+      - name: Install Rust toolchain
+        run: rustup update stable && rustup default stable
+      - name: Build Release
+        run: cargo build --release --verbose
+      - name: Test
+        run: cargo test --verbose
+      - name: Docs
+        run: cargo doc --verbose
+      - name: Publish eppo_core
+        if: ${{ startsWith(github.ref_name, 'eppo_core@') }}
+        run: cargo publish -p eppo_core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+      - name: Publish rust-sdk
+        if: ${{ startsWith(github.ref_name, 'rust-sdk@') }}
+        run: cargo publish -p eppo
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+  update_lockfiles:
+    name: Update SDK lockfiles
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref_name, 'eppo_core@') }}
+    needs: publish
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup update stable && rustup default stable
+      - run: cargo update eppo_core
+        working-directory: ruby-sdk
+      - run: cargo update eppo_core
+        working-directory: elixir-sdk
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "chore: update lockfiles"
+          title: "chore: update lockfiles"
+          branch: create-pull-request/ruby-lockfile
+          base: main

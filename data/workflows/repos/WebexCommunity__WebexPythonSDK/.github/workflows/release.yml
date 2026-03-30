@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    uses: ./.github/workflows/build-and-test.yml
+    secrets: inherit
+
+  pypi:
+    needs: build-and-test
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi.org
+    permissions:
+      id-token: write
+    steps:
+      - name: Download Distribution Files
+        uses: actions/download-artifact@v4
+        with:
+          name: distribution-files
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ vars.PYPI_REPOSITORY_URL }}
+          print-hash: true

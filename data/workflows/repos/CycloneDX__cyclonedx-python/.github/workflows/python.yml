@@ -1,0 +1,293 @@
+# This file is part of CycloneDX Python
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OWASP Foundation. All Rights Reserved.
+
+# For details of what checks are run for PRs please refer below
+# docs: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions
+
+name: Python CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    tags: [ 'v*' ]  # run again on release tags to have tools mark them
+    branches: [ 'main', 'next' ]
+  schedule:
+    # schedule daily tests, since some dependencies are not intended to be pinned
+    # this means: at 23:42 every day
+    - cron: '42 23 * * *'
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION_DEFAULT: "3.14"
+  POETRY_VERSION: "1.8.1"
+  REPORTS_DIR: CI_reports
+  TESTS_REPORTS_ARTIFACT: tests-reports
+  PIPENV_VENV_IN_PROJECT: 1
+
+permissions: {}
+
+jobs:
+  pyupgrade:
+    name: find Upgradable CodingFeatures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        # see https://github.com/actions/checkout
+        uses: actions/checkout@v6
+      - name: Setup Python Environment
+        # see https://github.com/actions/setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
+      - name: Install poetry
+        # see https://github.com/marketplace/actions/setup-poetry
+        uses: Gr1N/setup-poetry@v9
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+      - name: Install dependencies
+        run: poetry install --no-root
+      - name: Run tox
+        run: poetry run tox run -e pyupgrade -s false
+
+  deptry:
+    name: test dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        # see https://github.com/actions/checkout
+        uses: actions/checkout@v6
+      - name: Setup Python Environment
+        # see https://github.com/actions/setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
+      - name: Install poetry
+        # see https://github.com/marketplace/actions/setup-poetry
+        uses: Gr1N/setup-poetry@v9
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+      - name: Install dependencies
+        run: poetry install --no-root
+      - name: Run tox
+        run: poetry run tox run -e deptry -s false
+
+  coding-standards:
+    name: Linting & Coding Standards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        # see https://github.com/actions/checkout
+        uses: actions/checkout@v6
+      - name: Setup Python Environment
+        # see https://github.com/actions/setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
+      - name: Install poetry
+        # see https://github.com/marketplace/actions/setup-poetry
+        uses: Gr1N/setup-poetry@v9
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+      - name: Install dependencies
+        run: poetry install --no-root
+      - name: Run tox
+        run: poetry run tox r -e flake8 -s false
+
+  static-code-analysis:
+    name: StaticCodingAnalysis (py${{ matrix.python-version}} ${{ matrix.toxenv-factors }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: '3.14'  # latest
+            os: ubuntu-latest
+            toxenv-factors: '-current'
+          - python-version: '3.9'   # lowest
+            os: ubuntu-latest
+            toxenv-factors: '-lowest'
+    steps:
+      - name: Checkout
+        # see https://github.com/actions/checkout
+        uses: actions/checkout@v6
+      - name: Setup Python Environment
+        # see https://github.com/actions/setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install poetry
+        # see https://github.com/marketplace/actions/setup-poetry
+        uses: Gr1N/setup-poetry@v9
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+      - name: Install dependencies
+        run: poetry install --no-root
+      - name: Run tox
+        run: poetry run tox r -e mypy${{ matrix.toxenv-factors }} -s false
+
+  security-issues:
+    name: find Security Issues
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        # see https://github.com/actions/checkout
+        uses: actions/checkout@v6
+      - name: Setup Python Environment
+        # see https://github.com/actions/setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
+      - name: Install poetry
+        # see https://github.com/marketplace/actions/setup-poetry
+        uses: Gr1N/setup-poetry@v9
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+      - name: Install dependencies
+        run: poetry install --no-root
+      - name: Run tox
+        run: poetry run tox run -e bandit -s false
+
+  install-and-run:
+    name: install & run "${{matrix.command}}" (${{matrix.os}})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        command:
+          - cyclonedx-py --help
+          - python -m cyclonedx_py --help
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        # see https://github.com/actions/checkout
+        uses: actions/checkout@v6
+      - name: Setup Python Environment
+        # see https://github.com/actions/setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
+      - name: Install self
+        run: pip install .
+      - name: run command
+        run: ${{matrix.command}}
+
+  build-and-test:
+    name: Test (${{ matrix.os }} py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        python-version:
+          - "3.14" # highest supported
+          - "3.13"
+          - "3.12"
+          - "3.11"
+          - "3.10"
+          - "3.9"  # lowest supported -- handled in include
+        exclude:
+          - os: macos-latest  # macos-latest is incompatible with some PY versions
+            python-version: "3.10"
+          - os: macos-latest  # macos-latest is incompatible with some PY versions
+            python-version: "3.9"
+    steps:
+      - name: Checkout
+        # see https://github.com/actions/checkout
+        uses: actions/checkout@v6
+      - name: Create reports directory
+        run: mkdir ${{ env.REPORTS_DIR }}
+      - name: Setup Python Environment
+        # see https://github.com/actions/setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: craft PY_UT_ARGS
+        shell: python
+        run: |-
+          import sys, os
+          PY_UT_ARGS=[]
+          if sys.version_info >= (3, 12):
+            PY_UT_ARGS.append('--durations=0')
+          with open(os.environ['GITHUB_ENV'], 'a') as env_file:
+            env_file.write(f'PY_UT_ARGS={" ".join(PY_UT_ARGS)}\n')
+      - name: Install poetry
+        # see https://github.com/marketplace/actions/setup-poetry
+        uses: Gr1N/setup-poetry@v9
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+      - name: Install dependencies
+        run: poetry install --no-root
+      - name: Ensure build successful
+        run: poetry build
+      - name: Run tox
+        run: poetry run -- tox r -e py -s false -- $PY_UT_ARGS
+      - name: Generate coverage reports
+        if: ${{ failure() || success() }}
+        shell: bash
+        run: |
+          set -eux
+          poetry run coverage report -m
+          poetry run coverage xml -o '${{ env.REPORTS_DIR }}/coverage/${{ matrix.os }}_${{ matrix.python-version }}.cobertura.xml'
+      - name: Artifact reports
+        if: ${{ ! cancelled() }}
+        # see https://github.com/actions/upload-artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: '${{ env.TESTS_REPORTS_ARTIFACT }}_bnt_${{ matrix.os }}_py${{ matrix.python-version }}'
+          path: ${{ env.REPORTS_DIR }}
+          if-no-files-found: error
+
+  report-coverage:
+    name: Publish test coverage
+    needs: [ "build-and-test" ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: fetch test artifacts
+        # see https://github.com/actions/download-artifact
+        uses: actions/download-artifact@v7
+        with:
+          pattern: '${{ env.TESTS_REPORTS_ARTIFACT }}_bnt_*'
+          merge-multiple: true
+          path: ${{ env.REPORTS_DIR }}
+      - name: Run codacy-coverage-reporter
+        env:
+          CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+        ## see https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#example-using-secrets
+        if: ${{ env.CODACY_PROJECT_TOKEN != '' }}
+        # see https://github.com/codacy/codacy-coverage-reporter-action
+        uses: codacy/codacy-coverage-reporter-action@v1
+        with:
+          project-token: ${{ env.CODACY_PROJECT_TOKEN }}
+          coverage-reports: ${{ env.REPORTS_DIR }}/coverage/*

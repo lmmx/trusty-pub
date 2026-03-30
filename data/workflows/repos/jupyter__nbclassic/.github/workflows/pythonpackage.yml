@@ -1,0 +1,165 @@
+name: Testing nbclassic
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Set up Python
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.13'
+      - name: Lint with Pre-commit
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-2022]
+        python-version: [ '3.9', '3.10', '3.11', '3.12', '3.13' ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@d734fad2dc3aadbe56a5fd530037656e770e1a8d # v1
+      - name: Install pip dependencies
+        run: |
+          pip install -v -e ".[test]" pytest-cov
+      - name: Check pip environment
+        run: |
+          pip freeze
+          pip check
+      - name: Run the help command
+        run: |
+          jupyter nbclassic -h
+      - name: Test with pytest and coverage
+        run: |
+          python -m pytest -vv --cov=nbclassic --cov-report term-missing:skip-covered || python -m pytest -vv --cov=nbclassic --cov-report term-missing:skip-covered
+      - name: Test Running Server
+        if: startsWith(runner.os, 'Linux')
+        run: |
+          jupyter nbclassic --no-browser &
+          TASK_PID=$!
+          # Make sure the task is running
+          ps -p $TASK_PID || exit 1
+          sleep 5
+          kill $TASK_PID
+          wait $TASK_PID
+
+#  test_miniumum_versions:
+#    name: Test Minimum Versions
+#    timeout-minutes: 20
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+#      - name: Base Setup
+#        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@d734fad2dc3aadbe56a5fd530037656e770e1a8d # v1
+#        with:
+#          python_version: "3.8"
+#      - name: Install minimum versions
+#        uses: jupyterlab/maintainer-tools/.github/actions/install-minimums@v1
+#      - name: Run the unit tests
+#        run: pytest -vv || pytest -vv --lf
+
+  test_prereleases:
+    name: Test Prereleases
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@d734fad2dc3aadbe56a5fd530037656e770e1a8d # v1
+      - name: Install the Python dependencies
+        run: |
+          pip install --pre -e ".[test]"
+      - name: List installed packages
+        run: |
+          pip freeze
+          pip check
+      - name: Run the tests
+        run: |
+          pytest -vv || pytest -vv --lf
+
+  make_sdist:
+    name: Make SDist
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@d734fad2dc3aadbe56a5fd530037656e770e1a8d # v1
+      - name: Build SDist
+        run: |
+          pip install build
+          python -m build --sdist
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: "sdist"
+          path: dist/*.tar.gz
+
+  test_sdist:
+    runs-on: ubuntu-latest
+    needs: [make_sdist]
+    name: Install from SDist and Test
+    timeout-minutes: 20
+    steps:
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@d734fad2dc3aadbe56a5fd530037656e770e1a8d # v1
+      - name: Download sdist
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: sdist
+          path: sdist
+      - name: Install From SDist
+        run: |
+          set -ex
+          cd sdist
+          mkdir test
+          tar --strip-components=1 -zxvf *.tar.gz -C ./test
+          cd test
+          pip install -e .[test]
+          pip install pytest-github-actions-annotate-failures
+      - name: Run Test
+        run: |
+          cd sdist/test
+          pytest -vv || pytest -vv --lf
+  test_offline_build:
+    runs-on: ubuntu-latest
+    needs: [make_sdist]
+    name: Test building offline
+    timeout-minutes: 20
+    steps:
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@d734fad2dc3aadbe56a5fd530037656e770e1a8d # v1
+      - name: Download sdist
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: sdist
+          path: sdist
+      - name: Install From SDist
+        run: |
+          set -ex
+          cd sdist
+          mkdir test
+          tar --strip-components=1 -zxvf *.tar.gz -C ./test
+      - name: Test offline build with unshare
+        run: |
+          # Use unshare to create a network namespace that blocks network access
+          cd sdist/test
+          python -m venv .venv
+          .venv/bin/python -m pip install build babel jupyter-server hatch-jupyter-builder
+          sudo unshare --net bash -c ".venv/bin/python -m build --no-isolation --wheel"

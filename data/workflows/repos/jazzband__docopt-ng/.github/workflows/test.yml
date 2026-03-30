@@ -1,0 +1,82 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+    tags:
+      - "*"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PDM
+        uses: pdm-project/setup-pdm@v2
+      - name: Install dependencies
+        run: pdm sync -d -G dev
+      - name: Check formatting
+        run: pdm run ruff format --check .
+      - name: Lint
+        run: pdm run ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        python-version: ["3.7", "3.8", "3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PDM for Python ${{ matrix.python-version }}
+        uses: pdm-project/setup-pdm@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pdm sync -d -G dev
+
+      - name: Run tests
+        run: |
+          pdm run -v pytest --cov-report term-missing --cov-report xml --cov=docopt --mypy
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v2
+        with:
+          name: Python ${{ matrix.python-version }}
+          fail_ci_if_error: true
+
+      - name: Build wheels and sdist
+        run: |
+          pdm build
+
+      - name: Save artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          # These are pure-python, so we don't need to worry about platform
+          name: wheels-${{ matrix.python-version }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+  release:
+    needs:
+      - test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+
+      - name: Upload packages to Jazzband
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          user: jazzband
+          password: ${{ secrets.JAZZBAND_RELEASE_KEY }}
+          repository_url: https://jazzband.co/projects/docopt-ng/upload

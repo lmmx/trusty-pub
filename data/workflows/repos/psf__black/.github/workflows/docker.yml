@@ -1,0 +1,123 @@
+name: docker
+
+on:
+  push:
+    branches:
+      - "main"
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: pyfound/black
+
+jobs:
+  build:
+    if: github.repository == 'psf/black'
+    runs-on: ${{ matrix.runner }}
+    name: build (${{ matrix.platform }})
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to DockerHub
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare
+        id: prepare
+        run: echo "platform=${platform//\//-}" >> $GITHUB_OUTPUT
+        env:
+          platform: ${{ matrix.platform }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          tags: ${{ env.REGISTRY }}
+          cache-from: type=gha,scope=${{ steps.prepare.outputs.platform }}
+          cache-to: type=gha,scope=${{ steps.prepare.outputs.platform }},mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p digests
+          touch "digests/${digest#sha256:}"
+        env:
+          digest: ${{ steps.build.outputs.digest }}
+
+      - name: Upload digest
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: digests-${{ steps.prepare.outputs.platform }}
+          path: digests/*
+          if-no-files-found: error
+
+  push:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Login to DockerHub
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Create manifest list and push
+        run: |
+          TAGS="-t $REGISTRY:latest"
+
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            TAGS="$TAGS -t $REGISTRY:$(git describe --candidates=0 --tags)"
+
+            if [[ "$PRERELEASE" == "true" ]]; then
+              TAGS="$TAGS -t $REGISTRY:latest_prerelease"
+            else
+              TAGS="$TAGS -t $REGISTRY:latest_release"
+            fi
+          else
+            TAGS="$TAGS -t $REGISTRY:latest_non_release"
+          fi
+
+          cd digests
+          docker buildx imagetools create $TAGS $(printf "$REGISTRY@sha256:%s " *)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect $REGISTRY:latest

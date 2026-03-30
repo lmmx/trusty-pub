@@ -1,0 +1,292 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Verification (Nightly)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/nightly-verify.yml"
+      - "ci/docker/cpp-clang-latest.dockerfile"
+      - "ci/docker/cpp-gcc-latest.dockerfile"
+      - "ci/docker/cpp-musl.alpine.dockerfile"
+      - "dev/release/verify-release-candidate.sh"
+      - "dev/release/verify-release-candidate.ps1"
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # 'bash' will expand to -eo pipefail
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    # For cron: only run on the main repo, not forks
+    if: github.event_name != 'schedule' || github.repository == 'apache/arrow-adbc'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Prepare version
+        run: |
+          VERSION=$(grep 'set(ADBC_VERSION' c/cmake_modules/AdbcVersion.cmake | \
+                      grep -E -o '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Create archive
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -f \
+            -a apache-arrow-adbc-${VERSION}-rc0 \
+            -m "ADBC Libraries ${VERSION} RC 0"
+          ci/scripts/source_build.sh \
+            apache-arrow-adbc-${VERSION} \
+            apache-arrow-adbc-${VERSION}-rc0
+
+      - name: Create fake GPG key
+        run: |
+          gpg \
+            --quick-gen-key \
+            --batch \
+            --passphrase '' \
+            user@localhost
+
+          gpg \
+            --list-sigs >> KEYS
+
+          gpg \
+            --armor \
+            --export >> KEYS
+
+      - name: Create sum/signature
+        run: |
+          gpg \
+            --armor \
+            --detach-sign \
+            --output apache-arrow-adbc-${VERSION}.tar.gz.asc \
+            apache-arrow-adbc-${VERSION}.tar.gz
+
+          shasum --algorithm 512 \
+            apache-arrow-adbc-${VERSION}.tar.gz > apache-arrow-adbc-${VERSION}.tar.gz.sha512
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source
+          retention-days: 7
+          path: |
+            KEYS
+            apache-arrow-adbc-${{ env.VERSION }}.tar.gz
+            apache-arrow-adbc-${{ env.VERSION }}.tar.gz.asc
+            apache-arrow-adbc-${{ env.VERSION }}.tar.gz.sha512
+
+  source-conda:
+    name: "Verify Source (Conda)/${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    needs:
+      - source
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["macos-15-intel", "macos-latest", "ubuntu-latest", "windows-latest"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: arrow-adbc
+          persist-credentials: false
+
+      - name: Prepare version
+        run: |
+          VERSION=$(grep 'set(ADBC_VERSION' arrow-adbc/c/cmake_modules/AdbcVersion.cmake | \
+                      grep -E -o '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: source
+          path: ${{ github.workspace }}/apache-arrow-adbc-${{ env.VERSION }}-rc0/
+
+      - name: Setup directory structure
+        run: |
+          mv apache-arrow-adbc-${{ env.VERSION }}-rc0/KEYS .
+
+      - uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
+        # The Unix script will set up conda itself
+        if: matrix.os == 'windows-latest'
+        with:
+          miniforge-version: latest
+          use-mamba: true
+
+      - name: Work around ASAN issue (GH-1617)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Clean up disk space
+        if: runner.os == 'Linux'
+        run: |
+          # These tools use a lot of disk space, free up some space
+          # https://github.com/actions/runner-images/issues/2840
+          sudo rm -rf \
+            "$AGENT_TOOLSDIRECTORY" \
+            /opt/google/chrome \
+            /opt/microsoft/msedge \
+            /opt/microsoft/powershell \
+            /opt/pipx \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/lib/node_modules \
+            /usr/local/share/chromium \
+            /usr/local/share/powershell \
+            /usr/share/swift
+          df -h /
+
+      - name: Verify
+        if: matrix.os != 'windows-latest'
+        env:
+          CI: "false"
+          REPOSITORY: ${{ github.repository }}
+          TEST_DEFAULT: "0"
+          TEST_SOURCE: "1"
+          USE_CONDA: "1"
+          VERBOSE: "1"
+          VERIFICATION_MOCK_DIST_DIR: ${{ github.workspace }}
+        run: |
+          # Required for macOS
+          export CXXFLAGS="${CXXFLAGS} -D_LIBCPP_DISABLE_AVAILABILITY"
+          echo "CXXFLAGS=${CXXFLAGS}"
+          ./arrow-adbc/dev/release/verify-release-candidate.sh $VERSION 0
+
+      - name: Verify
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          CI: "false"
+          REPOSITORY: ${{ github.repository }}
+          TEST_DEFAULT: "0"
+          TEST_SOURCE: "1"
+          USE_CONDA: "1"
+          VERBOSE: "1"
+          VERIFICATION_MOCK_DIST_DIR: ${{ github.workspace }}\apache-arrow-adbc-${{ env.VERSION }}-rc0
+        run: |
+          .\arrow-adbc\dev\release\verify-release-candidate.ps1 $env:VERSION 0
+
+  source-docker:
+    name: "Run Docker Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: arrow-adbc
+          persist-credentials: false
+
+      - name: cpp-clang-latest
+        run: |
+          pushd arrow-adbc
+          docker compose run --rm cpp-clang-latest
+
+      - name: cpp-gcc-latest
+        run: |
+          pushd arrow-adbc
+          docker compose run --rm cpp-gcc-latest
+
+      - name: cpp-shared-no-common-entrypoints-test
+        run: |
+          pushd arrow-adbc
+          docker compose run --rm cpp-shared-no-common-entrypoints-test
+
+      - name: cpp-static-test
+        run: |
+          pushd arrow-adbc
+          docker compose run --rm cpp-static-test
+
+      - name: cpp-musl
+        run: |
+          pushd arrow-adbc
+          docker compose run --rm cpp-musl
+
+      - name: python-debug
+        run: |
+          # Need to set this or ASAN inside the container gets stuck
+          # printing a loop of DEADLYSIGNAL
+          sudo sysctl vm.mmap_rnd_bits=28
+          pushd arrow-adbc
+          docker compose run -e PYTHON=3.14 --rm python-debug
+
+  source-verify-docker:
+    name: "Verify Source (OS)/${{ matrix.os }} ${{ matrix.version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      matrix:
+        include:
+          - os: ubuntu
+            version: "22.04"
+          - os: ubuntu
+            version: "24.04"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: arrow-adbc
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Clean up disk space
+        run: |
+          # These tools use a lot of disk space, free up some space
+          # https://github.com/actions/runner-images/issues/2840
+          sudo rm -rf \
+            "$AGENT_TOOLSDIRECTORY" \
+            /opt/google/chrome \
+            /opt/microsoft/msedge \
+            /opt/microsoft/powershell \
+            /opt/pipx \
+            /usr/lib/mono \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/lib/node_modules \
+            /usr/local/share/chromium \
+            /usr/local/share/powershell \
+            /usr/share/dotnet \
+            /usr/share/swift
+          df -h /
+
+      - name: Verify
+        env:
+          OS: ${{ matrix.os }}
+          OS_VERSION: ${{ matrix.version }}
+        run: |
+          pushd arrow-adbc
+          env ${OS@U}=${OS_VERSION} docker compose run --rm verify-all-${OS}

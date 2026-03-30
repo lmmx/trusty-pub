@@ -1,0 +1,44 @@
+---
+name: "Test"
+on:
+  pull_request:
+  push:
+    branches:
+      - "main"
+env:
+  CLAMD_UNIX_SOCKET: "/tmp/clamd.socket"
+  CLAMD_TCP_PORT: "3310"
+jobs:
+  test:
+    name: "Test"
+    runs-on: "ubuntu-22.04"
+    steps:
+      - name: "Check out repository"
+        uses: "actions/checkout@v4"
+      - name: Start ClamAV daemon clamd
+        uses: toblux/start-clamd-github-action@bae519cc165de29b89cbb9c4528f61c34b1c848b # v0.2.1
+        with:
+          unix_socket: ${{ env.CLAMD_UNIX_SOCKET }}
+          tcp_port: ${{ env.CLAMD_TCP_PORT }}
+          stream_max_length: 1M
+          db_main: true
+          db_daily: true
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          version: latest
+      - name: Run tests
+        run: ./test.sh
+      - name: "Upload coverage report"
+        if: github.repository == 'artefactual-labs/clamav-client'
+        uses: "codecov/codecov-action@v4"
+        with:
+          files: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          files: ./junit.xml
+          token: ${{ secrets.CODECOV_TOKEN }}

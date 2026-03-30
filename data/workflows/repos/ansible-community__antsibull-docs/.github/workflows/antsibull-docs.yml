@@ -1,0 +1,351 @@
+---
+# Copyright (c) Ansible Project
+# GNU General Public License v3.0+ (see LICENSES/GPL-3.0-or-later.txt or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# This workflow will run antsibull-docs tests
+
+name: antsibull-docs tests
+
+on:
+  push:
+    branches:
+      - main
+      - stable-*
+  pull_request:
+    branches:
+      - main
+      - stable-*
+  # Run once per week (Monday at 04:00 UTC)
+  schedule:
+    - cron: '0 4 * * 1'
+
+jobs:
+  build-simple-docsite:
+    name: 'Build simple docsite (extra options: ${{ matrix.options }})'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        options:
+          - '--use-current --sphinx-theme sphinx_rtd_theme'
+          - '--no-indexes --squash-hierarchy --intersphinx ansible7:https://docs.ansible.com/ansible/6/ community.crypto --collection-version 2.0.0'
+        python:
+          - '3.14'
+        antsibull_core_ref:
+          - main
+          - '3.5.0'
+        antsibull_docs_parser_ref:
+          - main
+        antsibull_changelog_ref:
+          - main
+        antsibull_docutils_ref:
+          - main
+        antsibull_fileutils_ref:
+          - main
+        include:
+          - options: '--use-current --use-html-blobs --no-breadcrumbs community.crypto community.docker --extra-conf antsibull_ext_color_scheme=none'
+            python: '3.9'
+          - options: '--use-current --output-format simplified-rst community.crypto community.docker'
+            python: '3.11'
+
+    steps:
+      - name: Check out antsibull-docs
+        uses: actions/checkout@v6
+        with:
+          path: antsibull-docs
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-core
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-core
+          path: antsibull-core
+          ref: ${{ matrix.antsibull_core_ref }}
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-docs-parser
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-docs-parser
+          path: antsibull-docs-parser
+          ref: ${{ matrix.antsibull_docs_parser_ref }}
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-changelog
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-changelog
+          path: antsibull-changelog
+          ref: ${{ matrix.antsibull_changelog_ref }}
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-docutils
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-docutils
+          path: antsibull-docutils
+          ref: ${{ matrix.antsibull_docutils_ref }}
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-fileutils
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-fileutils
+          path: antsibull-fileutils
+          ref: ${{ matrix.antsibull_fileutils_ref }}
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[coverage] ../antsibull-core ../antsibull-changelog ../antsibull-docs-parser ../antsibull-docutils ../antsibull-fileutils
+        working-directory: antsibull-docs
+
+      - name: Use antsibull-docs sphinx-init
+        run: |
+          coverage run -p --source antsibull_docs -m antsibull_docs.cli.antsibull_docs sphinx-init --lenient --dest-dir . ${{ matrix.options }}
+        working-directory: antsibull-docs
+
+      - name: Patch build.sh to supply code coverage
+        run: |
+          sed -i build.sh -e 's!antsibull-docs !coverage run -p --source antsibull_docs -m antsibull_docs.cli.antsibull_docs !g'
+          sed -i build.sh -e 's!sphinx-build !coverage run -p --source antsibull_docs,sphinx_antsibull_ext -m sphinx.cmd.build !g'
+          cat build.sh
+        working-directory: antsibull-docs
+
+      - name: Patch requirements.txt to remove antsibull-docs requirement
+        run: |
+          sed -i requirements.txt -e '/antsibull-docs[^a-zA-Z0-9_-].*/d'
+          cat requirements.txt
+          (! grep antsibull-docs requirements.txt)
+        working-directory: antsibull-docs
+
+      - name: Install dependencies
+        run: |
+          pip install ansible-core -r requirements.txt
+        working-directory: antsibull-docs
+
+      - name: Install collections
+        # We install some collections using ansible-galaxy and at least one by cloning its repository,
+        # so we have galaxy.yml instead of MANIFEST.json present.
+        run: |
+          ansible-galaxy collection install community.docker community.sops
+          git clone https://github.com/ansible-collections/community.crypto.git ~/.ansible/collections/ansible_collections/community/crypto
+        if: contains(matrix.options, '--use-current')
+
+      - name: Lint collection docs
+        run: |
+          coverage run -p --source antsibull_docs,sphinx_antsibull_ext -m antsibull_docs.cli.antsibull_docs lint-collection-docs ~/.ansible/collections/ansible_collections/community/docker --plugin-docs --no-skip-rstcheck --no-check-extra-docs-refs
+          coverage run -p --source antsibull_docs,sphinx_antsibull_ext -m antsibull_docs.cli.antsibull_docs lint-collection-docs ~/.ansible/collections/ansible_collections/community/crypto --no-plugin-docs --no-check-extra-docs-refs
+          coverage run -p --source antsibull_docs,sphinx_antsibull_ext -m antsibull_docs.cli.antsibull_docs lint-collection-docs ~/.ansible/collections/ansible_collections/community/sops --plugin-docs --check-extra-docs-refs --skip-rstcheck
+          coverage run -p --source antsibull_docs,sphinx_antsibull_ext -m antsibull_docs.cli.antsibull_docs lint-collection-docs ~/.ansible/collections/ansible_collections/community/sops --no-plugin-docs --check-extra-docs-refs
+        working-directory: antsibull-docs
+        if: contains(matrix.options, '--use-current')
+
+      - name: Build docsite
+        run: |
+          ./build.sh
+        working-directory: antsibull-docs
+
+      - name: Validate HTML
+        run: |
+          pip install html5lib
+          python tests/validate-html.py build/html/
+        working-directory: antsibull-docs
+
+      - name: Test plugin rendering
+        shell: bash
+        run: |
+          coverage run -p --source antsibull_docs -m antsibull_docs.cli.antsibull_docs plugin --plugin-type module --dest-dir . community.crypto.acme_account_info
+          test -f community.crypto.acme_account_info_module.rst
+        working-directory: antsibull-docs
+        if: contains(matrix.options, '--use-current')
+
+      - name: Combine coverage stats
+        run: |
+          coverage combine .coverage.*
+          coverage report
+          coverage xml -i
+        working-directory: antsibull-docs
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          working-directory: antsibull-docs
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  build-stable:
+    name: 'Build stable docsite'
+    runs-on: ubuntu-latest
+    env:
+      MAJOR_VERSION: 10
+
+    steps:
+      - name: Check out antsibull-docs
+        uses: actions/checkout@v6
+        with:
+          path: antsibull-docs
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-core
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-core
+          path: antsibull-core
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-docs-parser
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-docs-parser
+          path: antsibull-docs-parser
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-changelog
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-changelog
+          path: antsibull-changelog
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-docutils
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-docutils
+          path: antsibull-docutils
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-fileutils
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-fileutils
+          path: antsibull-fileutils
+          persist-credentials: false
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[coverage] ../antsibull-core ../antsibull-changelog ../antsibull-docs-parser ../antsibull-docutils ../antsibull-fileutils
+        working-directory: antsibull-docs
+
+      - name: Get hold of deps file
+        run: |
+          curl "https://raw.githubusercontent.com/ansible-community/ansible-build-data/main/${MAJOR_VERSION}/ansible-${MAJOR_VERSION}.0.0.deps" --output ansible.deps
+          curl "https://raw.githubusercontent.com/ansible-community/ansible-build-data/main/${MAJOR_VERSION}/collection-meta.yaml" --remote-name
+        working-directory: antsibull-docs
+
+      - name: Build stable docs RST files
+        run: |
+          mkdir stable-docs
+          coverage run -p --source antsibull_docs -m antsibull_docs.cli.antsibull_docs stable --deps-file ansible.deps --dest-dir stable-docs --no-breadcrumbs --no-indexes --version "${MAJOR_VERSION}.0.0"
+        working-directory: antsibull-docs
+
+      - name: Combine coverage stats
+        run: |
+          coverage combine .coverage.*
+          coverage report
+          coverage xml -i
+        working-directory: antsibull-docs
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          working-directory: antsibull-docs
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  build-devel:
+    name: 'Build devel docsite'
+    runs-on: ubuntu-latest
+    env:
+      MAJOR_VERSION: 11
+
+    steps:
+      - name: Check out antsibull-docs
+        uses: actions/checkout@v6
+        with:
+          path: antsibull-docs
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-core
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-core
+          path: antsibull-core
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-docs-parser
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-docs-parser
+          path: antsibull-docs-parser
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-changelog
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-changelog
+          path: antsibull-changelog
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-docutils
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-docutils
+          path: antsibull-docutils
+          persist-credentials: false
+
+      - name: Check out dependent project antsibull-fileutils
+        uses: actions/checkout@v6
+        with:
+          repository: ansible-community/antsibull-fileutils
+          path: antsibull-fileutils
+          persist-credentials: false
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[coverage] ../antsibull-core ../antsibull-changelog ../antsibull-docs-parser ../antsibull-docutils ../antsibull-fileutils
+        working-directory: antsibull-docs
+
+      - name: Get hold of ansible.in file
+        run: |
+          curl "https://raw.githubusercontent.com/ansible-community/ansible-build-data/main/${MAJOR_VERSION}/ansible.in" --remote-name
+          curl "https://raw.githubusercontent.com/ansible-community/ansible-build-data/main/${MAJOR_VERSION}/collection-meta.yaml" --remote-name
+        working-directory: antsibull-docs
+
+      - name: Build devel docs RST files
+        run: |
+          mkdir devel-docs
+          coverage run -p --source antsibull_docs -m antsibull_docs.cli.antsibull_docs devel --pieces-file ansible.in --dest-dir devel-docs --major-version "${MAJOR_VERSION}"
+        working-directory: antsibull-docs
+
+      - name: Combine coverage stats
+        run: |
+          coverage combine .coverage.*
+          coverage report
+          coverage xml -i
+        working-directory: antsibull-docs
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          working-directory: antsibull-docs
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

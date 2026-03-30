@@ -1,0 +1,47 @@
+# This workflow will upload a Python Package using Twine when a new tag is created
+# For more information see: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions#publishing-to-package-registries
+
+name: detect-secrets-pypi
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+
+  tox:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+    - run: python -m pip install --upgrade setuptools pip tox virtualenv
+    # Run tox only for the installed py version on the runner as outlined in the python matrix
+    # Ensures the correct py version is installed and tested as opposed to 'tox' which attempts to run for all py versions in tox.ini
+    - run: tox -e py
+    - run: tox -e mypy
+
+  deploy:
+    # Run tests beforing deploying to pypi
+    needs: tox
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.13
+    - name: Install dependencies
+      run: pip install wheel
+    - name: Build package
+      run: python setup.py sdist bdist_wheel
+    - name: Publish package
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.pypi_password }}

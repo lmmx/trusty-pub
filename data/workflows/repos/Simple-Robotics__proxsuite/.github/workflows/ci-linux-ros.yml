@@ -1,0 +1,57 @@
+name: CI - Linux - ROS
+on:
+  push:
+    branches: devel
+  pull_request:
+    paths-ignore:
+      - CHANGELOG.md
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  CI:
+    strategy:
+      matrix:
+        env:
+          # ROS2 Jazzy Jalisco (May 2024 - May 2029)
+          - {name: "Jazzy / Debug", ROS_DISTRO: jazzy, CMAKE_BUILD_TYPE: Debug, VECTORIZATION_SUPPORT: OFF}
+          - {name: "Jazzy / Release", ROS_DISTRO: jazzy, CMAKE_BUILD_TYPE: Release,  VECTORIZATION_SUPPORT: OFF}
+          - {name: "Jazzy / Debug / Vectorization", ROS_DISTRO: jazzy, CMAKE_BUILD_TYPE: Debug, VECTORIZATION_SUPPORT: ON}
+          - {name: "Jazzy / Release / Vectorization", ROS_DISTRO: jazzy, CMAKE_BUILD_TYPE: Release,  VECTORIZATION_SUPPORT: ON}
+          # ROS2 Humble Hawksbill (May 2022 - May 2027)
+          - {name: "Humble / Debug / Vectorization", ROS_DISTRO: humble, CMAKE_BUILD_TYPE: Debug, VECTORIZATION_SUPPORT: ON}
+          - {name: "Humble / Release / Vectorization", ROS_DISTRO: humble, CMAKE_BUILD_TYPE: Release,  VECTORIZATION_SUPPORT: ON}
+          # - {name: "Humble / Pre-Release", ROS_DISTRO: humble, PRERELEASE: true}
+          # ROS2 Rolling Ridley
+          - {name: "Rolling / Debug / Vectorization", ROS_DISTRO: rolling, CMAKE_BUILD_TYPE: Debug, VECTORIZATION_SUPPORT: ON}
+          - {name: "Rolling / Release / Vectorization", ROS_DISTRO: rolling, CMAKE_BUILD_TYPE: Release,  VECTORIZATION_SUPPORT: ON}
+          # - {name: "Rolling / Pre-Release", ROS_DISTRO: rolling, PRERELEASE: true}
+          # - {name: "Rolling / TSID-Downstream", ROS_DISTRO: rolling, CMAKE_BUILD_TYPE: Release, VECTORIZATION_SUPPORT: ON, DOWNSTREAM_WORKSPACE: "github:stack-of-tasks/tsid#devel github:stack-of-tasks/eiquadprog#devel", DOWNSTREAM_CMAKE_ARGS: -DBUILD_WITH_PROXQP=ON}
+    name: ${{ matrix.env.name }}
+    env:
+      CMAKE_ARGS: -DBUILD_WITH_VECTORIZATION_SUPPORT=${{ matrix.env.VECTORIZATION_SUPPORT }}  # Simde is available since humble
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      # Run industrial_ci
+      - uses: 'ros-industrial/industrial_ci@master'
+        env: ${{ matrix.env }}
+
+
+  check:
+    if: always()
+    name: check-ci-linux-ros
+
+    needs:
+    - CI
+
+    runs-on: Ubuntu-latest
+    steps:
+    - name: Decide whether the needed jobs succeeded or failed
+      uses: re-actors/alls-green@release/v1
+      with:
+        jobs: ${{ toJSON(needs) }}

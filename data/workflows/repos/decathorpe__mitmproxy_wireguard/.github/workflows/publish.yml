@@ -1,0 +1,75 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-wheel:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+          - os: ubuntu-latest
+            args: --compatibility manylinux2014 --zig --sdist
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            args: --compatibility manylinux2014 --zig --target aarch64-unknown-linux-gnu
+          - os: macos-latest
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            args: --universal2
+    runs-on: ${{ matrix.os }}
+    name: build-wheel (${{ matrix.os }}, ${{ matrix.target || 'x64' }})
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+      - run: rustup toolchain install stable --profile minimal
+      - run: rustup default stable
+      - if: matrix.target
+        run: rustup target add ${{ matrix.target }}
+      - run: rustup show
+      - run: pip install -r .github/workflows/requirements.txt
+      - run: maturin build --release ${{ matrix.args }}
+      - uses: actions/upload-artifact@v2
+        with:
+          name: wheels
+          path: target/wheels
+
+  build-client:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - run: rustup toolchain install stable --profile minimal
+      - run: rustup default stable
+      - run: rustup show
+      - run: cargo install --path test-client --root test-client/dist/${{ matrix.os }}/
+      - uses: actions/upload-artifact@v2
+        with:
+          name: binaries
+          path: test-client/dist
+
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    env:
+      TWINE_USERNAME: __token__
+      TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+    needs: [build-wheel, build-client]
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: wheels
+          path: dist
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y twine
+      - run: |
+          twine check dist/*
+          twine upload dist/*

@@ -1,0 +1,78 @@
+name: Build and upload to PyPI
+on:
+  # push:
+  #   branches:
+  #     - master
+
+  release:
+    types:
+    - published
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+          - os: macos-14 # Apple silicon
+          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
+          - os: windows-latest
+          - os: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and verify wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_ARCHS: ${{ matrix.cibw_archs }}
+          CIBW_TEST_COMMAND: python -c "import yappi; yappi.set_clock_type('cpu'); yappi.start(); sum(range(1000)); yappi.stop(); stats=yappi.get_func_stats(); assert len(stats)>0; print('OK:', len(stats), 'functions profiled')"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist-${{ matrix.os }}-${{ matrix.cibw_archs || 'default' }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - name: Verify sdist
+        run: |
+          pip install dist/*.tar.gz
+          python -c "import yappi; yappi.set_clock_type('cpu'); yappi.start(); sum(range(1000)); yappi.stop(); stats=yappi.get_func_stats(); assert len(stats)>0; print('OK:', len(stats), 'functions profiled')"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist-source
+          path: dist/*.tar.gz
+
+  upload_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@v1.13.0
+        with:
+          verbose: true
+          user: __token__
+          password: ${{ secrets.pypi_password }}

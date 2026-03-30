@@ -1,0 +1,61 @@
+name: Rust Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "crates/**"
+      - "examples/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust_test.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "crates/**"
+      - "examples/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust_test.yml"
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Test Debug - x86_64
+            runner: ubuntu-latest
+            command: rust-test
+          - name: Test Release - x86_64
+            runner: ubuntu-latest
+            command: rust-test-release
+          - name: Test Debug - aarch64
+            runner: ubuntu-24.04-arm
+            command: rust-test
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/setup-rust-cache
+
+      - uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: v0.40.0
+          cache: true
+
+      - name: Run ${{ matrix.command }}
+        run: pixi run ${{ matrix.command }}
+
+      - name: Show sccache stats
+        if: always()
+        run: |
+          sccache --show-stats 2>&1 || echo "::warning::sccache stats unavailable - server may have exited"

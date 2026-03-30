@@ -1,0 +1,45 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  unit:
+    strategy:
+      matrix:
+        python-version: [3.7, 3.8, 3.9, '3.10', '3.11']
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        miniconda-version: latest
+        activate-environment: conda-env
+        channels: conda-forge, defaults
+        python-version: ${{ matrix.python-version }}
+
+    - name: Lint with flake8
+      shell: bash -l {0}
+      run: |
+        eval "$(conda shell.bash hook)"
+        pip install flake8
+        flake8
+
+    - name: Run tests
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PLOOMBER_STATS_ENABLED: false
+        PYTHON_VERSION: ${{ matrix.python-version }}
+      shell: bash -l {0}
+      run: |
+        eval "$(conda shell.bash hook)"
+        pip install nox
+        nox --verbose
+        # freetype version must match for image comparison to work without issues
+        # matplotlib 3.0.3 was built using freetype 2.6.1, travis has a lower version
+        # but still works
+        # freetype-config --ftversion

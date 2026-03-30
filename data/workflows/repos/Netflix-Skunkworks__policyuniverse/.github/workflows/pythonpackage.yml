@@ -1,0 +1,44 @@
+name: Python package
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 5
+      matrix:
+        python-version:
+          - "3.7"
+          - "3.8"
+          - "3.9"
+          - "3.10"
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[tests,dev]
+    - name: Run pre-commit
+      run: |
+        pre-commit install
+        pre-commit run -a
+    - name: Test with pytest/coverage
+      run: |
+        pip install pytest pytest-cov coveralls==2.2.0
+        pytest --cov
+    - name: Upload coverage data to coveralls.io
+      if: success() && matrix.python-version == '3.7'
+      run: coveralls
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

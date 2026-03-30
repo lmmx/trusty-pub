@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install JS dependencies (TypeScript client)
+        working-directory: clients/typescript
+        run: |
+          echo "Listing client dir contents:" && ls -la
+          if [ -f package-lock.json ]; then
+            npm ci || npm install
+          else
+            npm install
+          fi
+
+      - name: Install kit CLI (editable)
+        run: uv pip install -e .
+
+      - name: Lint & Type Check (Python + TypeScript)
+        run: scripts/format.sh --fix
+
+      - name: Run JS Tests
+        run: npm test --prefix clients/typescript
+      - name: Lint and Type Check
+        run: |
+          # Run mypy type checking
+          uv run mypy src/kit
+          # Run ruff linter
+          uv run ruff check .
+          # Run ruff formatter check (non-modifying)
+          uv run ruff format --check .
+      - name: Run Tests
+        run: |
+          # Run tests via scripts/test.sh
+          uv run scripts/test.sh -v

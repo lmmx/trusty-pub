@@ -1,0 +1,150 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  direct:
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      matrix:
+        os: [ubuntu, macos]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+        exclude:
+          # Avoid spurious "upgrade pip" error annotation
+          - os: macos
+            python-version: 3.8
+
+    steps:
+      - name: Checkout pysam
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install prerequisite Python libraries
+        run:  pip install Cython mypy pytest setuptools
+
+      - name: Install Linux build prerequisites
+        if:   runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -q --no-install-recommends --no-install-suggests libbz2-dev libcurl4-openssl-dev liblzma-dev
+
+      - name: Update macOS build prerequisites
+        if:   runner.os == 'macOS'
+        run: |
+          brew unlink xz || true  # Remove brewed liblzma as it is not multiarch
+
+      - name: Build (directly from checkout)
+        run:  python setup.py build
+
+      - name: Install test prerequisites
+        run: |
+          case $RUNNER_OS in
+          Linux)
+              sudo apt-get install -q --no-install-recommends --no-install-suggests samtools bcftools tabix
+              ;;
+          macOS)
+              brew install -q samtools bcftools
+              ;;
+          esac
+
+      - name: Run tests
+        run: |
+          export PYTHONPATH=$(echo $GITHUB_WORKSPACE/build/lib.*)
+          export REF_PATH=':'
+          pytest
+
+
+  sdist:
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      matrix:
+        os: [ubuntu, macos]
+        python-version: ['3.14']
+
+    steps:
+      - name: Checkout pysam
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install prerequisite Python libraries
+        run:  pip install Cython mypy pytest setuptools
+
+      - name: Install build prerequisites
+        if:   runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -q --no-install-recommends --no-install-suggests libbz2-dev libcurl4-openssl-dev liblzma-dev
+
+      - name: Create source distribution
+        run:  python setup.py sdist --owner=root --group=root
+
+      - name: Build (via sdist tarball)
+        run:  pip install --verbose --no-deps --no-binary=':all:' pysam-*.tar.gz
+        working-directory: dist
+
+      - name: Install test prerequisites
+        run: |
+          case $RUNNER_OS in
+          Linux)
+              sudo apt-get install -q --no-install-recommends --no-install-suggests samtools bcftools tabix
+              ;;
+          macOS)
+              brew install -q samtools bcftools
+              ;;
+          esac
+
+      - name: Run tests
+        run:  REF_PATH=':' pytest
+
+      - name: Upload sdist tarball
+        if:   runner.os == 'Linux'
+        uses: actions/upload-artifact@v5
+        with:
+          name: sdist
+          path: dist/pysam-*.tar.gz
+          retention-days: 14
+
+
+  conda:
+    timeout-minutes: 20
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      matrix:
+        os: [ubuntu]
+        python-version: ['3.13']
+    defaults:
+      run:
+        shell: bash -el {0}  # needed for conda activation
+    env:
+      HTSLIB_CONFIGURE_OPTIONS: "--disable-libcurl"
+
+    steps:
+      - name: Checkout pysam
+        uses: actions/checkout@v5
+
+      - name: Set up Conda and Python ${{ matrix.python-version }}
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          channels: conda-forge,bioconda
+          channel-priority: strict
+          conda-remove-defaults: true
+          python-version: ${{ matrix.python-version }}
+          environment-file: devtools/environment-dev.yaml
+          auto-activate-base: false
+
+      - name: Build (directly from checkout)
+        run:  python setup.py install
+
+      - name: Install test prerequisites via Conda
+        run:  conda install "samtools>=1.11" "bcftools>=1.11" "htslib>=1.11" pytest
+
+      - name: Run tests
+        run:  REF_PATH=':' pytest

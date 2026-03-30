@@ -1,0 +1,129 @@
+name: docs
+
+on:
+  push:
+    branches:
+      - "2025"
+    paths:
+      - "src/**"
+      - "docs/source/**"
+      - "examples/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches:
+      - "2025"
+    paths:
+      - "src/**"
+      - "docs/source/**"
+      - "examples/**"
+      - ".github/workflows/docs.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REPO_NAME: ${{ github.event.repository.name }}
+
+jobs:
+  branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the version
+        id: branch
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "branch=${{ github.event.release.target_commitish }}" >> $GITHUB_OUTPUT
+            echo "publish=${{ github.event.release.target_commitish }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "branch=${{ github.base_ref }}" >> $GITHUB_OUTPUT
+            echo "publish=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "publish=dev" >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "publish=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+    outputs:
+      branch: ${{ steps.branch.outputs.branch }}
+      publish: ${{ steps.branch.outputs.publish }}
+
+  sphinx:
+    needs: branch
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        language: ["en", "zh_CN"]
+        builder: ["html"]
+    env:
+      LANGUAGE: ${{ matrix.language }}
+      VERSION: ${{ needs.branch.outputs.branch }}
+      PUBLISH: ${{ needs.branch.outputs.publish }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Setup PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.11"
+          cache: true
+      - name: Installing the library
+        run: |
+          pdm install --group docs
+          pdm run python -m ensurepip
+          pdm run python -m pip install git+https://github.com/haiiliin/sphinx-immaterial.git
+          pdm run python -m pip show abqpy
+      - name: Build the documentation
+        run: |
+          cd docs && pdm run make ${{ matrix.builder }}
+        env:
+          SPHINXOPTS: -j auto
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: docs-${{ matrix.language }}-${{ env.VERSION }}
+          path: docs/build/${{ matrix.builder }}
+          retention-days: 1
+
+  upload:
+    if: github.event_name != 'pull_request'
+    needs: [branch, sphinx]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        language: ["en", "zh_CN"]
+        builder: ["html"]
+    env:
+      LANGUAGE: ${{ matrix.language }}
+      VERSION: ${{ needs.branch.outputs.branch }}
+      PUBLISH: ${{ needs.branch.outputs.publish }}
+
+    steps:
+      - uses: ahmadnassri/action-workflow-queue@v1
+        with:
+          timeout: 1200000
+          delay: 60000
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Download artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: docs-${{ matrix.language }}-${{ env.VERSION }}
+          path: docs/build/${{ matrix.builder }}/${{ matrix.language }}
+      - name: Upload the documentation
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          folder: docs/build/${{ matrix.builder }}/${{ matrix.language }}
+          target-folder: ${{ matrix.language }}/${{ env.PUBLISH }}
+          single-commit: true
+          clean: false

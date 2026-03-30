@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }} (${{ matrix.arch }}) for ${{ matrix.cp }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-15-intel]
+        arch: [auto64]
+        cp: ["cp3{10,11,12,13,14,14t}"]
+        include:
+          - os: macos-14
+            arch: arm64
+            cp: "cp3{10,11,12,13,14,14t}"
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+            cp: "cp3{10,11,12,13,14,14t}"
+          - os: windows-11-arm
+            arch: ARM64
+            cp: "cp3{11,12,13,14,14t}"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        env:
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          CIBW_BUILD: "${{ matrix.cp }}-*"
+          CIBW_SKIP: "*musllinux*"
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT_MACOS: TARGET_ARCH=${{ matrix.arch }} MACOSX_DEPLOYMENT_TARGET=11.0
+          CIBW_BEFORE_ALL: bash scripts/build_${{ runner.os }}.sh
+          CIBW_BEFORE_BUILD: pip install pybind11 numpy
+          CIBW_TEST_REQUIRES: pytest pillow glfw
+          CIBW_TEST_REQUIRES_LINUX: pytest pillow glfw moderngl
+          CIBW_TEST_REQUIRES_MACOS: pytest pillow pyopengl
+          CIBW_TEST_COMMAND: python -m pytest {project}/tests
+          CIBW_TEST_COMMAND_LINUX: >
+            xvfb-run -s "-screen 0 640x480x24" python -m pytest {project}/tests
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: "auditwheel repair --exclude libEGL.so.1 -w {dest_dir} {wheel}"
+          CIBW_TEST_SKIP: "*-macosx_arm64"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.cp }}
+          path: ./wheelhouse/*.whl
+
+  # identical to "build_wheels", except with the older pypa/cibuildwheel
+  build_wheels_old:
+    name: Build wheels on ${{ matrix.os }} (${{ matrix.arch }}) for ${{ matrix.cp }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-15-intel]
+        arch: [auto64]
+        cp: ["cp3{8,9}"]
+        include:
+          - os: macos-14
+            arch: arm64
+            cp: "cp3{8,9}"
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+            cp: "cp3{8,9}"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        env:
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          CIBW_BUILD: "${{ matrix.cp }}-*"
+          CIBW_SKIP: "*musllinux*"
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT_MACOS: TARGET_ARCH=${{ matrix.arch }} MACOSX_DEPLOYMENT_TARGET=11.0
+          CIBW_BEFORE_ALL: bash scripts/build_${{ runner.os }}.sh
+          CIBW_BEFORE_BUILD: pip install pybind11 numpy
+          CIBW_TEST_REQUIRES: pytest pillow glfw
+          CIBW_TEST_REQUIRES_LINUX: pytest pillow glfw moderngl
+          CIBW_TEST_REQUIRES_MACOS: pytest pillow pyopengl
+          CIBW_TEST_COMMAND: python -m pytest {project}/tests
+          CIBW_TEST_COMMAND_LINUX: >
+            xvfb-run -s "-screen 0 640x480x24" python -m pytest {project}/tests
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: "auditwheel repair --exclude libEGL.so.1 -w {dest_dir} {wheel}"
+          CIBW_TEST_SKIP: "*-macosx_arm64"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.cp }}
+          path: ./wheelhouse/*.whl
+
+  build_docs:
+    name: Build docs
+    needs: [build_wheels, build_wheels_old]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: '3.11'
+
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Build docs
+        run: |
+          # installing libegl1 will also install libegl-mesa0
+          sudo apt-get -y update
+          sudo apt-get -y install libegl1
+          python -m pip install --pre -f dist skia-python
+          python -m pip install sphinx sphinx-rtd-theme
+          sphinx-build -b html docs docs/_build/html
+
+      - name: Deploy docs
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/_build/html
+
+  publish:
+    name: Upload packages to PyPI
+    needs: [build_wheels, build_wheels_old]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/skia-python/
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  build_and_test_on_Fedora:
+    runs-on: ubuntu-24.04
+    container: fedora:42
+    permissions: write-all
+    steps:
+       - run: dnf install -y dnf-utils git gcc-c++ libstdc++-devel libstdc++-static
+       - run: dnf install -y python3-build python3-devel python3-pytest python3-pillow python3-glfw
+       - run: dnf install -y egl-utils glx-utils
+       - run: dnf install -y patch
+       - run: dnf install -y expat-devel fontconfig-devel
+       - run: dnf install -y libxml2-devel vulkan-headers
+       - run: dnf install -y gn ninja-build
+       - uses: actions/checkout@v6
+         with:
+          submodules: recursive
+       - run: bash scripts/build_Linux.sh
+       - run: python -m build --wheel
+       - run: python -m pip install dist/*.whl
+       - run: python -m pip install moderngl
+       - run: python -c 'import skia; print(skia.__version__)'
+       - run: python -c 'import moderngl; moderngl_context = moderngl.create_standalone_context(backend="egl"); import skia; interface = skia.GrGLInterface.MakeEGL() ; assert isinstance(skia.GrDirectContext.MakeGL(interface), skia.GrContext) ; print("Success3")'
+       - run: eglinfo || /bin/true
+       - run: xvfb-run -s "-screen 0 640x480x24" glxinfo
+       # The below also run that 3 lines above but under X, but allows it to fail there.
+       - run: xvfb-run -s "-screen 0 640x480x24" pytest

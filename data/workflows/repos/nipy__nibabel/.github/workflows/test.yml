@@ -1,0 +1,288 @@
+name: Build and test
+
+# This file tests the claimed support range of NiBabel including
+#
+# * Operating systems: Linux, Windows (x64 & x86), macOS
+# * Dependencies: minimum requirements, optional requirements
+# * Installation methods: setup.py, sdist, wheel, archive
+
+on:
+  push:
+    branches:
+      - master
+      - maint/*
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - master
+      - maint/*
+  schedule:
+    - cron: '0 0 * * 1'
+  # Allow job to be triggered manually from GitHub interface
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+# Force tox and pytest to use color
+env:
+  FORCE_COLOR: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3
+          activate-environment: true
+      - name: Build sdist and wheel
+        run: uv build
+      - run: uvx twine check dist/*
+      - name: Build git archive
+        run: mkdir archive && git archive -v -o archive/nibabel-archive.tgz HEAD
+      - name: Upload sdist and wheel artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist
+          path: dist/
+      - name: Upload git archive artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: archive
+          path: archive/
+
+  test-package:
+    runs-on: ubuntu-latest
+    needs: [build]
+    strategy:
+      matrix:
+        package: ['wheel', 'sdist', 'archive']
+    steps:
+      - name: Download sdist and wheel artifacts
+        if: matrix.package != 'archive'
+        uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+      - name: Download git archive artifact
+        if: matrix.package == 'archive'
+        uses: actions/download-artifact@v7
+        with:
+          name: archive
+          path: archive/
+      - name: Setup uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3
+          activate-environment: true
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Install wheel
+        if: matrix.package == 'wheel'
+        run: uv pip install dist/nibabel-*.whl
+      - name: Install sdist
+        if: matrix.package == 'sdist'
+        run: uv pip install dist/nibabel-*.tar.gz
+      - name: Install archive
+        if: matrix.package == 'archive'
+        run: uv pip install archive/nibabel-archive.tgz
+      - run: python -c 'import nibabel; print(nibabel.__version__)'
+      - name: Install minimum test dependencies
+        run: uv pip install nibabel[test]
+      - name: Run tests
+        run: pytest --doctest-modules --doctest-plus -v --pyargs nibabel -n auto
+
+  tox:
+    # Check each OS, all supported Python, minimum versions and latest releases
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['ubuntu-latest', 'windows-latest', 'macos-latest', 'macos-15-intel']
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.13t"
+          - "3.14"
+          - "3.14t"
+        architecture: ['x86', 'x64', 'arm64']
+        dependencies: ['full']
+        include:
+          # Basic dependencies only
+          - os: ubuntu-latest
+            python-version: "3.10"
+            architecture: 'x64'
+            dependencies: 'none'
+          # Absolute minimum dependencies
+          - os: ubuntu-latest
+            python-version: "3.10"
+            architecture: 'x64'
+            dependencies: 'min'
+          # Absolute minimum dependencies
+          - os: ubuntu-latest
+            python-version: "3.11"
+            architecture: 'x64'
+            dependencies: 'min'
+        exclude:
+          # Use ubuntu-latest to cover the whole range of Python. For Windows
+          # and macOS, checking oldest and newest should be sufficient.
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.13"
+          - os: windows-latest
+            python-version: "3.13t"
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13t"
+          - os: macos-15-intel
+            python-version: "3.11"
+          - os: macos-15-intel
+            python-version: "3.12"
+          - os: macos-15-intel
+            python-version: "3.13"
+          - os: macos-15-intel
+            python-version: "3.13t"
+
+          ## Unavailable architectures
+          # x86 is available for Windows and Mac
+          - os: ubuntu-latest
+            architecture: x86
+          - os: macos-latest
+            architecture: x86
+          - os: macos-15-intel
+            architecture: x86
+          # arm64 is available for macos-14+
+          - os: ubuntu-latest
+            architecture: arm64
+          - os: windows-latest
+            architecture: arm64
+          - os: macos-15-intel
+            architecture: arm64
+          # x64 is not available for macos-15
+          - os: macos-latest
+            architecture: x64
+
+    env:
+      DEPENDS: ${{ matrix.dependencies }}
+      ARCH: ${{ !contains(fromJSON('["none", "min"]'), matrix.dependencies) && matrix.architecture }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Setup uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          activate-environment: ${{ matrix.architecture != 'x86' }}
+      - name: Setup 32-bit Python ${{ matrix.python-version }}
+        if: matrix.architecture == 'x86'
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.architecture }}
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Install tox
+        run: uv tool install -v tox --with=tox-uv --with=tox-gh-actions
+      - name: Show tox config
+        run: tox c
+      - name: Setup test suite
+        run: tox run -vv --notest
+      - name: Run test suite
+        run: tox -v --skip-pkg-install --exit-and-dump-after 1200
+      - uses: codecov/codecov-action@v5
+        if: ${{ always() }}
+        with:
+          files: cov.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload pytest test results
+        uses: actions/upload-artifact@v6
+        with:
+          name: pytest-results-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.dependencies }}-${{ matrix.architecture }}
+          path: test-results.xml
+        if: ${{ always() }}
+
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.14']
+    steps:
+      - name: Shallow checkout
+        uses: actions/checkout@v6
+      - name: Setup uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          activate-environment: true
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Install with pytest
+        run: uv sync --extra=test --extra=all
+      - name: Run test suite
+        run: python -m pytest
+
+  checks:
+    runs-on: 'ubuntu-slim'
+    continue-on-error: true
+    strategy:
+      matrix:
+        check: ['doctest', 'typecheck']
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup uv and Python
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3
+          activate-environment: true
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Install tox
+        run: uv tool install -v tox --with=tox-uv-bare --with=tox-gh-actions
+      - name: Show tox config (this call)
+        run: tox c -e ${{ matrix.check }}
+      - name: Setup check environment
+        run: tox -vv --notest -e ${{ matrix.check }}
+      - name: Run check
+        run: tox -e ${{ matrix.check }}
+
+  publish:
+    runs-on: ubuntu-latest
+    environment: "Package deployment"
+    needs: [tox, pytest, test-package]
+    permissions:
+      # Required for trusted publishing
+      id-token: write
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,65 @@
+# Continuous Integration for community modules
+
+name: modules
+
+env:
+  UV_FROZEN: "1"  # use lock file as is
+  UV_NO_EDITABLE: "1"  # test the build package, not the dev installation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "modules/**"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "modules/**"
+
+jobs:
+  track-modules:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout contents
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get changed files
+        id: changed-files
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        with:
+          base: ${{ github.ref }}
+          list-files: 'json'
+          filters: |
+            modules:
+              - 'modules/**'
+      - name: Compute modules from files
+        id: compute-changes
+        run: |
+          modules=$(echo "${{ toJson(steps.changed-files.outputs.modules_files) }}" | jq '.[] | split("/") | nth(1)' | jq -s -c '. | unique')
+          echo "computed_modules=$modules"
+          echo "computed_modules=$modules" >> $GITHUB_OUTPUT
+    outputs:
+      changed_modules: ${{ steps.compute-changes.outputs.computed_modules }}
+  test:
+    runs-on: ubuntu-22.04
+    needs: [track-modules]
+    if: ${{ needs.track-modules.outputs.changed_modules != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13", "3.14"]
+        module: ${{ fromJSON(needs.track-modules.outputs.changed_modules) }}
+    steps:
+      - name: Checkout contents
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: ./.github/actions/setup-env
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Python dependencies
+        run: uv sync --extra ${{ matrix.module }}
+      - name: Run tests
+        run: make modules/${{ matrix.module }}/tests
+      - name: Run doctests
+        run: make modules/${{ matrix.module }}/doctests

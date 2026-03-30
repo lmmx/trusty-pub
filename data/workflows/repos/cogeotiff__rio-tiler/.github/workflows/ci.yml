@@ -1,0 +1,108 @@
+name: CI
+
+# On every pull request, but only on push to main
+on:
+  push:
+    branches:
+    - main
+    tags:
+    - '*'
+  pull_request:
+env:
+  LATEST_PY_VERSION: '3.14'
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.*" 
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          uv sync
+
+      - name: Run pre-commit and mypy
+        if: ${{ matrix.python-version == env.LATEST_PY_VERSION }}
+        run: |
+          uv run pre-commit run --all-files
+          uv run --with mypy --with types-attrs --with types-cachetools mypy -p rio_tiler --ignore-missing-imports
+
+      - name: Run tests
+        run: uv run pytest --cov rio_tiler --cov-report xml --cov-report term-missing -s -vv
+
+      - name: Upload Results
+        if: ${{ matrix.python-version == env.LATEST_PY_VERSION }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  benchmark:
+    needs: [tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.*" 
+          enable-cache: true
+          python-version: ${{ env.LATEST_PY_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv sync
+
+      - name: Run Benchmark
+        run: |
+          uv run --group performance pytest tests/benchmarks/benchmarks.py --benchmark-only --benchmark-columns 'min, max, mean, median' --benchmark-sort 'min' --benchmark-json output.json
+
+      - name: Store and Compare benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: rio-tiler Benchmarks
+          tool: 'pytest'
+          output-file-path: output.json
+          alert-threshold: '150%'
+          comment-on-alert: true
+          fail-on-alert: false
+          # GitHub API token to make a commit comment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: 'gh-benchmarks'
+          # Make a commit on `gh-pages` only if main
+          auto-push: ${{ github.ref == 'refs/heads/main' }}
+          benchmark-data-dir-path: dev/benchmarks
+
+  benchmark-requests:
+    needs: [tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.*" 
+          enable-cache: true
+          python-version: ${{ env.LATEST_PY_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv sync
+
+      - name: Run Benchmark
+        run: uv run --group performance pytest tests/benchmarks/requests.py -s -vv

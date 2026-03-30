@@ -1,0 +1,164 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  HAS_SECRETS: ${{ secrets.HAS_SECRETS }}
+  PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
+
+jobs:
+  checks:
+    name: Check with pre-commit and Prospector
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: "!startsWith(github.event.head_commit.message, '[skip ci] ')"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+      - run: python3 -m pip install --requirement=ci/requirements.txt
+
+      - name: Print environment information
+        run: c2cciutils-env
+        env:
+          GITHUB_EVENT: ${{ toJson(github) }}
+
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: "pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}\npre-commit-"
+      - run: pre-commit run --all-files --color=always
+      - run: git diff --exit-code --patch > /tmp/pre-commit.patch; git diff --color; git reset --hard || true
+        if: failure()
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Apply pre-commit fix.patch
+          path: /tmp/pre-commit.patch
+          retention-days: 1
+        if: failure()
+
+      - run: poetry install --extras=debug_images
+      - run: poetry run prospector --output=pylint --die-on-tool-error
+
+  test:
+    name: Run tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs:
+      - checks
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - '3.11'
+          - '3.12'
+          - '3.13'
+
+    outputs:
+      success-3-11: ${{ steps.success.outputs.success-3-11 }}
+      success-3-12: ${{ steps.success.outputs.success-3-12 }}
+      success-3-13: ${{ steps.success.outputs.success-3-13 }}
+
+    steps:
+      - run: docker system prune --all --force
+      - name: GitHub event
+        run: echo ${GITHUB_EVENT} | python3 -m json.tool
+        env:
+          GITHUB_EVENT: ${{ toJson(github) }}
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/checkout@v6
+
+      - run: python3 -m pip install $(grep poetry ci/requirements.txt)
+      - run: poetry install --extras=debug_images
+      - name: Versions
+        run: |
+          poetry --version
+          python --version
+          poetry run python --version
+          [ "$(python3 --version)" == "$(poetry run python --version)" ]
+
+      - run: |
+          poetry run pytest --durations=0 --verbose --color=yes \
+          --profile --profile-svg --junitxml=results/test-reports/junit.xml tests
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Test results (${{ matrix.python-version }})
+          path: results
+        if: always()
+
+      # Mark as success
+      - id: success
+        run: |
+          version=${{ matrix.python-version }}
+          echo "::set-output name=success-${version//\./-}::true"
+
+  publish:
+    name: Publish package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs:
+      - test
+    if: always()
+
+    steps:
+      - run: '[[ "${{ needs.test.outputs.success-3-11 }}" == "true" ]]'
+      - run: '[[ "${{ needs.test.outputs.success-3-12 }}" == "true" ]]'
+      - run: '[[ "${{ needs.test.outputs.success-3-13 }}" == "true" ]]'
+
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN }}
+        if: env.HAS_SECRETS == 'HAS_SECRETS'
+      - uses: actions/checkout@v6
+        if: env.HAS_SECRETS != 'HAS_SECRETS'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - run: python3 -m pip install --requirement=ci/requirements.txt
+
+      - name: Init Git
+        run: |
+          git config credential.helper 'cache --timeout=120'
+          git config user.email "<ci@ci.com>"
+          git config user.name "CI"
+        if: env.HAS_SECRETS == 'HAS_SECRETS'
+      - name: Init pypi
+        run: |-
+          echo "[pypi]" > ~/.pypirc
+          echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
+          echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc
+        if: env.HAS_SECRETS == 'HAS_SECRETS'
+      - name: Publish
+        run: tag-publish
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: env.HAS_SECRETS == 'HAS_SECRETS'
+      - run: git diff --exit-code --patch > /tmp/dpkg-versions.patch; git diff --color; git reset --hard || true
+        if: failure()
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Update dpkg versions list.patch
+          path: /tmp/dpkg-versions.patch
+          retention-days: 1
+        if: failure()

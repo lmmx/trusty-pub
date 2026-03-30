@@ -1,0 +1,173 @@
+name: Publish to PyPI and GitHub Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Ignore bot
+        if: github.actor == 'github-actions[bot]'
+        run: |
+          echo "Commit made by GitHub Actions. Exiting."
+          exit 0
+
+      - name: Bump Version and Push Tag
+        id: bump_version
+        uses: mathieudutour/github-tag-action@v6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_branches: main
+          default_bump: patch
+          tag_prefix: 'v'
+
+      # OPTIONAL: keep VERSION only on main (dev never changes it)
+      - name: Update VERSION (main only)
+        run: |
+          echo "${{ steps.bump_version.outputs.new_version }}" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f VERSION
+          git commit -m "🔖 Version v${{ steps.bump_version.outputs.new_version }} [skip ci]" || true
+          git push origin main || true
+
+      - name: Fetch Latest Pull Request Info
+        id: fetch_pr
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Get the latest merged PR from dev to main
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              base: 'main',
+              head: 'dev',
+              sort: 'updated',
+              direction: 'desc',
+              per_page: 1
+            });
+            
+            if (prs.data.length > 0) {
+              const pr = prs.data[0];
+              const prTitle = pr.title;
+              const prBody = pr.body || 'No description provided';
+              const prNumber = pr.number;
+              const prUrl = pr.html_url;
+              const prAuthor = pr.user.login;
+              
+              // Format PR body to remove any markdown or special characters if needed
+              const formattedBody = prBody.replace(/\r\n/g, '\n');
+              
+              const releaseInfo = {
+                title: prTitle,
+                body: formattedBody,
+                number: prNumber,
+                url: prUrl,
+                author: prAuthor
+              };
+              
+              console.log('Latest PR Info:', releaseInfo);
+              return releaseInfo;
+            } else {
+              console.log('No recent PRs from dev to main found');
+              return null;
+            }
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.bump_version.outputs.new_version }}
+          release_name: v${{ steps.bump_version.outputs.new_version }}
+          body: |            
+            ## Changes
+            ${{ steps.fetch_pr.outputs.result != 'null' && fromJSON(steps.fetch_pr.outputs.result).body || 'Version update' }}
+            
+            ## Details
+            - Version: v${{ steps.bump_version.outputs.new_version }}
+            ${{ steps.fetch_pr.outputs.result != 'null' && format('- PR: #{0} by @{1}', fromJSON(steps.fetch_pr.outputs.result).number, fromJSON(steps.fetch_pr.outputs.result).author) || '' }}
+            ${{ steps.fetch_pr.outputs.result != 'null' && format('- PR URL: {0}', fromJSON(steps.fetch_pr.outputs.result).url) || '' }}
+          draft: false
+          prerelease: false
+
+      - name: Fetch all tags so setuptools_scm can detect the tag
+        run: |
+          git fetch --all --tags --prune
+          git tag --list
+          git describe --tags --long || true
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with: { python-version: '3.x' }
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools_scm build twine
+
+      - name: Build (release)
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.bump_version.outputs.new_version }}
+        run: |
+          python -m build -o dist/prompture
+
+      - name: Publish prompture to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          python -m pip install --upgrade twine
+          ls -al dist/prompture
+          python -m twine upload dist/prompture/* --non-interactive
+
+      # ---- NEW: Pin wrapper version & dependency so it matches prompture ------
+      - name: Pin wrapper versions & dependencies to prompture
+        run: |
+          NEW_VERSION=${{ steps.bump_version.outputs.new_version }}
+          echo "Pinning wrapper to version $NEW_VERSION"
+          pip install toml
+          python .github/scripts/update_wrapper_version.py "$NEW_VERSION"
+
+      # Build wrapper package --------------------------------------------------
+      - name: Build llm-to-json (wrapper)
+        run: |
+          python -m build packages/llm_to_json -o dist/llm_to_json
+
+      - name: Publish llm-to-json to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN_LLM_TO_JSON }}
+        run: |
+          python -m twine upload dist/llm_to_json/* --non-interactive
+
+      - name: Build llm-to-toon (wrapper)
+        run: |
+          python -m build packages/llm_to_toon -o dist/llm_to_toon
+
+      - name: Publish llm-to-toon to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN_LLM_TO_TOON }}
+        run: |
+          python -m twine upload dist/llm_to_toon/* --non-interactive

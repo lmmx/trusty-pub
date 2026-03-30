@@ -1,0 +1,60 @@
+name: TestingUbuntu
+
+on:
+    push:
+        branches: ["master"]
+    pull_request:
+        branches: ["master"]
+
+jobs:
+    test-ubuntu:
+        runs-on: ubuntu-latest
+
+        strategy:
+            fail-fast: false
+            matrix:
+                python-version: [
+                    "3.12",
+                    "3.13"
+                ]
+
+        env:
+            USE_MKDOCS: ${{ secrets.USE_MKDOCS }}
+
+        steps:
+            - uses: actions/checkout@v6
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  version: "latest"
+                  enable-cache: true
+
+            - name: Set up Python ${{ matrix.python-version }}
+              run: uv python install ${{ matrix.python-version }}
+
+            - name: Install dependencies
+              run: uv sync --python ${{ matrix.python-version }}
+
+            - name: Install system GDAL (provides gdal-config)
+              run: |
+                  sudo add-apt-repository ppa:ubuntugis/ubuntugis-unstable -y
+                  sudo apt-get update
+                  sudo apt-get install -y gdal-bin libgdal-dev
+                  gdal-config --version
+
+            - name: Install optional dependencies
+              run: |
+                  GDAL_VER="$(gdal-config --version)"
+                  GDAL_PY_VER="${GDAL_VER%.*}.*"
+                  uv pip install --find-links https://girder.github.io/large_image_wheels "gdal==${GDAL_PY_VER}" pyproj
+                  uv pip install -r pyproject.toml --extra tests
+            - name: Test import
+              run: |
+                  uv run python -c "import geemap; print('geemap import successful')"
+                  uv run python -c "from osgeo import gdal; print('gdal import successful')"
+                  uv run gdalinfo --version
+
+            - name: Running tests
+              run: |
+                  uv run python -m unittest discover tests/

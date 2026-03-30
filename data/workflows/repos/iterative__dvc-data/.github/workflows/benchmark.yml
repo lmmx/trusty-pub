@@ -1,0 +1,53 @@
+name: Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: "1"
+  PY_COLORS: "1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  benchmark:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+    - name: Set up Python 3.14
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.base.sha }}
+        fetch-depth: 0
+
+    - uses: astral-sh/setup-uv@v7
+    - name: Install nox
+      run: uv pip install --system nox --upgrade
+
+    - name: Benchmark on base branch
+      run: nox -s bench -- --benchmark-save=base
+
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        clean: false
+
+    - name: Benchmark on pull request
+      run: nox -s bench -- --benchmark-save=${GITHUB_SHA::7} --benchmark-compare=0001 --benchmark-compare-fail=mean:10%
+
+    - name: Compare benchmark
+      if: always()
+      run: uvx pytest-benchmark compare --group-by name

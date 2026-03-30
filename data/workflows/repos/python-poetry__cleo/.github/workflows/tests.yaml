@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  PYTHONWARNDEFAULTENCODING: true
+
+permissions: {}
+
+jobs:
+  Tests:
+    name: ${{ matrix.os }} / ${{ matrix.python-version }}
+    runs-on: ${{ matrix.image }}
+    strategy:
+      matrix:
+        os: [Ubuntu, macOS, Windows]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: Ubuntu
+            image: ubuntu-24.04
+          - os: Windows
+            image: windows-2025
+          - os: macOS
+            image: macos-15
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: poetry
+          allow-prereleases: 'true'
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run typechecking
+        run: poetry run mypy
+
+      - name: Run tests
+        run: poetry run pytest

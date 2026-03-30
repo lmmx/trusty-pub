@@ -1,0 +1,39 @@
+name: Lint
+
+on:
+  merge_group:
+    types:
+      - checks_requested
+  pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - '**.md'
+      - '.github/dependabot.yml'
+      - '.gitignore'
+  workflow_dispatch:
+
+# Cancel previous runs on the same PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: nightly-2025-11-28
+  UV_VERSION: 0.9.26
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - run: rustup install --profile minimal "$RUST_TOOLCHAIN"
+      - run: rustup default "$RUST_TOOLCHAIN"
+      - run: rustup component add clippy rustfmt
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.13
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uvx nox -s lint docs

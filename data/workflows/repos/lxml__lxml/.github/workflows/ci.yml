@@ -1,0 +1,285 @@
+name: CI
+
+on:
+  push:
+    paths:
+      - '**'
+      - '!.github/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/cache_libs.yml'
+  pull_request:
+    paths:
+      - '**'
+      - '!.github/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/cache_libs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read  # to fetch code (actions/checkout)
+
+
+jobs:
+  cache_libs:
+    uses: ./.github/workflows/cache_libs.yml
+    secrets: inherit
+
+  ci:
+    needs: [ cache_libs ]
+
+    env:
+      OS_NAME: ${{ matrix.os }}
+      PYTHON_VERSION: ${{ matrix.python-version }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      COVERAGE: false
+      GCC_VERSION: 9
+      USE_CCACHE: 1
+      CCACHE_SLOPPINESS: "pch_defines,time_macros"
+      CCACHE_COMPRESS: 1
+      CCACHE_MAXSIZE: "100M"
+      ZLIB_VERSION: ${{ contains(matrix.os, 'windows-') && needs.cache_libs.outputs.WIN_ZLIB_VERSION || needs.cache_libs.outputs.ZLIB_VERSION }}
+      LIBICONV_VERSION: ${{ contains(matrix.os, 'windows-') && needs.cache_libs.outputs.WIN_LIBICONV_VERSION || needs.cache_libs.outputs.LIBICONV_VERSION }}
+      LIBXML2_VERSION: ${{ contains(matrix.os, 'windows-') && needs.cache_libs.outputs.WIN_LIBXML2_VERSION || needs.cache_libs.outputs.LIBXML2_VERSION }}
+      LIBXSLT_VERSION: ${{ contains(matrix.os, 'windows-') && needs.cache_libs.outputs.WIN_LIBXSLT_VERSION || needs.cache_libs.outputs.LIBXSLT_VERSION }}
+
+    strategy:
+      # Allows for matrix sub-jobs to fail without canceling the rest
+      fail-fast: false
+
+      # MATRIX:
+      # =======
+      # Required parameters:
+      #  os                  the os to run on
+      #  python-version      the python version to use
+      #  backend             the backend to use
+      #  env                 any additional env variables. Set to '{}' for none
+      # Optional parameters:
+      #  allowed_failure     whether the job is allowed to fail
+      #  extra_hash          extra hash str to differentiate from other caches with similar name (must always start with '-')
+      matrix:
+        # Tests [amd64]
+        #
+        os:
+          - "ubuntu-22.04"
+          - "ubuntu-22.04-arm"
+          - "macos-latest"
+          - "windows-2022"
+          - "windows-11-arm"
+        python-version:
+          - "3.9"
+          - "3.10"  # quotes to avoid being interpreted as the number 3.1
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+          - "3.15-dev"
+        env:
+          - { STATIC_DEPS: true }
+          - { STATIC_DEPS: false }
+
+        include:
+          #- os: ubuntu-22.04
+          #  python-version: "3.15-dev"
+          #  allowed_failure: true
+
+          - os: ubuntu-latest
+            python-version: "3.9"
+            env: {STATIC_DEPS: true, WITH_REFNANNY: true}
+            extra_hash: "-refnanny"
+          - os: ubuntu-latest
+            python-version: "3.13"
+            env: {STATIC_DEPS: true, WITH_REFNANNY: true}
+            extra_hash: "-refnanny"
+
+          # Coverage setup
+          - os: ubuntu-latest
+            python-version: "3.10"
+            env: { COVERAGE: true, STATIC_DEPS: true }
+            extra_hash: "-coverage"
+          - os: ubuntu-latest
+            python-version: "3.10"
+            env: { STATIC_DEPS: false, EXTRA_DEPS: "docutils pygments sphinx sphinx-rtd-theme" }
+            extra_hash: "-docs"
+
+          # Old library setup with minimum version requirements
+          - os: ubuntu-latest
+            python-version: "3.12"
+            env: {
+              STATIC_DEPS: true,
+              LIBXML2_VERSION: 2.9.2,
+              LIBXSLT_VERSION: 1.1.27,
+            }
+            extra_hash: "-oldlibs29"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            env: {
+              STATIC_DEPS: true,
+              LIBXML2_VERSION: 2.10.3,
+              LIBXSLT_VERSION: 1.1.37,
+            }
+            extra_hash: "-oldlibs210"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            env: {
+              STATIC_DEPS: true,
+              LIBXML2_VERSION: 2.11.8,
+              LIBXSLT_VERSION: 1.1.37,
+            }
+            extra_hash: "-oldlibs211"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            env: {
+              STATIC_DEPS: true,
+              LIBXML2_VERSION: 2.12.10,
+              LIBXSLT_VERSION: 1.1.37,
+            }
+            extra_hash: "-oldlibs212"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            env: {
+              STATIC_DEPS: true,
+              LIBXML2_VERSION: 2.13.7,
+              LIBXSLT_VERSION: 1.1.40,
+            }
+            extra_hash: "-oldlibs213"
+
+          - os: ubuntu-latest
+            python-version: "3.12"
+            #allowed_failure: true
+            env: {
+              STATIC_DEPS: true,
+              LIBXML2_VERSION: "",
+              LIBXSLT_VERSION: "",
+            }
+            extra_hash: "-latestlibs"
+          - os: ubuntu-latest
+            python-version: "pypy-3.11"
+            #allowed_failure: true
+            env: {
+              STATIC_DEPS: true,
+              LIBXML2_VERSION: "",
+              LIBXSLT_VERSION: "",
+            }
+            extra_hash: "-latestlibs"
+
+          - os: ubuntu-latest
+            python-version: "3.12"
+            #allowed_failure: true
+            env: {
+              STATIC_DEPS: "true",
+              LIBXML2_VERSION: "",
+              LIBXSLT_VERSION: "",
+              WITHOUT_ZLIB: "true",
+            }
+            extra_hash: "-nozlib"
+
+          # Ubuntu sub-jobs:
+          # ================
+          # Pypy
+          - os: ubuntu-latest
+            python-version: pypy-3.9
+            env: { STATIC_DEPS: false }
+            allowed_failure: true
+          - os: ubuntu-latest
+            python-version: pypy-3.10
+            env: { STATIC_DEPS: false }
+            #allowed_failure: true
+          - os: ubuntu-latest
+            python-version: pypy-3.11
+            env: { STATIC_DEPS: false }
+            #allowed_failure: true
+
+          # MacOS sub-jobs
+          # ==============
+          #- os: macos-latest
+          #  allowed_failure: true   # Unicode parsing fails in Py3
+
+          # Legacy jobs
+          # ===========
+          #- os: ubuntu-22.04
+          #  python-version: "3.7"
+          #  env: { STATIC_DEPS: true }
+          #- os: ubuntu-22.04
+          #  python-version: "3.7"
+          #  env: { STATIC_DEPS: false }
+
+        exclude:
+          # Windows sub-jobs
+          # ==============
+          - os: windows-2022
+            env: { STATIC_DEPS: false }  # always static
+          - os: windows-11-arm
+            env: { STATIC_DEPS: false }  # always static
+          - os: windows-11-arm
+            python-version: "3.9"  # setup-python only supports 3.11+ on windows arm
+          - os: windows-11-arm
+            python-version: "3.10"  # setup-python only supports 3.11+ on windows arm
+
+    # This defaults to 360 minutes (6h) which is way too long and if a test gets stuck, it can block other pipelines.
+    # From testing, the runs tend to take 8-20 minutes, so a limit of 45 minutes should be enough.
+    timeout-minutes: 45
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install MacOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install automake libtool ccache
+          ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        with:
+          max-size: 100M
+          create-symlink: true
+          key: ${{ runner.os }}-${{ runner.arch }}-ccache${{ matrix.extra_hash }}-${{ matrix.python-version }}-${{ matrix.env.STATIC_DEPS }}-${{ matrix.env.LIBXML2_VERSION || env.LIBXML2_VERSION }}-${{ matrix.env.LIBXSLT_VERSION || env.LIBXSLT_VERSION }}
+
+      - name: Cache [libs]
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        if: matrix.env.STATIC_DEPS
+        with:
+          path: |
+            libs/*.xz
+            libs/*.gz
+            libs/*.zip
+          key: libs-${{ runner.os }}-${{ runner.arch }}-${{ env.LIBXML2_VERSION }}-${{ env.LIBXSLT_VERSION }}
+
+      - name: Run CI
+        continue-on-error: ${{ matrix.allowed_failure || false }}
+        env: ${{ matrix.env }}
+        run: bash -c 'GITHUB_API_TOKEN="${{ secrets.GITHUB_TOKEN }}"  bash ./tools/ci-run.sh'
+
+      - name: Build docs
+        if: contains( matrix.env.EXTRA_DEPS, 'sphinx')
+        run: make html
+
+      - name: Upload docs
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: matrix.extra_hash == '-docs'
+        with:
+          name: website_html
+          path: doc/html
+          if-no-files-found: ignore
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: matrix.env.COVERAGE
+        with:
+          name: pycoverage_html
+          path: coverage*
+          if-no-files-found: ignore

@@ -1,0 +1,44 @@
+name: pydevicetree-tests
+
+on:
+  push:
+    path-ignore:
+      - '**.md'
+      - 'LICENSE'
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run:
+          make virtualenv
+      - name: Check types with mypy
+        run:
+          make test-types
+      - name: Lint with pylint
+        run:
+          make test-lint
+      - name: Run unit tests
+        run:
+          make test-unit
+      - name: Run unit tests with bounded parser cache
+        run:
+          make test-cache-size-bound
+      - name: Run integration tests
+        run:
+          make test-integration
+      - name: Make distribution
+        run:
+          make dist
+

@@ -1,0 +1,270 @@
+name: Build and upload to PyPI
+
+on:
+  push:
+    tags:
+      - '**'
+    branches:
+      - main
+      - master
+      - "temp/**"
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  lint:
+    name: Lint
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.10"
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+
+  build_wheels:
+    name: ${{ matrix.build || matrix.platform }} ${{ matrix.archs }} wheels
+    needs: [lint]
+    permissions:
+      contents: read
+    runs-on: "${{ matrix.runs-on }}${{ startsWith(matrix.archs, 'aarch64') && '-arm' || '' }}"
+    strategy:
+      matrix:
+        platform: ["linux"]
+        archs: ["x86_64, i686", "aarch64, armv7l", "ppc64le", "s390x", "riscv64"]
+        build: ["manylinux", "musllinux"]
+        runs-on: [ubuntu-24.04]
+        include:
+          - platform: "windows"
+            archs: "AMD64"
+            runs-on: windows-2022
+          - platform: "windows"
+            archs: "x86"
+            runs-on: windows-2022
+          - platform: "windows"
+            archs: "ARM64"
+            runs-on: windows-11-arm
+          - platform: "macos"
+            archs: "x86_64"
+            runs-on: macos-15-intel
+          - platform: "macos"
+            archs: "arm64"
+            runs-on: macos-14
+          - platform: "ios"
+            archs: "x86_64_iphonesimulator"
+            runs-on: macos-15-intel
+          - platform: "ios"
+            archs: "arm64_iphonesimulator,arm64_iphoneos"
+            runs-on: macos-14
+          - platform: "android"
+            archs: "arm64_v8a,x86_64"
+            runs-on: ubuntu-24.04
+          - platform: "pyodide"
+            archs: "wasm32"
+            runs-on: ubuntu-24.04
+
+    steps:
+      - name: Clean Up runner
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        run: |
+          df -h
+          docker system prune -a -f
+          sudo rm -rf \
+            /opt/hostedtoolcache/CodeQL \
+            /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk \
+            /opt/hostedtoolcache/PyPy \
+            /opt/hostedtoolcache/Ruby \
+            /opt/hostedtoolcache/go \
+            /usr/local/share/chromium
+          ls -al /opt/hostedtoolcache/
+          find /opt/hostedtoolcache/Python -name '*.tgz' -delete
+          df -h
+
+      - name: Set git to use LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          enable-cache: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+
+      # https://github.blog/changelog/2024-04-02-github-actions-hardware-accelerated-android-virtualization-now-available/
+      - name: Enable KVM for Android emulator
+        if: matrix.platform == 'android' && runner.os == 'Linux' && runner.arch == 'X64'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install cmake
+        if: runner.os == 'macOS'
+        run: |
+          # workaround https://gitlab.kitware.com/cmake/cmake/-/issues/26570
+          pipx install -f cmake
+          which cmake
+          cmake --version
+
+      # see https://cibuildwheel.pypa.io/en/stable/faq/#macos-building-cpython-38-wheels-on-arm64
+      - name: "Install python 3.8 universal2 on macOS arm64"
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: 1
+        with:
+          python-version: 3.8
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@ee02a1537ce3071a004a6b08c41e72f0fdc42d9a # v3.4.0
+        env:
+          CIBW_ARCHS: "${{ matrix.archs }}"
+          CIBW_BUILD: "${{ matrix.build && '*-' || ''}}${{ matrix.build }}*"
+          CIBW_ENABLE: "${{ startsWith(github.ref, 'refs/tags/v') && '' || 'cpython-prerelease'}}"
+          CIBW_PLATFORM: "${{ matrix.platform }}"
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: "${{ (matrix.platform != 'pyodide') && 'pypi' || 'cibw' }}-wheels ${{ matrix.build || matrix.platform }} ${{ matrix.archs }}"
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: source distribution
+    needs: [lint]
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    env:
+      CIBUILDWHEEL: 1  # make C extension mandatory
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          enable-cache: false
+
+      - name: Build sdist
+        run: uvx --from build pyproject-build --installer uv --sdist
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        name: Install Python
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: python -m pip install ${{ github.workspace }}/dist/pybase64*.tar.gz
+        working-directory: "${{ runner.temp }}"
+
+      - name: Test
+        run: |
+          python -m pip install --group test
+          pytest
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: pypi-sdist
+          path: dist/*.tar.gz
+
+  check_dist:
+    if: always()
+    name: Check dist
+    needs: [build_wheels, build_sdist]
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          # unpacks all PyPI artifacts into dist/
+          pattern: pypi-*
+          path: dist
+          merge-multiple: true
+      - run: |
+          set -x
+          WHEEL_COUNT=$(find dist -name '*.whl' | wc -l)
+          EXPECTED_WHEEL_COUNT=${{ startsWith(github.ref, 'refs/tags/v') && '214' || '214' }}
+          test ${WHEEL_COUNT} -eq ${EXPECTED_WHEEL_COUNT}
+          pipx run twine check --strict dist/*
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          # unpacks all non PyPI artifacts into nodist/
+          pattern: cibw-*
+          path: nodist
+          merge-multiple: true
+      - run: |
+          set -x
+          WHEEL_COUNT=$(find nodist -name '*.whl' | wc -l)
+          EXPECTED_WHEEL_COUNT=${{ startsWith(github.ref, 'refs/tags/v') && '2' || '2' }}
+          test ${WHEEL_COUNT} -eq ${EXPECTED_WHEEL_COUNT}
+          pipx run twine check --strict nodist/*
+
+  upload_test_pypi:
+    name: Upload to Test PyPI
+    needs: [check_dist]
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && github.repository == 'mayeut/pybase64'
+    environment:
+      name: test-pypi
+      url: https://test.pypi.org/p/pybase64
+    permissions:
+      id-token: write # trusted publishing + attestations
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          # unpacks all PyPI artifacts into dist/
+          pattern: pypi-*
+          path: dist
+          merge-multiple: true
+      - name: Upload to Test PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          skip-existing: true
+          repository-url: https://test.pypi.org/legacy/
+
+  upload_pypi:
+    name: Upload to PyPI
+    needs: [upload_test_pypi]
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && github.repository == 'mayeut/pybase64' && startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pybase64
+    permissions:
+      id-token: write # trusted publishing + attestations
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          # unpacks all PyPI artifacts into dist/
+          pattern: pypi-*
+          path: dist
+          merge-multiple: true
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          skip-existing: true

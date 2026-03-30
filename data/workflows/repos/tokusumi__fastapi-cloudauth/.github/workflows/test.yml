@@ -1,0 +1,52 @@
+name: Tests
+on: 
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.6, 3.7, 3.8, 3.9]
+        poetry-version: [1.1.12]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup Python
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - uses: Gr1N/setup-poetry@v4
+      with:
+        poetry-version: ${{ matrix.poetry-version }}
+    - run: poetry install
+    - run: poetry run bash scripts/test.sh
+      env:
+        AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
+        AUTH0_CLIENTID: ${{ secrets.AUTH0_CLIENTID }}
+        AUTH0_CLIENT_SECRET: ${{ secrets.AUTH0_CLIENT_SECRET }}
+        AUTH0_MGMT_CLIENTID: ${{ secrets.AUTH0_MGMT_CLIENTID }}
+        AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.AUTH0_MGMT_CLIENT_SECRET }}
+        AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE }}
+        AUTH0_CONNECTION: ${{ secrets.AUTH0_CONNECTION }}
+        COGNITO_REGION: ${{ secrets.COGNITO_REGION }}
+        COGNITO_USERPOOLID: ${{ secrets.COGNITO_USERPOOLID }}
+        COGNITO_APP_CLIENT_ID: ${{ secrets.COGNITO_APP_CLIENT_ID }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        FIREBASE_PROJECTID: ${{ secrets.FIREBASE_PROJECTID }}
+        FIREBASE_APIKEY: ${{ secrets.FIREBASE_APIKEY }}
+        FIREBASE_BASE64_CREDENCIALS: ${{ secrets.FIREBASE_BASE64_CREDENCIALS }}
+
+    - name: Upload coverage to Codecov  
+      uses: codecov/codecov-action@v2
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: true

@@ -1,0 +1,70 @@
+name: 'Test on Linux'
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  test-on-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.11
+      - name: Install Browsers
+        run: |
+          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list > /dev/null
+
+          curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/opera-archive-keyring.gpg] https://deb.opera.com/opera-stable/ stable non-free" | sudo tee /etc/apt/sources.list.d/opera.list > /dev/null
+
+          curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor | sudo tee /usr/share/keyrings/vivaldi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" | sudo tee /etc/apt/sources.list.d/vivaldi.list > /dev/null
+
+          distro=$(if echo " una vanessa focal jammy bullseye vera uma" | grep -q " $(lsb_release -sc) "; then echo $(lsb_release -sc); else echo focal; fi)
+          curl -fsSL https://deb.librewolf.net/keyring.gpg | sudo gpg --dearmor -o /usr/share/keyrings/librewolf.gpg
+
+          sudo tee /etc/apt/sources.list.d/librewolf.sources << EOF > /dev/null
+          Types: deb
+          URIs: https://deb.librewolf.net
+          Suites: $distro
+          Components: main
+          Architectures: amd64
+          Signed-By: /usr/share/keyrings/librewolf.gpg
+          EOF
+
+          sudo apt update
+          sudo apt install -y opera-stable brave-browser vivaldi-stable librewolf
+          
+          # chrome, chromium, edge, and firefox are already installed
+          # See: https://github.com/actions/runner-images/blob/main/images/linux/Ubuntu2204-Readme.md
+        
+      - name: Install patched geckodriver
+        run: |
+          tag=$(curl -fsSL 'https://api.github.com/repos/rafiibrahim8/geckodriver-unchained/releases/latest' | jq -r '.tag_name')
+          mkdir -p ~/.local/bin
+          curl -Lo ~/.local/bin/geckodriver "https://github.com/rafiibrahim8/geckodriver-unchained/releases/download/$tag/geckodriver-unchained-linux-$tag"
+          chmod +x ~/.local/bin/geckodriver
+          echo "GECKOWEBDRIVER=$HOME/.local/bin/geckodriver" >> "$GITHUB_ENV"
+
+      - name: Install Python Dependencies
+        run: |
+          pip install -r tests/test-requirements.txt
+      - name: Set Environment Variables
+        run: |
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Run Browser Tests
+        env:
+          DBUS_SESSION_BUS_ADDRESS: "${{ env.DBUS_SESSION_BUS_ADDRESS }}"
+        run: |
+          python -m unittest -v
+      - name: Test Build
+        run: |
+          pip install build
+          python -m build

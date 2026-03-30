@@ -1,0 +1,129 @@
+name: Publish snapshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["master"]
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  check-version:
+    name: Check SNAPSHOT version
+    if: ( ! github.event.repository.fork )
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      is-snapshot: ${{ steps.check.outputs.is-snapshot }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if this is a SNAPSHOT version
+        id: check
+        run: |
+          # check is snapshot version
+          if grep -q "<version>.*-SNAPSHOT</version>" pom.xml
+          then
+            echo "Version in pom IS a SNAPSHOT version"
+            echo "is-snapshot=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version in pom is NOT a SNAPSHOT version"
+            echo "is-snapshot=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  snapshot:
+    name: Snapshot Spark ${{ matrix.params.spark-version }} Scala ${{ matrix.params.scala-version }}
+    needs: check-version
+    # when we release from master, this workflow will see a commit that does not have a SNAPSHOT version
+    # we want this workflow to skip over that commit
+    if: needs.check-version.outputs.is-snapshot == 'true'
+    runs-on: ubuntu-latest
+    # secrets are provided by environment
+    environment:
+      name: snapshot
+      # a different URL for each point in the matrix, but the same URLs accross commits
+      url: 'https://github.com/G-Research/spark-extension?spark=${{ matrix.params.spark-version }}&scala=${{ matrix.params.scala-version }}&snapshot'
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - params: {"spark-version": "3.2.4", "scala-version": "2.12.15", "scala-compat-version": "2.12", "java-compat-version": "8"}
+          - params: {"spark-version": "3.3.4", "scala-version": "2.12.15", "scala-compat-version": "2.12", "java-compat-version": "8"}
+          - params: {"spark-version": "3.4.4", "scala-version": "2.12.17", "scala-compat-version": "2.12", "java-compat-version": "8"}
+          - params: {"spark-version": "3.5.8", "scala-version": "2.12.18", "scala-compat-version": "2.12", "java-compat-version": "8"}
+          - params: {"spark-version": "3.2.4", "scala-version": "2.13.5", "scala-compat-version": "2.13", "java-compat-version": "8"}
+          - params: {"spark-version": "3.3.4", "scala-version": "2.13.8", "scala-compat-version": "2.13", "java-compat-version": "8"}
+          - params: {"spark-version": "3.4.4", "scala-version": "2.13.8", "scala-compat-version": "2.13", "java-compat-version": "8"}
+          - params: {"spark-version": "3.5.8", "scala-version": "2.13.8", "scala-compat-version": "2.13", "java-compat-version": "8"}
+          - params: {"spark-version": "4.0.2", "scala-version": "2.13.16", "scala-compat-version": "2.13", "java-compat-version": "17"}
+          - params: {"spark-version": "4.1.1", "scala-version": "2.13.17", "scala-compat-version": "2.13", "java-compat-version": "17"}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK and publish to Maven Central
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12  # v4.7.0
+        with:
+          java-version: ${{ matrix.params.java-compat-version }}
+          distribution: 'corretto'
+          server-id: central
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Inspect GPG
+        run: gpg -k
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Restore Maven packages cache
+        id: cache-maven
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-mvn-build-${{ matrix.params.spark-version }}-${{ matrix.params.scala-version }}-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-mvn-build-${{ matrix.params.spark-version }}-${{ matrix.params.scala-version }}-${{ hashFiles('pom.xml') }}
+            ${{ runner.os }}-mvn-build-${{ matrix.params.spark-version }}-${{ matrix.params.scala-version }}-
+
+
+      - name: Publish snapshot
+        run: |
+          ./set-version.sh ${{ matrix.params.spark-version }} ${{ matrix.params.scala-version }}
+          mvn clean deploy -Dsign -Dspotless.check.skip -DskipTests -Dmaven.test.skip=true
+        env:
+          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE}}
+
+      - name: Prepare PyPi package to test snapshot
+        if: ${{ matrix.params.scala-version }} == 2.12*
+        run: |
+          # Build whl
+          ./build-whl.sh
+
+      - name: Restore Spark Binaries cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/spark
+          key: ${{ runner.os }}-spark-binaries-${{ matrix.params.spark-version }}-${{ matrix.params.scala-compat-version }}
+          restore-keys: |
+            ${{ runner.os }}-spark-binaries-${{ matrix.params.spark-version }}-${{ matrix.params.scala-compat-version }}
+
+      - name: Rename Spark Binaries cache
+        run: |
+          mv ~/spark ./spark-${{ matrix.params.spark-version }}-${{ matrix.params.scala-compat-version }}
+
+      - name: Test snapshot
+        id: test-package
+        run: |
+          # Test the snapshot (needs whl)
+          ./test-release.sh

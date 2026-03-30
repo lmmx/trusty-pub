@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release Tag WITHOUT `v` Prefix (e.g. 6.0.0)"
+        required: true
+      dry-run:
+        description: 'Dry run'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  DOCKER_BUILDKIT: '1'
+  FORCE_COLOR: 1
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Generate Package
+        run: |
+          pip3 install build
+          python -m build .
+        env:
+          # This is also supported by Hatch; see
+          # https://github.com/ofek/hatch-vcs#version-source-environment-variables
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ inputs.tag }}
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: '! inputs.dry-run'
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Create GitHub release
+        uses: ncipollo/release-action@v1
+        if: '! inputs.dry-run'
+        with:
+          artifacts: "dist/*"
+          generateReleaseNotes: true
+          draft: true
+          commit: ${{ github.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ inputs.tag }}

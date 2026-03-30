@@ -1,0 +1,155 @@
+# Builds project on qemu with custom hmat settings
+name: Qemu
+
+on:
+  workflow_call:
+    inputs:
+      short_run:
+        description: Should the workflow run only basic tests?
+        type: boolean
+        default: false
+      os:
+        description: List of OSes
+        type: string
+        default: '["ubuntu-24.04"]'
+
+permissions:
+  contents: read
+
+jobs:
+  qemu-build:
+    strategy:
+      matrix:
+        os: ${{ fromJson(inputs.os) }}
+    name: QEMU (${{ matrix.os }})
+
+    # Host QEMU on any Linux platform
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout UMF
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: 0
+        path: umf
+
+    - name: Enable KVM
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qemu-system genisoimage qemu-utils \
+          libvirt-clients libvirt-daemon-system libvirt-daemon virtinst bridge-utils
+
+    # Latest distros do not allow global pip installation
+    - name: Install Python requirements in venv
+      run: |
+        python3 -m venv .venv
+        . .venv/bin/activate
+        echo "$PATH" >> $GITHUB_PATH
+        python3 -m pip install -r umf/scripts/qemu/requirements.txt
+
+    - name: Add user to kvm group
+      run: sudo usermod -a -G kvm,libvirt $USER
+
+    - name: Run ssh-keygen
+      run: ssh-keygen -b 4096 -N '' -f ~/.ssh/id_rsa
+
+    - name: Generate iso with user info
+      run: |
+        pub_key=$(cat ~/.ssh/id_rsa.pub)
+
+        cat > user-data << EOF
+        #cloud-config
+
+        # Add a 'testuser' user to the system with a password
+        users:
+          - default
+          - name: testuser
+            gecos: Test User
+            primary_group: wheel
+            groups: users
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            lock_passwd: false
+            ssh-authorized-keys:
+              - $pub_key
+            shell: /usr/bin/bash
+
+        # Set local logins
+        chpasswd:
+          list: |
+            root:password
+            testuser:password
+          expire: False
+        EOF
+
+        cat > meta-data << EOF
+        instance-id: qemu-test
+        local-hostname: qemu-test
+        EOF
+
+        sudo -Sk genisoimage -output ubuntu-cloud-init.iso -volid cidata -joliet -rock ./user-data ./meta-data
+
+    - name: Set vars if short run
+      if: ${{ inputs.short_run == true }}
+      run: |
+        echo "SHORT_RUN=true" >> $GITHUB_ENV
+        declare -a short_configs=("default.xml" "sock_2_var3.xml" "sock_8_var1_hmat.xml")
+        echo "CONFIG_OPTIONS=${short_configs[@]}" >> $GITHUB_ENV
+
+    - name: Set vars if long run
+      if: ${{ inputs.short_run == false }}
+      run: |
+        echo "SHORT_RUN=false" >> $GITHUB_ENV
+        echo "CONFIG_OPTIONS=umf/scripts/qemu/configs/*.xml" >> $GITHUB_ENV
+
+    - name: Download Ubuntu image
+      run: |
+        OS_VER=$(echo ${{matrix.os}} | cut -d'-' -f2)
+        wget https://cloud-images.ubuntu.com/releases/${OS_VER}/release/${{matrix.os}}-server-cloudimg-amd64.img -O qemu_image.img
+
+    - name: Resize image
+      run: qemu-img resize ./qemu_image.img +4G
+
+    - name: Build UMF in QEMU
+      run: |
+        umf/scripts/qemu/start_qemu.sh default.xml
+
+        # Copy UMF repository's content into the home dir in QEMU
+        rsync -az -e "ssh -p 2222" ${{github.workspace}}/umf/ testuser@127.0.0.1:/home/testuser/
+        ssh testuser@127.0.0.1 -p 2222 -t "sudo chown -R testuser:users /home/testuser"
+
+        ssh testuser@127.0.0.1 -p 2222 -t "bash /home/testuser/scripts/qemu/run-build.sh COVERAGE"
+        # ssh may return non-zero error code on closing the connection in Ubuntu 22.04
+        ssh testuser@127.0.0.1 -p 2222 -t "sudo shutdown -h now" || true
+
+    - name: Run tests in QEMU
+      run: |
+        echo "Running tests for: ${CONFIG_OPTIONS}"
+
+        for config_file in ${CONFIG_OPTIONS}; do
+          config_name=$(basename $config_file)
+
+          while ps -aux | grep qemu-system-x86_64 | grep -q -v grep; do
+            echo "Waiting for QEMU to shut down..."
+            sleep 5
+          done
+
+          echo "### Testing ${config_name} ###"
+          umf/scripts/qemu/start_qemu.sh ${config_name}
+
+          ssh testuser@127.0.0.1 -p 2222 -t "export SHORT_RUN=${SHORT_RUN} OS_FULL_NAME=${{matrix.os}} && /home/testuser/scripts/qemu/run-tests.sh COVERAGE ${config_name}"
+          scp -r -P 2222 testuser@127.0.0.1:/home/testuser/coverage ./
+          # ssh may return non-zero error code on closing the connection in Ubuntu 22.04
+          ssh testuser@127.0.0.1 -p 2222 -t "sudo shutdown -h now" || true
+        done
+        ls -al ./coverage
+
+    - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      with:
+        name: exports-coverage-qemu-${{matrix.os}}
+        path: coverage

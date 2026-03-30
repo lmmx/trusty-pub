@@ -1,0 +1,195 @@
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        grappelli: ["0", "1"]
+        python-version: ["3.11"]
+        django-version: ["4.2"]
+        exclude:
+          - python-version: "3.11"
+            grappelli: "1"
+        include:
+          - python-version: "3.9"
+            django-version: "4.2"
+            grappelli: "0"
+          - python-version: "3.10"
+            django-version: "4.2"
+            grappelli: "1"
+          - python-version: "3.11"
+            django-version: "5.1"
+            grappelli: "0"
+          - python-version: "3.13"
+            django-version: "5.2"
+            grappelli: "0"
+
+    runs-on: ubuntu-latest
+    name: Django ${{ matrix.django-version }} (Python ${{ matrix.python-version }})${{ matrix.grappelli == '1' && ' + grappelli' || '' }}
+
+    env:
+      DJANGO: ${{ matrix.django-version }}
+      GRAPPELLI: ${{ matrix.grappelli }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      NODE_ENV: test
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Setup chromedriver
+      # uses: nanasess/setup-chromedriver@v2.2.2
+      uses: nanasess/setup-chromedriver@42cc2998329f041de87dc3cfa33a930eacd57eaa
+
+    - name: Install tox
+      run: |
+       python3 -m pip install tox tox-gh-actions
+
+    - name: Cache instrumented static files
+      id: cache-test-dist
+      uses: actions/cache@v3
+      with:
+        path: nested_admin/tests/static
+        key: test-dist-${{ hashFiles('package-lock.json', '.github/workflows/test.yml', 'webpack.config.js', 'package.json', '.*rc*', 'nested_admin/static/nested_admin/src/**/*.*s') }}
+
+    - name: Cache node_modules
+      id: cache-node_modules
+      uses: actions/cache@v3
+      with:
+        path: node_modules
+        key: node_modules-${{ hashFiles('package-lock.json') }}
+
+    - name: Setup nodejs
+      if: steps.cache-test-dist.outputs.cache-hit != 'true'
+      uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+        cache: 'npm'
+
+    - name: npm ci
+      if: steps.cache-test-dist.outputs.cache-hit != 'true' && steps.cache-node_modules.outputs.cache-hit != 'true'
+      run: |
+        npm ci || npm ci || npm ci
+
+    - name: Build instrumented static files
+      if: steps.cache-test-dist.outputs.cache-hit != 'true'
+      run: |
+        npm run build
+
+    - name: Run tests
+      run: |
+        tox -- -vvv --selenosis-driver=chrome-headless --retries 3 || \
+        tox -- -vvv --selenosis-driver=chrome-headless --retries 3
+      env:
+        PIXELMATCH_BIN: ${{ env.GITHUB_WORKSPACE }}/node_modules/.bin/pixelmatch
+
+    - name: Generate python coverage
+      run: |
+        tox -e coverage-report
+
+    - uses: codecov/codecov-action@v5
+      name: Upload python coverage
+      with:
+        files: .tox/coverage/coverage.xml
+        flags: python
+        name: ${{ github.workflow }}
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true
+
+    - name: Generate js coverage report
+      run: npm run report
+
+    - uses: codecov/codecov-action@v5
+      name: Upload js coverage
+      with:
+        files: coverage/lcov.info
+        flags: javascript
+        name: ${{ github.workflow }}
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true
+
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: ["flake8", "black", "eslint", "stylelint"]
+        include:
+          - tool: flake8
+            language: python
+          - tool: black
+            language: python
+          - tool: eslint
+            language: javascript
+          - tool: stylelint
+            language: javascript
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - uses: actions/setup-python@v4
+      if: matrix.language == 'python'
+      with:
+        python-version: 3.9
+
+    - name: Cache node_modules
+      if: matrix.language == 'javascript'
+      id: cache-node_modules
+      uses: actions/cache@v3
+      with:
+        path: node_modules
+        key: node_modules-${{ hashFiles('package-lock.json') }}-lint
+        restore-keys: |
+          node_modules-${{ hashFiles('package-lock.json') }}
+
+    - name: Setup nodejs
+      if: matrix.language == 'javascript'
+      uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+        cache: 'npm'
+
+    - name: npm ci
+      if: matrix.language == 'javascript' && steps.cache-node_modules.outputs.cache-hit != 'true'
+      run: |
+        npm ci || npm ci || npm ci
+
+    - name: Run black
+      if: matrix.tool == 'black'
+      uses: psf/black@stable
+      with:
+        src: "nested_admin docs setup.py"
+        version: "22.8.0"
+
+    - name: Install flake8
+      if: matrix.tool == 'flake8'
+      run: pip install flake8
+
+    - name: Run flake8
+      if: matrix.tool == 'flake8'
+      uses: suo/flake8-github-action@releases/v1
+      with:
+        checkName: 'lint'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run ${{ matrix.tool }}
+      if: matrix.language == 'javascript'
+      run: |
+        npm run lint:${{ matrix.tool }}
+
+  success:
+    needs: [lint, build]
+    runs-on: ubuntu-latest
+    name: Test Successful
+    steps:
+      - name: Success
+        run: echo Test Successful

@@ -1,0 +1,42 @@
+name: Deploy PR previews
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+
+concurrency: preview-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  pages: write
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and Git
+        uses: ./.github/actions/setup-python-and-git
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: uv sync -p 3.12 --group docs
+
+      - name: Build documentation
+        run: |
+          uv run mkdocs build --strict
+
+      - name: Deploy preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: ./site/

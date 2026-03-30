@@ -1,0 +1,260 @@
+name: PyBaMM
+
+on:
+  pull_request:
+
+
+permissions: {}
+
+env:
+  PYBAMM_DISABLE_TELEMETRY: "true"
+  FORCE_COLOR: 3
+
+concurrency:
+  # github.workflow: name of the workflow, so that we don't cancel other workflows
+  # github.event.pull_request.number || github.ref: pull request number or branch name if not a pull request
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel in-progress runs when a new workflow with the same group name is triggered
+  # This avoids workflow runs on both pushes and PRs
+  cancel-in-progress: true
+
+jobs:
+  style:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.12
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Check style
+        run: uvx pre-commit run -a
+
+  run_unit_tests:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    name: Tests (${{ matrix.os }} / Python ${{ matrix.python-version }})
+
+    steps:
+      - name: Check out PyBaMM repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Linux system dependencies
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          packages: gfortran gcc graphviz pandoc
+          execute_install_scripts: true
+
+      # dot -c is for registering graphviz fonts and plugins
+      - name: Install OpenBLAS and TeXLive for Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo dot -c
+          sudo apt-get install libopenblas-dev texlive-latex-extra dvipng
+
+      - name: Install macOS system dependencies
+        if: matrix.os == 'macos-15-intel' || matrix.os == 'macos-latest'
+        env:
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_COLOR: 1
+          # Speed up CI
+          NONINTERACTIVE: 1
+        # sometimes gfortran cannot be found, so reinstall gcc just to be sure
+        run: |
+          brew analytics off
+          brew install graphviz libomp
+          brew reinstall gcc
+
+      - name: Install Windows system dependencies
+        if: matrix.os == 'windows-latest'
+        run: winget install --id Graphviz.Graphviz --exact --accept-source-agreements --accept-package-agreements
+
+      - name: Set up Python ${{ matrix.python-version }}
+        id: setup-python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install nox
+        run: uv tool install nox
+
+      - name: Run unit tests for ${{ matrix.os }} with Python ${{ matrix.python-version }}
+        if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.13'
+        run: nox -s unit
+
+      - name: Run coverage tests for ${{ matrix.os }} with Python ${{ matrix.python-version }}
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        run: nox -s coverage
+
+      - name: Upload coverage report
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Run integration tests for ${{ matrix.os }} with Python ${{ matrix.python-version }}
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        run: nox -s integration
+
+  run_doctests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+    name: Doctests (ubuntu-latest / Python 3.13)
+
+    steps:
+      - name: Check out PyBaMM repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Linux system dependencies
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        with:
+          packages: graphviz pandoc
+          execute_install_scripts: true
+
+      # dot -c is for registering graphviz fonts and plugins
+      - name: Install TeXLive for Linux
+        run: |
+          sudo apt-get update
+          sudo dot -c
+          sudo apt-get install texlive-latex-extra dvipng
+
+      - name: Set up Python
+        id: setup-python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.13
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install nox
+        run: uv tool install nox
+
+      - name: Install docs dependencies and run doctests for GNU/Linux
+        run: nox -s doctests
+
+      - name: Check if the documentation can be built for GNU/Linux
+        run: nox -s docs
+
+  run_example_tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+    name: Example notebooks (ubuntu-latest / Python 3.13)
+
+    steps:
+      - name: Check out PyBaMM repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Linux system dependencies
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        with:
+          packages: gfortran gcc graphviz pandoc
+          execute_install_scripts: true
+
+      # dot -c is for registering graphviz fonts and plugins
+      - name: Install OpenBLAS and TeXLive for Linux
+        run: |
+          sudo apt-get update
+          sudo dot -c
+          sudo apt-get install libopenblas-dev texlive-latex-extra dvipng
+
+      - name: Set up Python 3.13
+        id: setup-python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.13
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install nox
+        run: uv tool install nox
+
+      - name: Run example notebooks tests for GNU/Linux with Python 3.13
+        run: nox -s examples
+
+  run_scripts_tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+    name: Example scripts (ubuntu-latest / Python 3.13)
+
+    steps:
+      - name: Check out PyBaMM repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Linux system dependencies
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        with:
+          packages: gfortran gcc graphviz
+          execute_install_scripts: true
+
+      # dot -c is for registering graphviz fonts and plugins
+      - name: Install OpenBLAS and TeXLive for Linux
+        run: |
+          sudo apt-get update
+          sudo dot -c
+          sudo apt-get install libopenblas-dev texlive-latex-extra dvipng
+
+      - name: Set up Python 3.13
+        id: setup-python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.13
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install nox
+        run: uv tool install nox
+
+      - name: Run example scripts tests for GNU/Linux with Python 3.13
+        run: nox -s scripts

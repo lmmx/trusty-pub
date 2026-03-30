@@ -1,0 +1,67 @@
+name: create-release-candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_part:
+        description: The part of the version to update (patch, minor or major)
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+        default: 'patch'
+        required: true
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+    env:
+      PYTHON_PACKAGE: kedro_mlflow
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Validate inputs
+      run: |
+        echo "INPUT_VERSION_PART: ${{ github.event.inputs.version_part }}"
+    - name: Bump the version number  # bump2version is a maintained fork of original bumpversion
+      id: bump_version
+      run: |
+        uv tool install bump-my-version
+        uvx bump-my-version bump ${{ github.event.inputs.version_part }}
+        echo "package_version=$(cat $PYTHON_PACKAGE/__init__.py | grep -Po  '\d+\.\d+\.\d+')" >> $GITHUB_OUTPUT
+    - name: Update the CHANGELOG according to 'Keep a Changelog' guidelines
+      uses: thomaseizinger/keep-a-changelog-new-release@v1
+      with:
+        version: ${{ steps.bump_version.outputs.package_version }}
+    - name: Create a new release branch
+      run: |
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+        git checkout -b release-${{ steps.bump_version.outputs.package_version }}
+        git push -u origin release-${{ steps.bump_version.outputs.package_version }}
+    - name: Commit the changes
+      run: |
+        git commit -am "Bump version and CHANGELOG for release ${{ steps.bump_version.outputs.package_version }}"
+        git push
+    - name: Open a PR to merge the release to master
+      id: open_pr
+      run: |
+        gh pr create -B master -H release-${{ steps.bump_version.outputs.package_version }} --title "Release ${{ steps.bump_version.outputs.package_version }}" --body "Bump version and CHANGELOG for next release." --assignee "${{ github.repository_owner }}"
+        echo "pull_request_number=$(gh pr list --base master --json number,createdAt --jq 'sort_by(.createdAt) | reverse | .[0].number')" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Change the commit message to add PR number
+      run: |
+        git commit -a --amend -m ":rocket: Bump version and CHANGELOG for release ${{ steps.bump_version.outputs.package_version }} (#${{ steps.open_pr.outputs.pull_request_number }})"
+        git push -f

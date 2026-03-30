@@ -1,0 +1,56 @@
+name: tests
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/jupyterlab-tests.yml'
+      - '**.py'
+      - '**.ts'
+      - '**.tsx'
+      - 'optuna_dashboard/package.json'
+      - 'optuna_dashboard/package-lock.json'
+      - 'tslib/react/package.json'
+      - 'tslib/react/package-lock.json'
+      - 'tslib/storage/package.json'
+      - 'tslib/storage/package-lock.json'
+      - 'jupyterlab/pyproject.toml'
+      - 'jupyterlab/package.json'
+      - 'jupyterlab/yarn.lock'
+      - 'jupyterlab/tsconfig.json'
+jobs:
+  test-build:
+    name: Test build for JupyterLab extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        working-directory: jupyterlab
+        run: |
+          uv venv
+          uv pip install --upgrade pip setuptools build
+          uv pip install jupyterlab
+      
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      # Without a following step, it will be failed to build the jupyter lab extension by the below error
+      # Type Error Cannot read properties of undefined (reading .../jupyterlab/.pnp.cjs)
+      - name: Mysterious hack to fix the build error
+        working-directory: jupyterlab
+        run: yarn install
+      
+      - run: make jupyterlab-extension
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false

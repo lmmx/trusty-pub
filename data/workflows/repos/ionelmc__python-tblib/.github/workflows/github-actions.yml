@@ -1,0 +1,219 @@
+name: build
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 'check'
+            python: '3.13'
+            tox_env: 'check'
+            os: 'ubuntu-latest'
+          - name: 'docs'
+            python: '3.13'
+            tox_env: 'docs'
+            os: 'ubuntu-latest'
+          - name: 'py39 (ubuntu/x64)'
+            python: '3.9'
+            python_arch: 'x64'
+            tox_env: 'py39'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'py39 (windows/x64)'
+            python: '3.9'
+            python_arch: 'x64'
+            tox_env: 'py39'
+            os: 'windows-latest'
+            cover: true
+          - name: 'py39 (macos/arm64)'
+            python: '3.9'
+            python_arch: 'arm64'
+            tox_env: 'py39'
+            os: 'macos-latest'
+            cover: true
+          - name: 'py310 (ubuntu/x64)'
+            python: '3.10'
+            python_arch: 'x64'
+            tox_env: 'py310'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'py310 (windows/x64)'
+            python: '3.10'
+            python_arch: 'x64'
+            tox_env: 'py310'
+            os: 'windows-latest'
+            cover: true
+          - name: 'py310 (macos/arm64)'
+            python: '3.10'
+            python_arch: 'arm64'
+            tox_env: 'py310'
+            os: 'macos-latest'
+            cover: true
+          - name: 'py311 (ubuntu/x64)'
+            python: '3.11'
+            python_arch: 'x64'
+            tox_env: 'py311'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'py311 (windows/x64)'
+            python: '3.11'
+            python_arch: 'x64'
+            tox_env: 'py311'
+            os: 'windows-latest'
+            cover: true
+          - name: 'py311 (macos/arm64)'
+            python: '3.11'
+            python_arch: 'arm64'
+            tox_env: 'py311'
+            os: 'macos-latest'
+            cover: true
+          - name: 'py312 (ubuntu/x64)'
+            python: '3.12'
+            python_arch: 'x64'
+            tox_env: 'py312'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'py312 (windows/x64)'
+            python: '3.12'
+            python_arch: 'x64'
+            tox_env: 'py312'
+            os: 'windows-latest'
+            cover: true
+          - name: 'py312 (macos/arm64)'
+            python: '3.12'
+            python_arch: 'arm64'
+            tox_env: 'py312'
+            os: 'macos-latest'
+            cover: true
+          - name: 'py313 (ubuntu/x64)'
+            python: '3.13'
+            python_arch: 'x64'
+            tox_env: 'py313'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'py313 (windows/x64)'
+            python: '3.13'
+            python_arch: 'x64'
+            tox_env: 'py313'
+            os: 'windows-latest'
+            cover: true
+          - name: 'py313 (macos/arm64)'
+            python: '3.13'
+            python_arch: 'arm64'
+            tox_env: 'py313'
+            os: 'macos-latest'
+            cover: true
+          - name: 'py314 (ubuntu/x64)'
+            python: '3.14'
+            python_arch: 'x64'
+            tox_env: 'py314'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'py314 (windows/x64)'
+            python: '3.14'
+            python_arch: 'x64'
+            tox_env: 'py314'
+            os: 'windows-latest'
+            cover: true
+          - name: 'py314 (macos/arm64)'
+            python: '3.14'
+            python_arch: 'arm64'
+            tox_env: 'py314'
+            os: 'macos-latest'
+            cover: true
+          - name: 'pypy39 (ubuntu/x64)'
+            python: 'pypy-3.9'
+            python_arch: 'x64'
+            tox_env: 'pypy39'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'pypy39 (windows/x64)'
+            python: 'pypy-3.9'
+            python_arch: 'x64'
+            tox_env: 'pypy39'
+            os: 'windows-latest'
+            cover: true
+          - name: 'pypy39 (macos/arm64)'
+            python: 'pypy-3.9'
+            python_arch: 'arm64'
+            tox_env: 'pypy39'
+            os: 'macos-latest'
+            cover: true
+          - name: 'pypy310 (ubuntu/x64)'
+            python: 'pypy-3.10'
+            python_arch: 'x64'
+            tox_env: 'pypy310'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'pypy310 (windows/x64)'
+            python: 'pypy-3.10'
+            python_arch: 'x64'
+            tox_env: 'pypy310'
+            os: 'windows-latest'
+            cover: true
+          - name: 'pypy310 (macos/arm64)'
+            python: 'pypy-3.10'
+            python_arch: 'arm64'
+            tox_env: 'pypy310'
+            os: 'macos-latest'
+            cover: true
+          - name: 'pypy311 (ubuntu/x64)'
+            python: 'pypy-3.11'
+            python_arch: 'x64'
+            tox_env: 'pypy311'
+            os: 'ubuntu-latest'
+            cover: true
+          - name: 'pypy311 (windows/x64)'
+            python: 'pypy-3.11'
+            python_arch: 'x64'
+            tox_env: 'pypy311'
+            os: 'windows-latest'
+            cover: true
+          - name: 'pypy311 (macos/arm64)'
+            python: 'pypy-3.11'
+            python_arch: 'arm64'
+            tox_env: 'pypy311'
+            os: 'macos-latest'
+            cover: true
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+        architecture: ${{ matrix.python_arch }}
+    - name: install dependencies
+      run: |
+        python -mpip install --progress-bar=off -r ci/requirements.txt
+        virtualenv --version
+        pip --version
+        tox --version
+        pip list --format=freeze
+    - name: test
+      run: >
+        tox -e ${{ matrix.tox_env }} -v
+    - uses: coverallsapp/github-action@v2
+      if: matrix.cover
+      continue-on-error: true
+      with:
+        flag-name: ${{ matrix.name }}
+        parallel: true
+    - uses: codecov/codecov-action@v5
+      if: matrix.cover
+      with:
+        flags: ${{ matrix.name }}
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true
+  finish:
+    needs: test
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: coverallsapp/github-action@v2
+      with:
+        parallel-finished: true

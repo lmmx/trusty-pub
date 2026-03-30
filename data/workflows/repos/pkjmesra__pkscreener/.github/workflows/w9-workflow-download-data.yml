@@ -1,0 +1,535 @@
+# """
+#     The MIT License (MIT)
+
+#     Copyright (c) 2023 pkjmesra
+
+#     Permission is hereby granted, free of charge, to any person obtaining a copy
+#     of this software and associated documentation files (the "Software"), to deal
+#     in the Software without restriction, including without limitation the rights
+#     to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#     copies of the Software, and to permit persons to whom the Software is
+#     furnished to do so, subject to the following conditions:
+
+#     The above copyright notice and this permission notice shall be included in all
+#     copies or substantial portions of the Software.
+
+#     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#     SOFTWARE.
+
+# """
+name: 9. After-Market Data Gen
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Run Details'
+        required: false
+        default: 'After-Market Data Gen'
+      targetPythonVersion:
+        description: 'Target Python version: 3.9 , 3.10, 3.11 ?'
+        required: false
+        type: string
+        default: '3.12'
+      runson:
+          description: 'Runner OS. e.g: ubuntu-latest, windows-latest or macos-latest'
+          required: false
+          default: 'ubuntu-latest'
+      installtalib:
+        description: 'Is TA-Lib install required? (Y/N). N to skip installing talib.'
+        required: false
+        default: 'Y'
+      skipDownload:
+          description: 'Skip pkl download for 1y. Leave empty to NOT skip download. Y to skip download'
+          required: false
+          default: ''
+      cleanuphistoricalscans:
+        description: 'Clean up historical scans? Leave empty to run historical scans. Y to run clean up'
+        required: false
+        default: 'N'
+      scanOptions:
+        description: 'Scan options for historical scans. cleanuphistoricalscans MUST to be left empty to run historical scans.'
+        required: false
+        default: '--reScanForZeroSize --scanDaysInPast 3 -s2 42,0,21,22,29,M,Z -s1 W,N,E,M,Z,S,0,2,3,4,6,7,9,10,13,14,15 -s0 S,T,E,U,Z,F,H,Y,B,G,C,M,D,I,L,P -s3 "0" -s4 "0" --branchname actions-data-download --scans --triggerRemotely -f'
+
+  # schedule:
+  # - cron: '58 9 * * 0-6'
+
+run-name: ${{ inputs.name || 'After-Market Data Gen'}}
+
+jobs:
+
+  Download_Stock_Data:
+
+    runs-on: ${{ inputs.runson || 'ubuntu-latest'}} #ubuntu-latest #windows-latest
+    permissions: write-all
+      # actions: write
+    outputs:
+      should_clean: ${{ inputs.scanOptions }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: actions-data-download
+
+    - name: Set up Python 
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.targetPythonVersion  || 3.12 }}
+
+    - name: Restore Dependencies from Windows Cache
+      if: startsWith(runner.os, 'Windows')
+      uses: actions/cache@v4
+      continue-on-error: true
+      with:
+        path: ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Load Cache for Linux Dependencies
+      uses: actions/cache@v4
+      continue-on-error: true
+      if: startsWith(runner.os, 'Linux')
+      with:
+        path: |
+          /usr/include/ta-lib
+          /usr/bin/ta-lib-config
+          /usr/lib/libta_lib.la
+          /usr/lib/libta_lib.a
+        key: ${{ runner.os }}-talib
+        restore-keys: |
+          ${{ runner.os }}-talib
+
+    - name: Restore pip cache for Linux
+      if: startsWith(runner.os, 'Linux')
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install TA-Lib for Windows
+      if: ${{ inputs.installtalib != 'N' && inputs.skipDownload == '' && startsWith(runner.os, 'Windows') }}
+      shell: bash
+      run: |
+        python3 -m pip install --upgrade pip
+        cd .github/dependencies/
+        if [[ "${{ inputs.targetPythonVersion }}" == "" ]] ;then
+          pip3 install ta_lib-0.6.0-cp312-cp312-win_amd64.whl
+        elif [[ "${{ inputs.targetPythonVersion }}" == "3.9" ]] ;then
+          pip3 install TA_Lib-0.4.19-cp39-cp39-win_amd64.whl
+        elif [[ "${{ inputs.targetPythonVersion }}" == "3.11" ]] ;then
+          pip3 install TA_Lib-0.4.29-cp311-cp311-win_amd64.whl
+        elif [[ "${{ inputs.targetPythonVersion }}" == "3.12" ]] ;then
+          pip3 install ta_lib-0.6.0-cp312-cp312-win_amd64.whl
+        fi
+
+    - name: Install TA-Lib for Linux
+      if: ${{ inputs.installtalib != 'N' && inputs.skipDownload == '' && startsWith(runner.os, 'Linux') }}
+      run: |
+        cd .github/dependencies/
+        pwd
+        sudo dpkg -i ta-lib_0.6.4_amd64.deb
+        cd /home/runner/work/PKScreener/PKScreener/
+        # Pin numpy<2.0 to avoid incompatibility with ta-lib 0.6.0
+        # ta-lib uses deprecated NumPy C API that was removed in NumPy 2.x
+        pip3 install "numpy<2.0" setuptools "cython<3.0"
+        pip3 install --no-build-isolation ta-lib==0.6.0
+
+    - name: Environment setup to get latest EXE
+      if: ${{ inputs.skipDownload == '' }}
+      shell: bash
+      id: releaseurlsetter
+      run: |
+        pip3 install PKDevTools
+        pip3 install PKNSETools
+        python3 .github/workflows/githubutilities.py -d
+
+    - name: Download latest executable on Windows
+      shell: cmd
+      if: ${{ inputs.skipDownload == '' && startsWith(runner.os, 'Windows' ) }}
+      env:
+        exe_path: ${{ steps.releaseurlsetter.outputs.DOWNLOAD_URL }}
+      run: |
+        curl -o pkscreenercli.exe -JL %exe_path%
+
+    - name: Download latest executable on Ubuntu
+      shell: bash
+      if: ${{ inputs.skipDownload == '' && startsWith(runner.os, 'Linux' ) }}
+      env:
+        exe_path: ${{ steps.releaseurlsetter.outputs.DOWNLOAD_URL }}
+      run: |
+        curl -o /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin -JL $exe_path
+        chmod +x /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin
+        # Validate binary format
+        if ! file /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin | grep -q "ELF 64-bit"; then
+          echo "ERROR: Downloaded file is not a valid Linux ELF binary"
+          file /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin
+          exit 1
+        fi
+          
+    - name: Download and Validate 52 week Stock Data on Ubuntu
+      shell: bash
+      continue-on-error: true
+      if: ${{ inputs.skipDownload == '' && startsWith(runner.os, 'Linux' ) }}
+      run: |
+        # Define size thresholds (in bytes)
+        DAILY_PKL_MIN_SIZE=25000000    # 25 MB minimum for daily pkl
+        INTRADAY_PKL_MIN_SIZE=800000  # 1 MB minimum for intraday pkl
+        
+        # Function to validate pkl files
+        validate_pkl_files() {
+          local period=$1
+          local min_size=$2
+          local files_found=0
+          local valid_files=0
+          
+          echo "=== Validating $period pkl files (min: $((min_size/1024/1024)) MB) ==="
+          
+          for pkl_file in actions-data-download/*.pkl; do
+            if [ -f "$pkl_file" ]; then
+              files_found=$((files_found + 1))
+              file_size=$(stat -c%s "$pkl_file" 2>/dev/null || stat -f%z "$pkl_file")
+              size_mb=$((file_size/1024/1024))
+              
+              # Check if this file matches the period pattern
+              if [[ "$pkl_file" == *"$period"* ]] || [[ "$period" == "daily" && "$pkl_file" != *"intraday"* ]] || [[ "$period" == "intraday" && "$pkl_file" == *"intraday"* ]]; then
+                if [ "$file_size" -ge "$min_size" ]; then
+                  echo "  ✅ Valid $period pkl: $(basename "$pkl_file") - ${size_mb} MB"
+                  valid_files=$((valid_files + 1))
+                else
+                  echo "  ⚠️ Undersized $period pkl: $(basename "$pkl_file") - ${size_mb} MB (min: $((min_size/1024/1024)) MB)"
+                fi
+              fi
+            fi
+          done
+          
+          echo "Found $files_found total files, $valid_files valid $period files"
+          return $valid_files
+        }
+        
+        # Download daily data
+        echo "=== Downloading Daily Stock Data ==="
+        if python3 pkscreener/pkscreenercli.py -d -a Y 2>&1; then
+          echo "✓ Used Python directly for daily data download"
+        else
+          echo "⚠ Python failed, falling back to binary"
+          /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin -d -a Y
+        fi
+        
+        # Download intraday data
+        echo ""
+        echo "=== Downloading Intraday Stock Data ==="
+        if python3 pkscreener/pkscreenercli.py -d -a Y -i 1m 2>&1; then
+          echo "✓ Used Python directly for intraday data download"
+        else
+          echo "⚠ Python failed, falling back to binary"
+          /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin -d -a Y -i 1m
+        fi
+        
+        # Clean up lock files
+        rm -rf results/*.lck || true
+        
+        # List and validate files
+        echo ""
+        echo "=== Listing results directory ==="
+        ls -la results/ || echo "results/ not found"
+        
+        echo ""
+        echo "=== Listing results/Data directory ==="
+        ls -la results/Data/ || echo "results/Data/ not found"
+        
+        # Create actions-data-download directory if it doesn't exist
+        mkdir -p actions-data-download
+        
+        # Copy and validate pkl files
+        echo ""
+        echo "=== Copying and Validating PKL Files ==="
+        
+        # Copy from results/Data/ (where Archiver saves them)
+        if [ -d "results/Data" ]; then
+          cp results/Data/*.pkl actions-data-download/ 2>/dev/null && echo "Copied from results/Data/" || true
+        fi
+        
+        # Also try copying from results/ directly
+        cp results/*.pkl actions-data-download/ 2>/dev/null && echo "Copied from results/" || true
+        
+        # Validate daily pkl files
+        echo ""
+        validate_pkl_files "daily" $DAILY_PKL_MIN_SIZE
+        DAILY_VALID=$?
+        
+        # Validate intraday pkl files
+        echo ""
+        validate_pkl_files "intraday" $INTRADAY_PKL_MIN_SIZE
+        INTRADAY_VALID=$?
+        
+        # Create validation metadata
+        cat > actions-data-download/download_metadata.json << EOF
+        {
+          "download_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "download_time_ist": "$(TZ='Asia/Kolkata' date +%Y-%m-%dT%H:%M:%S%:z)",
+          "daily_valid": $DAILY_VALID,
+          "intraday_valid": $INTRADAY_VALID,
+          "size_thresholds": {
+            "daily_mb": $((DAILY_PKL_MIN_SIZE/1024/1024)),
+            "intraday_mb": $((INTRADAY_PKL_MIN_SIZE/1024/1024))
+          }
+        }
+        EOF
+        
+        echo ""
+        echo "=== Validation Summary ==="
+        if [ "$DAILY_VALID" -gt 0 ] || [ "$INTRADAY_VALID" -gt 0 ]; then
+          echo "✅ Found valid pkl files - daily: $DAILY_VALID, intraday: $INTRADAY_VALID"
+        else
+          echo "⚠️ No valid pkl files found"
+        fi
+        
+        echo ""
+        echo "=== Contents of actions-data-download ==="
+        ls -la actions-data-download/
+        git status
+        
+        # Export validation status for later steps
+        echo "DAILY_VALID=$DAILY_VALID" >> $GITHUB_ENV
+        echo "INTRADAY_VALID=$INTRADAY_VALID" >> $GITHUB_ENV
+      env:
+        GITHUB_TOKEN : ${{secrets.GITHUB_TOKEN}}
+        RUNNER : "GitHub_Actions"
+
+    - name: Fallback - Create pkl from ticks.json.zip with validation
+      shell: bash
+      continue-on-error: true
+      if: ${{ inputs.skipDownload == '' && startsWith(runner.os, 'Linux' ) && env.DAILY_VALID == '0' && env.INTRADAY_VALID == '0' }}
+      run: |
+        DAILY_PKL_MIN_SIZE=25000000
+        INTRADAY_PKL_MIN_SIZE=800000
+        
+        echo "No valid pkl files found, trying ticks.json.zip fallback..."
+        
+        # Download ticks.json.zip
+        TICKS_URL="https://raw.githubusercontent.com/pkjmesra/PKScreener/actions-data-download/results/Data/ticks.json.zip"
+        curl -sL -o /tmp/ticks.json.zip "$TICKS_URL" || true
+        
+        # Download ticks.json directly as fallback
+        TICKS_JSON_URL="https://raw.githubusercontent.com/pkjmesra/PKBrokers/main/pkbrokers/kite/examples/results/Data/ticks.json"
+        curl -sL -o /tmp/ticks.json "$TICKS_JSON_URL" || true
+        
+        # Check zip file size
+        if [ -f /tmp/ticks.json.zip ] && [ -s /tmp/ticks.json.zip ]; then
+          ZIP_SIZE=$(stat -c%s /tmp/ticks.json.zip 2>/dev/null || stat -f%z /tmp/ticks.json.zip)
+          echo "Downloaded ticks.json.zip - size: $((ZIP_SIZE/1024/1024)) MB"
+          
+          if [ "$ZIP_SIZE" -gt 800000 ]; then  # At least 800KB
+            echo "Extracting ticks.json.zip..."
+            unzip -o /tmp/ticks.json.zip -d /tmp/ 2>/dev/null || true
+          else
+            echo "⚠️ ticks.json.zip too small, skipping extraction"
+          fi
+        fi
+        
+        # Check JSON file size
+        if [ -f /tmp/ticks.json ] && [ -s /tmp/ticks.json ]; then
+          JSON_SIZE=$(stat -c%s /tmp/ticks.json 2>/dev/null || stat -f%z /tmp/ticks.json)
+          echo "Found ticks.json - size: $((JSON_SIZE/1024/1024)) MB"
+          
+          if [ "$JSON_SIZE" -gt 800000 ]; then  # At least 800KB
+            echo "Converting ticks.json to pickle format..."
+            python3 .github/workflows/ticks_to_pickle.py --ticks /tmp/ticks.json --output actions-data-download
+            
+            # Validate generated pkl files
+            echo ""
+            echo "=== Validating generated pkl files ==="
+            for pkl_file in actions-data-download/*.pkl; do
+              if [ -f "$pkl_file" ]; then
+                file_size=$(stat -c%s "$pkl_file" 2>/dev/null || stat -f%z "$pkl_file")
+                size_mb=$((file_size/1024/1024))
+                
+                if [[ "$pkl_file" == *"intraday"* ]]; then
+                  if [ "$file_size" -ge "$INTRADAY_PKL_MIN_SIZE" ]; then
+                    echo "✅ Valid intraday pkl: $(basename "$pkl_file") - ${size_mb} MB"
+                  else
+                    echo "⚠️ Undersized intraday pkl: $(basename "$pkl_file") - ${size_mb} MB"
+                  fi
+                else
+                  if [ "$file_size" -ge "$DAILY_PKL_MIN_SIZE" ]; then
+                    echo "✅ Valid daily pkl: $(basename "$pkl_file") - ${size_mb} MB"
+                  else
+                    echo "⚠️ Undersized daily pkl: $(basename "$pkl_file") - ${size_mb} MB"
+                  fi
+                fi
+              fi
+            done
+          else
+            echo "⚠️ ticks.json too small, skipping conversion"
+          fi
+        else
+          echo "Could not find ticks.json"
+        fi
+        
+        ls -la actions-data-download/*.pkl 2>/dev/null || echo "No pkl files created"
+      env:
+        GITHUB_TOKEN : ${{secrets.GITHUB_TOKEN}}
+
+    - name: Download and Validate 52 week Stock Data on Windows
+      continue-on-error: true
+      if: ${{ inputs.skipDownload == '' && startsWith(runner.os, 'Windows' ) }}
+      shell: cmd
+      id: downloader
+      run: |
+        rmdir /s /q actions-data-download
+        mkdir actions-data-download
+        rmdir /s /q results
+        mkdir results
+        pkscreenercli.exe -d -a Y
+      env:
+        GITHUB_TOKEN : ${{secrets.GITHUB_TOKEN}}
+        RUNNER : "GitHub_Actions"
+            
+    - name: Download Intraday Stock Data on Windows
+      continue-on-error: true
+      if: ${{ inputs.skipDownload == '' && startsWith(runner.os, 'Windows' ) }}
+      shell: cmd
+      id: intradaydownloader
+      run: |
+        pkscreenercli.exe -d -a Y -i 1m
+      env:
+        GITHUB_TOKEN : ${{secrets.GITHUB_TOKEN}}
+        RUNNER : "GitHub_Actions"
+
+    - name: Copy and Validate Stock Data Pickles on Windows
+      continue-on-error: true
+      if: ${{ inputs.skipDownload == '' && startsWith(runner.os, 'Windows' ) }}
+      shell: bash
+      run: |
+        DAILY_PKL_MIN_SIZE=25000000
+        INTRADAY_PKL_MIN_SIZE=800000
+        
+        # Copy files
+        copy results\*DB.pkl actions-data-download
+        copy results\stock_data_*.pkl actions-data-download
+        
+        # Validate files
+        echo ""
+        echo "=== Validating PKL Files (Windows) ==="
+        
+        DAILY_VALID=0
+        INTRADAY_VALID=0
+        
+        for pkl_file in actions-data-download/*.pkl; do
+          if [ -f "$pkl_file" ]; then
+            # Use PowerShell to get file size on Windows
+            file_size=$(powershell -Command "(Get-Item '$pkl_file').Length" 2>/dev/null || echo "0")
+            size_mb=$((file_size/1024/1024))
+            
+            if [[ "$pkl_file" == *"intraday"* ]]; then
+              if [ "$file_size" -ge "$INTRADAY_PKL_MIN_SIZE" ]; then
+                echo "✅ Valid intraday pkl: $(basename "$pkl_file") - ${size_mb} MB"
+                INTRADAY_VALID=$((INTRADAY_VALID + 1))
+              else
+                echo "⚠️ Undersized intraday pkl: $(basename "$pkl_file") - ${size_mb} MB"
+              fi
+            else
+              if [ "$file_size" -ge "$DAILY_PKL_MIN_SIZE" ]; then
+                echo "✅ Valid daily pkl: $(basename "$pkl_file") - ${size_mb} MB"
+                DAILY_VALID=$((DAILY_VALID + 1))
+              else
+                echo "⚠️ Undersized daily pkl: $(basename "$pkl_file") - ${size_mb} MB"
+              fi
+            fi
+          fi
+        done
+        
+        echo ""
+        echo "=== Validation Summary (Windows) ==="
+        echo "Daily valid files: $DAILY_VALID"
+        echo "Intraday valid files: $INTRADAY_VALID"
+        
+        # Export validation status
+        echo "DAILY_VALID=$DAILY_VALID" >> $GITHUB_ENV
+        echo "INTRADAY_VALID=$INTRADAY_VALID" >> $GITHUB_ENV
+        
+    - name: Push Validated Pickle Data for stock data
+      if: ${{ inputs.skipDownload == '' }}
+      continue-on-error: true
+      shell: bash
+      run: |
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+        git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+        git remote update
+        git fetch
+        
+        # Count files to commit
+        FILES_TO_COMMIT=0
+        
+        # Add only files that meet size requirements
+        DAILY_PKL_MIN_SIZE=25000000
+        INTRADAY_PKL_MIN_SIZE=800000
+        
+        for pkl_file in actions-data-download/*.pkl; do
+          if [ -f "$pkl_file" ]; then
+            file_size=$(stat -c%s "$pkl_file" 2>/dev/null || stat -f%z "$pkl_file")
+            
+            if [[ "$pkl_file" == *"intraday"* ]]; then
+              if [ "$file_size" -ge "$INTRADAY_PKL_MIN_SIZE" ]; then
+                git add -f "$pkl_file"
+                FILES_TO_COMMIT=$((FILES_TO_COMMIT + 1))
+              fi
+            else
+              if [ "$file_size" -ge "$DAILY_PKL_MIN_SIZE" ]; then
+                git add -f "$pkl_file"
+                FILES_TO_COMMIT=$((FILES_TO_COMMIT + 1))
+              fi
+            fi
+          fi
+        done
+        
+        # Add metadata file if it exists
+        if [ -f "actions-data-download/download_metadata.json" ]; then
+          git add -f actions-data-download/download_metadata.json
+          FILES_TO_COMMIT=$((FILES_TO_COMMIT + 1))
+        fi
+        
+        if [ "$FILES_TO_COMMIT" -gt 0 ]; then
+          # Get sizes for commit message
+          DAILY_SIZE=$(ls -l actions-data-download/*.pkl 2>/dev/null | grep -v intraday | head -1 | awk '{print $5}' || echo "0")
+          DAILY_MB=$((DAILY_SIZE/1024/1024))
+          
+          INTRADAY_SIZE=$(ls -l actions-data-download/intraday*.pkl 2>/dev/null | head -1 | awk '{print $5}' || echo "0")
+          INTRADAY_MB=$((INTRADAY_SIZE/1024/1024))
+          
+          git commit -m "GitHub-Action-Workflow-Market-Data-Download - daily:${DAILY_MB}MB intraday:${INTRADAY_MB}MB [files:$FILES_TO_COMMIT]"
+          git push -v -u origin +actions-data-download
+          echo "✅ Pushed $FILES_TO_COMMIT validated files"
+        else
+          echo "No valid files to commit (all files below size thresholds)"
+        fi
+      env:
+        GITHUB_TOKEN : ${{secrets.GITHUB_TOKEN}}
+    
+    - name: Trigger Intraday analysis scan
+      continue-on-error: true
+      shell: bash
+      run: |
+        pip3 install pkscreener
+        python3 .github/workflows/workflowtriggers.py --runintradayanalysis -u -1001785195297
+      env:
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        RUNNER : "GitHub_Actions"
+
+    - name: Delete this workflow run
+      continue-on-error: true
+      if: ${{ inputs.skipDownload == '' && startsWith(runner.os, 'Linux' ) }}
+      shell: bash
+      run: |
+        gh run list --status success --limit 1000 --json databaseId -q '.[].databaseId' | xargs -IID gh api "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/actions/runs/ID" -X DELETE
+        gh run list --status cancelled --limit 1000 --json databaseId -q '.[].databaseId' | xargs -IID gh api "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/actions/runs/ID" -X DELETE
+      env:
+        GH_TOKEN : ${{secrets.GITHUB_TOKEN}}

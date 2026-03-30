@@ -1,0 +1,68 @@
+name: PyPI Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: v0.40.0
+          cache: true
+
+      - name: Build package
+        run: pixi run uv build
+
+      - name: List built packages
+        run: ls -lh dist/
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: pypi-packages-${{ github.sha }}
+          path: dist
+
+  upload-release:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: pypi-packages-${{ github.sha }}
+          path: dist
+
+      - name: Upload to release
+        uses: AButler/upload-release-assets@v3.0
+        with:
+          files: 'dist/*'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'release'
+    permissions:
+      id-token: write  # Required for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: pypi-packages-${{ github.sha }}
+          path: dist
+
+      - name: List packages
+        run: ls -lh dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.pypi_password }}

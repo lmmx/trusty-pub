@@ -1,0 +1,183 @@
+name: tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs: {}
+
+permissions:
+  contents: read  # to fetch code
+  actions: write  # to cancel previous workflows
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flake8:
+    name: "Lint check with flake8"
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6
+        with:
+            python-version: "3.12"
+            cache: "pip"
+            cache-dependency-path: "pyproject.toml"
+      - name: Install linting dependencies
+        run: |
+          python3 -m pip install -U flake8
+      - name: Lint with flake8
+        run: |
+          python3 -m flake8 --select=E9,F63,F7,F82,E225,E251 --show-source --statistics
+  pylint:
+    name: "Lint check with pylint"
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6
+        with:
+            python-version: "3.12"
+            cache: "pip"
+            cache-dependency-path: "pyproject.toml"
+      - name: Install linting dependencies
+        run: |
+          python3 -m pip install -U pylint
+      - name: Lint module files with pylint
+        run: |
+          PYLINT_ARGS="-efail -wfail -cfail -rfail"
+          python3 -m pylint $(find optax -name '*.py' | grep -v 'test.py' | xargs) -d E1102 || pylint-exit $PYLINT_ARGS $?
+      - name: Lint test files with pylint
+        run: |
+          PYLINT_ARGS="-efail -wfail -cfail -rfail"
+          python3 -m pylint $(find optax -name '*_test.py' | xargs) -d W0212,E1102 || pylint-exit $PYLINT_ARGS $?
+      - name: Lint check quote consistency
+        run: |
+          python3 -m pylint $(find optax -name '*.py' | xargs) \
+            --disable=R,C,W,E --enable=inconsistent-quotes --check-quote-consistency=y
+  build-and-pytype:
+    needs: [pre-commit, flake8, pylint, ruff-lint]  # do not run tests if linting fails
+    name: "Build and check types with pytype"
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6
+        with:
+            python-version: "3.12"
+            cache: "pip"
+            cache-dependency-path: "pyproject.toml"
+      - name: Check if the package builds
+        run: |
+          TEMP_DIR=$(mktemp -d)
+          python3 -m pip install --quiet -U pip uv
+          python3 -m uv pip install -q -U setuptools wheel build
+          python3 -m build
+          python3 -m pip wheel --no-deps dist/optax-*.tar.gz --wheel-dir "${TEMP_DIR}"
+          python3 -m pip install -q "${TEMP_DIR}/optax-"*.whl
+      - name: Check types with pytype
+        run: |
+          python3 -m pip install -q pytype
+          python3 -m pytype "optax" -j auto --keep-going --disable import-error
+  ruff-lint:
+    name: "Lint check with ruff"
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6
+        with:
+            python-version: "3.12"
+            cache: "pip"
+            cache-dependency-path: "pyproject.toml"
+      - name: Install ruff and lint check
+        run: |
+          python3 -m pip install -U ruff
+          ruff check .
+  pre-commit:
+    name: "Pre-commit check - `pre-commit run -a`"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+  doctests:
+    needs: [pre-commit, flake8, pylint, ruff-lint]  # do not run doctests if linting fails
+    name: "Doctests"
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6
+        with:
+            python-version: "3.12"  # only build docs with a somewhat latest python
+            cache: "pip"
+            cache-dependency-path: 'pyproject.toml'
+      - name: Build docs and run doctests
+        run: |
+          python3 -m pip install -q -e ".[docs]"
+          cd docs
+          make html
+          make doctest # run doctests
+        shell: bash
+  pytest-tests:
+    needs: [pre-commit, flake8, pylint, ruff-lint]  # do not run tests if linting fails
+    name: "Pytest ${{ matrix.python-version }} on ${{ matrix.os }} jax=${{ matrix.jax-version }}"
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
+        os: [ubuntu-latest]
+        jax-version: [newest]
+        include:
+          - python-version: "3.10"
+            os: "ubuntu-latest"
+            jax-version: "0.5.3"  # Keep version in sync with pyproject.toml and copy.bara.sky!
+          - python-version: "3.12"
+            os: "ubuntu-latest"
+            jax-version: "nightly"
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6
+        with:
+            python-version: "${{ matrix.python-version }}"
+            cache: "pip"
+            cache-dependency-path: 'pyproject.toml'
+      - name: Install depedencies
+        run: |
+          export JAX_VERSION="${{ matrix.jax-version }}"  # set the JAX version
+
+          python3 -m pip install -q -U pip uv
+          python3 -m uv pip install -q -U pytest "pytest-xdist[psutil]"
+
+          # Install the requested JAX version
+          if [ -z "${JAX_VERSION-}" ]; then
+            : # use version installed in requirements above
+          elif [ "$JAX_VERSION" = "newest" ]; then
+            python3 -m uv pip install -q -U jax jaxlib
+          elif [ "$JAX_VERSION" = "nightly" ]; then
+            python3 -m uv pip install -q -U --pre jax jaxlib -i https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/
+          else
+            python3 -m uv pip install -q "jax==${JAX_VERSION}" "jaxlib==${JAX_VERSION}"
+          fi
+
+          python3 -m uv pip install -q ".[test]"
+      - name: Run pytests
+        run: |
+          TEMP_DIR=$(mktemp -d)
+          cd "${TEMP_DIR}"
+          python3 -m pytest -n auto --pyargs optax
+  markdown-link-check:
+    name: "Check links in markdown files"
+    runs-on: "ubuntu-latest"
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+    - name: Check links
+      uses: gaurav-nelson/github-action-markdown-link-check@d53a906aa6b22b8979d33bc86170567e619495ec # v1.0.15
+      with:
+        use-quiet-mode: yes
+        use-verbose-mode: yes
+        config-file: 'mlc_config.json'

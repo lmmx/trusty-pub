@@ -1,0 +1,77 @@
+
+name: continuous-integration
+on:
+  push:
+    branches: [master]
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  pull_request:
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.10"
+    - uses: pre-commit/action@v3.0.1
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+        sphinx-version: ['']
+        include:
+          - python-version: '3.12'
+            sphinx-version: 'dev'
+          - python-version: '3.11'
+            sphinx-version: '7'
+          - python-version: '3.10'
+            sphinx-version: '6'
+          - python-version: '3.9'
+            sphinx-version: '5'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Python versions
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Python dependencies
+        run: |
+          set -eo pipefail
+          if [[ "${{ matrix.sphinx-version }}" != "" ]]; then
+            if [[ "${{ matrix.sphinx-version }}" == "dev" ]]; then
+              SPHINX_INSTALL="git+https://github.com/sphinx-doc/sphinx.git"
+            else
+              SPHINX_INSTALL="sphinx==${{ matrix.sphinx-version }}.*"
+            fi
+          fi
+          set -x
+          python -VV
+          python -m site
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements_dev.txt $SPHINX_INSTALL
+      - name: Install Package
+        run: |
+          python -m pip install .
+      - name: Run Tests for ${{ matrix.python-version }}
+        run: |
+          python -m tox
+  vale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install docutils
+        run: sudo apt-get install -y docutils
+
+      - name: Lint with Vale
+        uses: errata-ai/vale-action@reviewdog
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        with:
+          files: docs
+          # github-pr-check, github-pr-review, github-check
+          reporter: github-pr-check

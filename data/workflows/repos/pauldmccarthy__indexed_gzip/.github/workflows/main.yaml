@@ -1,0 +1,235 @@
+# This workflow runs the full set of of indexed_gzip
+# unit tests on a range of different versions of Python,
+# and on different operating systems and architectures.
+# It is run on pushes to the main branch.
+
+
+on:
+  push:
+    branches:
+      - main
+
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+
+  # Quick tests run on all OSes/python versions
+  test-indexed_gzip:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:             ["ubuntu-latest", "macos-latest", "windows-latest"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        extra-args:     ["", "--concat"]
+
+    env:
+      PLATFORM:       ${{ matrix.os }}
+      PYTHON_VERSION: ${{ matrix.python-version }}
+      TEST_SUITE:     "not (slow_test or zran_test)"
+      EXTRA_ARGS:     ${{ matrix.extra-args }}
+      ENV_DIR:        ./test.env
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Create test environment
+        run:  bash ./.ci/create_test_env.sh "$ENV_DIR"
+      - name: Log test environment
+        run: |
+          source ./.ci/activate_env.sh "$ENV_DIR"
+          python -V
+          pip freeze
+      - name: Download zlib
+        if:   ${{ matrix.os == 'windows-latest' }}
+        run:  bash ./.ci/download_zlib.sh
+      - name: Build indexed_gzip
+        run:  bash ./.ci/build_dev_indexed_gzip.sh "$ENV_DIR"
+      - name: Run tests
+        if:   ${{ !(matrix.os             == 'windows-latest' &&
+                   (matrix.python-version == '3.12' ||
+                    matrix.python-version == '3.13')) }}
+        run:  bash  ./.ci/run_tests.sh "$ENV_DIR"
+
+
+  # Slow indexed_gzip tests run on all OSes
+  test-indexed_gzip-slow:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+         - os:         "windows-latest"
+           test-suite: "indexed_gzip_test and slow_test"
+           extra-args: ""
+         - os:         "macos-latest"
+           test-suite: "indexed_gzip_test and slow_test"
+           extra-args: ""
+         - os:         "ubuntu-latest"
+           test-suite: "indexed_gzip_test and slow_test"
+           extra-args: ""
+           nelems:     ""
+         - os:         "windows-latest"
+           test-suite: "indexed_gzip_test and slow_test"
+           extra-args: "--concat"
+           nelems:     ""
+         - os:         "macos-latest"
+           test-suite: "indexed_gzip_test and slow_test"
+           extra-args: "--concat"
+           nelems:     ""
+         - os:         "ubuntu-latest"
+           test-suite: "indexed_gzip_test and slow_test"
+           extra-args: "--concat"
+           nelems:     ""
+         # mmap test errors under windos (I think because
+         # memory needs to be alliocated for the mmap, but
+         # there's not enough RAM)
+         - os:         "macos-latest"
+           test-suite: "indexed_gzip_test"
+           extra-args: "--use_mmap"
+           nelems:     "805306368"
+         - os:         "ubuntu-latest"
+           test-suite: "indexed_gzip_test"
+           extra-args: "--use_mmap"
+           nelems:     "805306368"
+
+    env:
+      PLATFORM:       ${{ matrix.os }}
+      PYTHON_VERSION: 3.11
+      TEST_SUITE:     ${{ matrix.test-suite }}
+      EXTRA_ARGS:     ${{ matrix.extra-args }}
+      NELEMS:         ${{ matrix.nelems }}
+      ENV_DIR:        ./test.env
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Create test environment
+        run:  bash ./.ci/create_test_env.sh "$ENV_DIR"
+      - name: Log test environment
+        run: |
+          source ./.ci/activate_env.sh "$ENV_DIR"
+          python -V
+          pip freeze
+      - name: Download zlib
+        if:   ${{ matrix.os == 'windows-latest' }}
+        run:  bash ./.ci/download_zlib.sh
+      - name: Build indexed_gzip
+        run:  bash ./.ci/build_dev_indexed_gzip.sh "$ENV_DIR"
+      - name: Run tests
+        run:  bash  ./.ci/run_tests.sh "$ENV_DIR"
+
+
+  # zran tests run only on ubuntu
+  test-zran:
+    runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        include:
+          - niters:       "5000"
+            nelems:       "rnd_1000000"
+            test-pattern: "not test_readbuf_spacing_sizes and not test_seek_then_read_block"
+            extra-args:   ""
+          - niters:       "5000"
+            nelems:       "rnd_1000000"
+            test-pattern: "not test_readbuf_spacing_sizes and not test_seek_then_read_block"
+            extra-args:   "--concat"
+          - niters:       "5000"
+            nelems:       "rnd_1000000"
+            test-pattern: "test_readbuf_spacing_sizes"
+            extra-args:   ""
+          - niters:       "5000"
+            nelems:       "rnd_1000000"
+            test-pattern: "test_readbuf_spacing_sizes"
+            extra-args:   "--concat"
+          - niters:       "5000"
+            nelems:       "rnd_1000000"
+            test-pattern: "test_seek_then_read_block"
+            extra-args:   ""
+          - niters:       "5000"
+            nelems:       "rnd_1000000"
+            test-pattern: "test_seek_then_read_block"
+            extra-args:   "--concat"
+          - niters:       "5000"
+            nelems:       "rnd_2000000"
+            test-pattern: "not test_readbuf_spacing_sizes and not test_seek_then_read_block"
+            extra-args:   ""
+          - niters:       "5000"
+            nelems:       "rnd_2000000"
+            test-pattern: "not test_readbuf_spacing_sizes and not test_seek_then_read_block"
+            extra-args:   "--concat"
+          - niters:       "500"
+            nelems:       "rnd_2000000"
+            test-pattern: "test_readbuf_spacing_sizes"
+            extra-args:   ""
+          - niters:       "500"
+            nelems:       "rnd_2000000"
+            test-pattern: "test_readbuf_spacing_sizes"
+            extra-args:   "--concat"
+          - niters:       "500"
+            nelems:       "rnd_2000000"
+            test-pattern: "test_seek_then_read_block"
+            extra-args:   ""
+          - niters:       "500"
+            nelems:       "rnd_2000000"
+            test-pattern: "test_seek_then_read_block"
+            extra-args:   "--concat"
+          - niters:       "1000"
+            nelems:       "rnd_800000000"
+            extra-args:   "--use_mmap"
+            test-pattern: "not test_readbuf_spacing_sizes and not test_seek_then_read_block"
+          - niters:       "1000"
+            nelems:       "rnd_800000000"
+            extra-args:   "--use_mmap --concat"
+            test-pattern: "not test_readbuf_spacing_sizes and not test_seek_then_read_block"
+          - niters:       "50"
+            nelems:       "rnd_800000000"
+            extra-args:   "--use_mmap"
+            test-pattern: "test_readbuf_spacing_sizes"
+          - niters:       "50"
+            nelems:       "rnd_800000000"
+            extra-args:   "--use_mmap --concat"
+            test-pattern: "test_readbuf_spacing_sizes"
+          - niters:       "25"
+            nelems:       "rnd_800000000"
+            extra-args:   "--use_mmap"
+            test-pattern: "test_seek_then_read_block"
+          - niters:       "25"
+            nelems:       "rnd_800000000"
+            extra-args:   "--use_mmap --concat"
+            test-pattern: "test_seek_then_read_block"
+
+    env:
+      PLATFORM:       ${{ matrix.os }}
+      PYTHON_VERSION: "3.12"
+      TEST_SUITE:     "zran_test"
+      TEST_PATTERN:   ${{ matrix.test-pattern }}
+      EXTRA_ARGS:     ${{ matrix.extra-args }}
+      NELEMS:         ${{ matrix.nelems }}
+      NITERS:         ${{ matrix.niters }}
+      ENV_DIR:        ./test.env
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Create test environment
+        run:  bash ./.ci/create_test_env.sh "$ENV_DIR"
+      - name: Log test environment
+        run: |
+          source ./.ci/activate_env.sh "$ENV_DIR"
+          python -V
+          pip freeze
+      - name: Build indexed_gzip
+        run:  bash ./.ci/build_dev_indexed_gzip.sh "$ENV_DIR"
+      - name: Run tests
+        run:  bash  ./.ci/run_tests.sh "$ENV_DIR"

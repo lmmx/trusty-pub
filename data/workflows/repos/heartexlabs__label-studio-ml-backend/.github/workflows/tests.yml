@@ -1,0 +1,266 @@
+name: "Tests"
+
+on:
+  push:
+    branches:
+      - master
+      - 'release/**'
+    paths-ignore:
+      - '**/*.md'  # Ignore changes to all .md files
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      - master
+      - 'release/**'
+    paths-ignore:
+      - '**/*.md'  # Ignore changes to all .md files
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+env:
+  CACHE_NAME_PREFIX: v1
+  DOCKER_BUILD_CONFIG_BRANCH: "master"
+  DOCKER_BUILD_CONFIG_PATH: ".github/docker-build-config.yml"
+  DOCKER_EXAMPLES_DIRECTORY: "label_studio_ml/examples"
+  SLACK_NOTIFICATION_CHANNEL_ID: "CKL2D6D2P"
+
+jobs:
+  run_pytest:
+    name: Run pytest
+    if: needs.calculate_matrix.outputs.matrix-include != '[]'
+    needs: calculate_matrix
+    runs-on: ${{ matrix.runs_on || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.calculate_matrix.outputs.matrix-include) }}
+    env:
+      LOG_DIR: pytest_logs
+      collect_analytics: false
+      TEST_WITH_CPU: ${{ matrix.backend_dir_name == 'segment_anything_model' }}
+    steps:
+      - uses: hmarr/debug-action@v3.0.0
+
+      - name: Extract branch name on direct push to a branch
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
+        run: |
+          echo "BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_ENV
+
+      - name: Extract branch name on 'pull_request'
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "BRANCH_NAME=$(echo ${GITHUB_HEAD_REF})" >> $GITHUB_ENV
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: "${{ env.GITHUB_SHA }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - uses: actions/cache@v5
+        name: Configure pip cache
+        id: pip-cache
+        with:
+          path: ~/.cache/pip
+          key: ${{ env.CACHE_NAME_PREFIX }}-${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}-${{ hashFiles('**/requirements-test.txt') }}
+          restore-keys: |
+            ${{ env.CACHE_NAME_PREFIX }}-${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get clean
+          sudo apt-get update
+          sudo apt-get install virtualenv libsasl2-dev python3-dev libldap2-dev libssl-dev
+          pip install -r tests/requirements-test.txt
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Check pytest version
+        run: pytest --version
+
+      - name: Build the stack
+        env:
+          DOCKER_BUILDKIT: 1
+          TEST_ENV: "true"
+        run: docker compose -f label_studio_ml/examples/${{ matrix.backend_dir_name }}/docker-compose.yml up ${{ matrix.skip_pytests != 'true' && '' || '-d' }} --build
+
+      - name: Wait for stack
+        if: ${{ matrix.skip_pytests != 'true' }}
+        timeout-minutes: 20
+        run: |
+          while [ "$(curl -s -o /dev/null -L -w ''%{http_code}'' "http://localhost:9090/health")" != "200" ]; do
+            echo "=> Waiting for service to become available" && sleep 2s
+          done
+
+      - name: Run general functional tests
+        if: ${{ matrix.skip_pytests != 'true' }}
+        env:
+          ML_BACKEND: ${{ matrix.backend_dir_name }}
+        run: |
+          pytest tests/ -vvv --ignore-glob='**/logs/*' --ignore-glob='**/data/*' --cov=. --cov-report=xml:tests/${{ matrix.backend_dir_name }}_coverage.xml
+
+      - name: Run per-ml-backend tests
+        if: ${{ matrix.skip_pytests != 'true' }}
+        env:
+          ML_BACKEND: ${{ matrix.backend_dir_name }}
+          TEST_ENV: "true"
+        run: |
+          docker compose -f label_studio_ml/examples/${{ matrix.backend_dir_name }}/docker-compose.yml exec -T ${{ matrix.backend_dir_name }} pytest -vvv --cov --cov-report=xml:/tmp/coverage.xml
+
+      - name: Copy per-ml-backend coverage.xml from the container
+        if: ${{ matrix.skip_pytests != 'true' }}
+        run: |
+          docker compose -f label_studio_ml/examples/${{ matrix.backend_dir_name }}/docker-compose.yml cp ${{ matrix.backend_dir_name }}:/tmp/coverage.xml label_studio_ml/examples/${{ matrix.backend_dir_name }}/coverage.xml
+
+      - name: Pull the logs
+        if: always() && matrix.skip_pytests != 'true'
+        env:
+          DOCKER_BUILDKIT: 1
+        run: docker compose -f label_studio_ml/examples/${{ matrix.backend_dir_name }}/docker-compose.yml logs
+
+      - name: "Upload general coverage to Codecov"
+        if: ${{ matrix.backend_dir_name == 'the_simplest_backend' }}
+        uses: codecov/codecov-action@v5.5.2
+        with:
+          name: codecov-general
+          files: ./tests/${{ matrix.backend_dir_name }}_coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: "Upload ml-backend ${{ matrix.backend_dir_name }} coverage to Codecov"
+        if: ${{ matrix.backend_dir_name == 'the_simplest_backend' }}
+        uses: codecov/codecov-action@v5.5.2
+        with:
+          name: codecov-${{ matrix.backend_dir_name }}
+          files: ./label_studio_ml/examples/${{ matrix.backend_dir_name }}/coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  calculate_matrix:
+    name: "Calculate test matrix"
+    runs-on: ubuntu-latest
+    outputs:
+      matrix-include: ${{ steps.matrix.outputs.matrix-include }}
+    steps:
+      - uses: hmarr/debug-action@v3.0.0
+
+      - run: npm install js-yaml
+
+      - name: Build matrix
+        id: matrix
+        uses: actions/github-script@v8
+        env:
+          BASE_REF: "${{ github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_REF: "${{ github.event.pull_request.head.sha || github.event.after || github.sha }}"
+          EVENT_NAME: "${{ github.event_name }}"
+        with:
+          script: |
+            const yaml = require('js-yaml');
+
+            const {owner, repo} = context.repo;
+            
+            const default_branch = process.env.DOCKER_BUILD_CONFIG_BRANCH;
+            const docker_build_config_path = process.env.DOCKER_BUILD_CONFIG_PATH;
+            const docker_examples_directory = process.env.DOCKER_EXAMPLES_DIRECTORY;
+            const base_ref = process.env.BASE_REF;
+            const head_ref = process.env.HEAD_REF;
+            const event_name = process.env.EVENT_NAME;
+            
+            const docker_build_config_blob = await github.rest.repos.getContent({
+              owner: owner,
+              repo: repo,
+              ref: default_branch,
+              path: docker_build_config_path,
+            });
+            const docker_build_config_content = Buffer.from(docker_build_config_blob.data.content, docker_build_config_blob.data.encoding).toString("utf8");
+            const docker_build_config = yaml.load(docker_build_config_content);
+            
+            let backends = [];
+            if (event_name === 'schedule' || event_name === 'workflow_dispatch') { 
+              const {data: examples} = await github.rest.repos.getContent({
+                owner: owner,
+                repo: repo,
+                ref: head_ref,
+                path: docker_examples_directory,
+              });
+              backends = new Set(examples.filter(e => e.type === 'dir').map(e => e.path.split('/')[2]));
+            } else {
+              const {data: compare} = await github.rest.repos.compareCommits({
+                owner,
+                repo,
+                base: base_ref,
+                head: head_ref,
+              });
+              backends = new Set(compare.files.filter(e => e.filename.startsWith(docker_examples_directory)).map(e => e.filename.split('/')[2]));
+            }
+            
+            let matrixInclude = [];
+            for (const backend of backends) {
+              const config = docker_build_config.find(e => e.backend_dir_name === backend)
+              let runs_on = "ubuntu-latest";
+              let skip_pytests = "false";
+              if (config) {
+                console.log(`Config for ${backend}:`);
+                console.log(config);
+                if ((config.bypass ?? []).includes("pytests")) {
+                  console.log(`Skipping pytests for ${backend}`);
+                  skip_pytests = "true";
+                }
+                runs_on = config.runs_on ?? "ubuntu-latest";
+              } else {
+                console.log(`Could not find config for ${backend}`);
+              }
+              matrixInclude.push({"backend_dir_name": backend, "runs_on": runs_on, "skip_pytests": skip_pytests});
+            }
+            console.log(`Matrix calculation result:`);
+            console.log(matrixInclude);
+            core.setOutput("matrix-include", matrixInclude);
+
+  dependabot-auto-merge:
+    name: "Auto Merge dependabot PR"
+    if: |
+      always() &&
+      needs.run_pytest.result == 'success' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      ( startsWith(github.head_ref, 'dependabot/npm_and_yarn/') || startsWith(github.head_ref, 'dependabot/pip/') )
+    runs-on: ubuntu-latest
+    needs:
+      - run_pytest
+    steps:
+      - name: Enable auto-merge for Dependabot PRs
+        run: gh pr merge --admin --squash "${PR_URL}"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
+
+  notification:
+    name: "Send Slack Notification"
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    needs:
+      - run_pytest
+    steps:
+      - name: Send Slack Notification
+        if: always()
+        uses: slackapi/slack-github-action@v2.1.1
+        env:
+          WORKFLOW: "<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|workflow>"
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_LSE_BOT_TOKEN }}
+          payload: |
+            channel: "${{ env.SLACK_NOTIFICATION_CHANNEL_ID }}"
+            text: >+
+              :x: Scheduled test workflow failed
+              [ ${{ env.WORKFLOW }} ]

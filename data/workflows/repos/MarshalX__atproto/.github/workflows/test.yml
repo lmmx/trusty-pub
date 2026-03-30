@@ -1,0 +1,39 @@
+name: Unit tests
+
+on: [ pull_request ]
+
+permissions:
+  contents: read
+
+jobs:
+  unit_tests:
+    strategy:
+      matrix:
+        os: [ macos-latest, ubuntu-latest, windows-latest ]
+        python-version: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.14" ]
+
+    runs-on: ${{matrix.os}}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository.
+        uses: actions/checkout@v4
+
+      - name: Set up Python.
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup Poetry.
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.2.1
+
+      - name: Install dependencies.
+        run: poetry install --without docs
+
+      - name: Run Tests.
+        run: poetry run pytest

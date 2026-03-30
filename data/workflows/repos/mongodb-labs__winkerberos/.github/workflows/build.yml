@@ -1,0 +1,90 @@
+name: Build
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+     - uses: actions/checkout@v6
+       with:
+        persist-credentials: false
+        # Lowest supported Python
+        python-version: '3.10'
+     - uses: actions/setup-python@v6
+     - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+       with:
+         extra_args: --all-files --hook-stage manual
+     - run: |
+        sudo apt-get install -y cppcheck
+     - run: |
+        cppcheck src/*.*
+
+  docs:
+    runs-on: windows-latest
+    steps:
+     - uses: actions/checkout@v6
+       with:
+        persist-credentials: false
+     - uses: actions/setup-python@v6
+       with:
+        # Lowest supported Python
+        python-version: '3.10'
+     - shell: pwsh
+       run: |
+        pip install sphinx
+        pip install -e .
+        python -m sphinx -b html -W doc doc/_build
+
+  windows-msys2:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        msystem: [MINGW64, MINGW32, UCRT64, CLANG64]
+    name: Build (${{ matrix.msystem }})
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@4f806de0a5a7294ffabaff804b38a9b435a73bda # v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          pacboy: cc:p python:p python-setuptools:p python-sphinx:p
+      - name: Build
+        run: CC=cc python setup.py build
+      - name: Check
+        run: |
+          CC=cc python setup.py build_ext --inplace
+          cd src
+          python -c "import winkerberos;print(winkerberos.__version__)"
+  windows-msvc:
+    runs-on: windows-latest
+    name: Build MSVC
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+      - name: Check
+        run: |
+          pip install -e .
+          python -c "import winkerberos;print(winkerberos.__version__)"

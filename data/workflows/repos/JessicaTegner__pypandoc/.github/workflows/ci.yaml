@@ -1,0 +1,150 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: test-${{ github.ref }}-1
+  cancel-in-progress: true
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  test:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-14, windows-2025, windows-2022]
+        python-version: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15.0-alpha.1", "pypy3.10", "pypy3.11", ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up python
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Print Python Information
+        run: python -VV
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install dependencies
+        run: uv sync --extra tinytex
+      - name: Download pandoc
+        run: uv run python -c "from pypandoc.pandoc_download import download_pandoc; download_pandoc()"
+      - name: Download TinyTeX
+        run: uv run pytinytex download
+      - name: Run tests
+        run: uv run pytest
+
+  builder_pypandoc:
+    needs: [test]
+    runs-on: ubuntu-latest  # Any OS is fine as this wheel is not OS dependent
+    # only run on tagged commits and master branch
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/master'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Build package
+        run: uv build
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypandoc-distributions
+          path: dist/
+          retention-days: 1
+
+  builder_pypandoc_binary:
+    needs: [test]
+    strategy:
+      matrix:
+        os: [macos-15, windows-2022, ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.os }}
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/master'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: all
+      - name: Build binary wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        with:
+          package-dir: binary/
+        env:
+          CIBW_ENVIRONMENT_PASS_LINUX: GITHUB_TOKEN
+          CIBW_BEFORE_ALL: >
+            pip install hatchling &&
+            python3 -c "import sys,os; sys.path.insert(0,'.'); from pypandoc.pandoc_download import download_pandoc; download_pandoc(targetfolder=os.path.join(os.getcwd(),'pypandoc','files'))"
+          CIBW_BEFORE_BUILD: >
+            cp -r pypandoc {package}/pypandoc &&
+            cp README.md {package}/README.md &&
+            cp pyproject.toml {package}/root_pyproject.toml
+          CIBW_BUILD: cp39-*
+          CIBW_ARCHS_LINUX: "auto64 aarch64"
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: ""
+          CIBW_ARCHS_WINDOWS: "AMD64"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypandoc-binary-${{ matrix.os }}-distributions
+          path: wheelhouse/
+          retention-days: 1
+
+  publisher_release:
+    needs: [builder_pypandoc, builder_pypandoc_binary]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+      - name: Publish  to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+
+
+  publisher_latest:
+    needs: [builder_pypandoc, builder_pypandoc_binary]
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+      - name: Make release
+        uses: "marvinpinto/action-automatic-releases@v1.2.1"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: true
+          title: "Latest Development Version"
+          automatic_release_tag: "latest"
+          files: dist/*

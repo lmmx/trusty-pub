@@ -1,0 +1,160 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          fetch-depth: '2'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Tox
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade tox
+
+      - name: Run Pylint
+        run:  tox -e pylint-ci
+
+  test_on_linux:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    name: ${{ matrix.name }} (${{ matrix.os }}, py${{ matrix.python-version }})
+    strategy:
+      fail-fast: False
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+        tox_env: [orange-released]
+        name: [Released]
+        include:
+          - os: ubuntu-latest
+            python-version: '3.14'
+            tox_env: orange-latest
+            name: Latest
+          - os: ubuntu-22.04
+            python-version: '3.11'
+            tox_env: orange-oldest
+            name: Oldest dependencies
+          - os: ubuntu-latest
+            python-version: '3.13'
+            tox_env: pyqt6
+            name: PyQt6
+          - os: ubuntu-latest
+            python-version: '3.14'
+            tox_env: beta
+            name: "Scientific Python nightly wheels"
+
+    services:
+      postgres:
+        image: orangedm/postgres:11
+        env:
+          POSTGRES_USER: postgres_user
+          POSTGRES_PASSWORD: postgres_password
+          POSTGRES_DB: postgres_db
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+      SQLServer:
+        image: mcr.microsoft.com/mssql/server:2017-latest
+        env:
+          ACCEPT_EULA: Y
+          SA_PASSWORD: sqlServerPassw0rd
+        ports:
+          - 1433:1433
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libxcb-shape0 libxcb-cursor0 glibc-tools libegl1
+
+      - name: Install Tox
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade tox
+
+      - name: Skip testing workflows at coverage
+        if: |
+          matrix.python-version == '3.12' && matrix.tox_env == 'orange-released'
+        run: |
+          echo 'SKIP_EXAMPLE_WORKFLOWS=1' >> $GITHUB_ENV
+
+      - name: Run Tox
+        run: catchsegv xvfb-run -a -s "$XVFBARGS" tox -e ${{ matrix.tox_env }}
+        env:
+          XVFBARGS: "-screen 0 1280x1024x24"
+          ORANGE_TEST_DB_URI: postgres://postgres_user:postgres_password@localhost:5432/postgres_db|mssql://SA:sqlServerPassw0rd@localhost:1433
+
+      - name: Upload code coverage
+        if: matrix.python-version == '3.12' && matrix.tox_env == 'orange-released'
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  test_on_macos_and_windows:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    name: ${{ matrix.name }} (${{ matrix.os }}, py${{ matrix.python-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+        tox_env: [orange-released]
+        name: [Released]
+        include:
+          - os: windows-latest
+            python-version: '3.14'
+            tox_env: orange-latest
+            name: Latest
+          - os: macos-latest
+            python-version: '3.14'
+            tox_env: orange-latest
+            name: Latest
+          - os: windows-latest
+            python-version: '3.13'
+            tox_env: pyqt6
+            name: PyQt6
+          - os: macos-latest
+            python-version: '3.13'
+            tox_env: pyqt6
+            name: PyQt6
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade tox
+
+      - name: Test with Tox
+        run: |
+          tox -e ${{ matrix.tox_env }}

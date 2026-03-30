@@ -1,0 +1,45 @@
+name: build
+on:
+  workflow_call:
+
+jobs:
+  # Build python wheels
+  build:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          [
+            macos-latest,
+            ubuntu-latest,
+            ubuntu-24.04-arm,
+            windows-latest,
+            windows-11-arm,
+          ]
+    env:
+      SCCACHE_VERSION: 0.2.13
+      GITHUB_WORKSPACE: "${{github.workspace}}"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Disable scmtools local scheme
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: >-
+          echo LIBCST_NO_LOCAL_SCHEME=1 >> $GITHUB_ENV
+      - name: Enable building wheels for pre-release CPython versions
+        if: github.event_name != 'release'
+        run: echo CIBW_ENABLE=cpython-prerelease >> $GITHUB_ENV
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+      - uses: actions/upload-artifact@v4
+        with:
+          path: wheelhouse/*.whl
+          name: wheels-${{matrix.os}}

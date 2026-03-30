@@ -1,0 +1,131 @@
+# This workflows will upload a Python Package using Twine when a release is created
+# For more information see: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions#publishing-to-package-registries
+
+name: Release plugp100
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_pypi_publish:
+        description: 'Skip PyPI publish'
+        default: 'false'
+        required: false
+  push:
+    branches:
+      - main
+      - next
+      - dev
+#    tags:
+#      - v*.*.*
+
+jobs:
+#  build_vendoring_wheels:
+#    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+#    runs-on: ubuntu-latest
+#    name: Build on ${{ matrix.platform }} with ${{ matrix.python }}
+#
+#    strategy:
+#      matrix:
+#        platform:
+#          - manylinux2014_aarch64
+#          - musllinux_1_1_aarch64
+#          - manylinux2014_armv7l
+#        python: [ python3.9, python3.10 ]
+#
+#    steps:
+#      - name: Check out repository
+#        uses: actions/checkout@v3
+#      - name: Build wheels for ${{ matrix.python }} on ${{ matrix.platform }}
+#        uses: ./.github/actions/python-on-arch
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#        with:
+#          arch: ${{ matrix.platform }}
+#          python: ${{ matrix.python }}
+#          run: |
+#            ${{ matrix.python }} --version
+#            echo "Generate vendoring wheel..."
+#            ${{ matrix.python }} build_tools/build_vendoring.py ./plugp100/_vendor ./.cache-pip
+#            echo "Generate library wheel with the right platform name"
+#            ${{ matrix.python }} build_tools/build_platform_wheel.py ./plugp100/_vendor requirements.txt
+#            ${{ matrix.python }} build_tools/rename_wheels.py ${{ matrix.platform }}
+#      - name: "Upload generated wheel for ${{ matrix.python }} ${{ matrix.platform }}"
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: wheel
+#          path: dist/*
+
+
+  publish_pypi:
+    name: Publish to PyPi
+    runs-on: ubuntu-latest
+    environment: release
+    #    needs: [ build_vendoring_wheels ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GIT_GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Setup Node 20.x
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Semantic Release (Dry Run)
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v6
+        with:
+          semantic_version: 23.0.2
+          branches: |
+            [ 'main', {name: 'next', prerelease: true}, {name: 'dev', channel: 'dev', prerelease: true} ]
+          extra_plugins: |
+            @semantic-release/commit-analyzer@11.1.0
+            @semantic-release/release-notes-generator@12.1.0
+            @semantic-release/git@10.0.1
+            @semantic-release/github@9.2.6
+          dry_run: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_GITHUB_TOKEN }}
+
+      - name: Bump version file
+        run: sed -i 's/__version__ = ".*"/__version__ = \"${{ steps.semantic.outputs.new_release_version }}\"/g' plugp100/__init__.py
+
+      - name: Generate source and wheel distributions
+        run: |
+          uv build
+          ls -R
+
+      - name: Publish source distribution to PyPi
+        if: ${{ github.event.inputs.skip_pypi_publish != 'true' }}
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          uvx twine upload dist/*
+
+      - name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v6
+        with:
+          semantic_version: 23.0.2
+          branches: |
+            [ 'main',  {name: 'next', prerelease: true},  {name: 'dev', channel: 'dev', prerelease: true}]
+          extra_plugins: |
+            @semantic-release/commit-analyzer@11.1.0
+            @semantic-release/release-notes-generator@12.1.0
+            @semantic-release/git@10.0.1
+            @semantic-release/github@9.2.6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_GITHUB_TOKEN }}

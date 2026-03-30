@@ -1,0 +1,100 @@
+name: valgrind-linux-x86
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-valgrind-linux-x86:
+    name: Valgrind (Linux x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Linux x86_64 - Valgrind"
+        uname -a
+        python --version
+        docker --version
+
+    - name: Download and install clang toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      timeout-minutes: 20
+
+    - name: Compile clean test program
+      run: |
+        cat > clean_test.c << 'EOF'
+        #include <stdio.h>
+        #include <stdlib.h>
+        int main() {
+            int* p = (int*)malloc(100 * sizeof(int));
+            p[0] = 42;
+            printf("Value: %d\n", p[0]);
+            free(p);
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-c clean_test.c -g -O0 -o clean_test
+
+    - name: Run Valgrind on clean program (expect no errors)
+      run: |
+        uv run clang-tool-chain-valgrind --leak-check=full --error-exitcode=1 ./clean_test
+      timeout-minutes: 10
+
+    - name: Compile buggy test program
+      run: |
+        cat > leak_test.c << 'EOF'
+        #include <stdio.h>
+        #include <stdlib.h>
+        int main() {
+            int* leaked = (int*)malloc(100 * sizeof(int));
+            leaked[0] = 42;
+            printf("Allocated: %d\n", leaked[0]);
+            /* BUG: forgot to free(leaked) */
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-c leak_test.c -g -O0 -o leak_test
+
+    - name: Run Valgrind on buggy program (expect leak detection)
+      run: |
+        # Valgrind should detect the leak and return exit code 1
+        if uv run clang-tool-chain-valgrind --leak-check=full --error-exitcode=1 ./leak_test; then
+          echo "ERROR: Valgrind should have detected a memory leak but didn't!"
+          exit 1
+        else
+          echo "OK: Valgrind correctly detected the memory leak."
+        fi
+      timeout-minutes: 10
+
+    - name: Compile and test with bundled test data
+      run: |
+        uv run clang-tool-chain-cpp tests/test_data/valgrind_test.cpp -g -O0 -o valgrind_test
+        # This program has intentional bugs - Valgrind should detect them
+        if uv run clang-tool-chain-valgrind --leak-check=full --error-exitcode=1 ./valgrind_test; then
+          echo "ERROR: Valgrind should have detected memory errors but didn't!"
+          exit 1
+        else
+          echo "OK: Valgrind correctly detected memory errors in test program."
+        fi
+      timeout-minutes: 10

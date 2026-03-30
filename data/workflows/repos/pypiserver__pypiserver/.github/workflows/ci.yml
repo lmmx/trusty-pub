@@ -1,0 +1,244 @@
+# Run tests
+
+name: CI
+
+on:
+  # This will run when any branch or tag is pushed
+  push:
+    branches:
+      - "main"
+    tags:
+      - "v**"
+  # Allowing to run on fork and other pull requests
+  pull_request:
+
+env:
+  LAST_SUPPORTED_PYTHON: "3.13"
+
+jobs:
+  test-python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # make sure to align the `python-version`s in the Matrix with env.LAST_SUPPORTED_PYTHON
+        python-version: [
+            "3.10",
+            "3.11",
+            "3.12",
+            "3.13",
+            "3.x", # make sure to test the current stable Python version
+          ]
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          pip install --upgrade setuptools
+          pip install tox==3.27.*
+      - name: Run tests
+        run: tox -e py
+
+  check:
+    # These checks only need to be done once, not for every python version we
+    # support
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          # Use the current version of Python
+          python-version: ${{ env.LAST_SUPPORTED_PYTHON }}
+      - name: Install dependencies
+        run: |
+          pip install -r "requirements/dev.pip"
+      - name: Check types
+        # individual mypy files for now, until we get the rest
+        # of the project typechecking
+        run: >-
+          mypy
+          docker/test_docker.py
+          pypiserver/config.py 
+          tests/test_init.py
+      - name: Check formatting
+        run: black --diff --check .
+      - name: Validate README
+        id: validate_readme
+        run: mdformat --check README.md
+        continue-on-error: true
+      - name: check mdformat result
+        run: |
+          if [ "${{ steps.validate_readme.outcome }}" == "failure" ]; then
+              echo "copy readme to /tmp/pypiserver"
+              mkdir -p /tmp/pypiserver
+              cp README.md /tmp/pypiserver
+              echo "README.md is not formatted correctly. Please run 'mdformat README.md' and commit the result."
+              mdformat /tmp/pypiserver/README.md
+              diff -u README.md /tmp/pypiserver/README.md
+              exit 1
+          else
+              echo "README.md is formatted correctly."
+          fi
+
+  # Full-flow docker tests, again not python version dependent
+  # We _could_ test this on MacOS, but it takes forever to get docker
+  # installed. I'm going to say for now probably 99% of people using
+  # the docker image will be doing so from a linux system, e.g. for
+  # a k8s deploy, and I've verified manually that things work on
+  # MacOS, so /shrug.
+  test-docker:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          # Use the current version of Python
+          python-version: ${{ env.LAST_SUPPORTED_PYTHON }}
+      - name: Install test dependencies
+        run: pip install -r "requirements/test.pip"
+      - name: Install package
+        run: pip install -r "requirements/exe.pip"
+      - name: Run tests
+        run: "pytest docker/test_docker.py"
+
+  tests:
+    runs-on: "ubuntu-latest"
+    needs:
+      - "check"
+      - "test-docker"
+      - "test-python"
+    steps:
+      - name: "Everything is good!"
+        run: "echo true"
+
+  # RELEASES
+
+  ## PYPI
+
+  create-pypi-wheels:
+    runs-on: ubuntu-latest
+    needs:
+      - "tests"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.LAST_SUPPORTED_PYTHON }}
+
+      - name: Install dev dependencies
+        run: pip install -r "requirements/dev.pip"
+
+      - name: Build distribution _wheel_.
+        run: |
+          ./bin/package.sh
+
+      - name: Publish distribution 📦 to PyPI.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Push to PyPi only if a tag is pushed
+        if: startsWith(github.event.ref, 'refs/tags/v')
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          print-hash: true
+
+  ## DOCKER (DOCKER HUB & CONTAINER REGISTRY)
+
+  create-docker-images:
+    runs-on: "ubuntu-latest"
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-docker
+      cancel-in-progress: ${{ github.ref_type != 'tag' }}
+    env:
+      DOCKER_IMAGE_BASE: pypiserver/pypiserver
+    needs:
+      - "tests"
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: docker-metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.DOCKER_IMAGE_BASE }}
+            ${{ github.ref_type == 'tag' && format('ghcr.io/{0}', env.DOCKER_IMAGE_BASE)  || '' }}
+          tags: |
+            type=ref,event=pr
+            type=edge,event=branch,branch=main
+            type=raw,value=unstable,event=branch,branch=main
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+
+      - name: Cache Docker layers
+        uses: "actions/cache@v3"
+        with:
+          path: "/tmp/.buildx-cache"
+          key: "${{ runner.os }}-buildx-${{ github.sha }}"
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Login to Docker Hub
+        if: github.ref_type == 'tag' || (github.ref_type == 'branch' && github.ref_name == 'main')
+        uses: "docker/login-action@v3"
+        with:
+          username: "${{ secrets.DOCKER_HUB_USER }}"
+          password: "${{ secrets.DOCKER_HUB_TOKEN }}"
+
+      - name: Login to GitHub Container Registry
+        if: github.ref_type == 'tag' || (github.ref_type == 'branch' && github.ref_name == 'main')
+        uses: "docker/login-action@v3"
+        with:
+          registry: "ghcr.io"
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: "docker/setup-qemu-action@v3"
+      - id: buildx
+        uses: "docker/setup-buildx-action@v3"
+
+      - name: Build and push
+        id: docker_build
+        uses: "docker/build-push-action@v5"
+        with:
+          context: "./"
+          platforms: linux/amd64,linux/arm64
+          file: "./Dockerfile"
+          builder: "${{ steps.buildx.outputs.name }}"
+          push: ${{ github.ref_type == 'tag' || (github.ref_type == 'branch' && github.ref_name == 'main') }}
+          tags: ${{ steps.docker-metadata.outputs.tags }}
+          labels: ${{ steps.docker-metadata.outputs.labels }}
+          cache-from: "type=local,src=/tmp/.buildx-cache"
+          cache-to: "type=local,dest=/tmp/.buildx-cache"
+
+      - name: Image digest
+        run: "echo ${{ steps.docker_build.outputs.digest }}"
+
+      - name: Docker Hub Description
+        uses: peter-evans/dockerhub-description@v3
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        with:
+          username: ${{ secrets.DOCKER_HUB_USER }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+          repository: ${{ env.DOCKER_IMAGE_BASE }}
+
+  ## GITHUB RELEASE DRAFT
+
+  create_release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: "ubuntu-latest"
+    needs:
+      - "tests"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: softprops/action-gh-release@v1
+        with:
+          body: 👋 This is a draft release. Please update it manually.
+          prerelease: false
+          draft: true
+          files: |
+            CHANGES.rst

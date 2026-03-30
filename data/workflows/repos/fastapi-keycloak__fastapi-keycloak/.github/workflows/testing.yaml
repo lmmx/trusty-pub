@@ -1,0 +1,54 @@
+name: Test-Suite
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [review_requested]
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.9', '3.10', '3.11', '3.12' ]
+    name: Test-Suite for Python ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Test Infrastructure
+        run: |
+          cd tests
+          bash ./start_infra.sh
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Pip
+        run: |
+          python -m pip install --upgrade pip wheel
+
+      - name: Install dependencies
+        run: |
+          python -m pip install .
+
+      - name: Wait for Infrastructure to be ready
+        run: |
+          chmod +x tests/wait_for_service.sh & bash tests/wait_for_service.sh http://localhost:8085 200 100
+
+      - name: Test with pytest
+        run: |
+          pytest tests
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2
+        with:
+          fail_ci_if_error: false
+
+      - name: Teardown Test Infrastructure
+        if: always()
+        run: |
+          cd tests
+          bash ./stop_infra.sh

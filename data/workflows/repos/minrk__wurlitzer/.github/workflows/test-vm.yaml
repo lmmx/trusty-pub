@@ -1,0 +1,61 @@
+name: test-vm
+# run tests in a VM via vagrant
+# GHA doesn't support freebsd, but we can test there
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "main"
+
+jobs:
+  test:
+    # ref: https://github.com/jonashackt/vagrant-github-actions
+    # MIT License
+    # after macos-12, vagrant stops working
+    runs-on: macos-12
+
+    strategy:
+      fail-fast: true
+      matrix:
+        box:
+          - freebsd
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cache Vagrant boxes
+        uses: actions/cache@v2
+        with:
+          path: ~/.vagrant.d/boxes
+          key: ${{ runner.os }}-vagrant-${{ hashFiles('Vagrantfile') }}
+          restore-keys: |
+            ${{ runner.os }}-vagrant-
+
+      - name: Show Vagrant version
+        run: vagrant --version
+
+      - name: Run vagrant up
+        run: vagrant up ${{ matrix.box }}
+
+      - name: install dependencies
+        run: |
+          vagrant ssh ${{ matrix.box }} -c "
+            cd /vagrant
+            pip install --upgrade pip
+            pip install --upgrade --pre -r dev-requirements.txt .
+            pip freeze
+          "
+
+      - name: Run tests
+        run: |
+          vagrant ssh ${{ matrix.box }} -c "
+            cd /vagrant
+            pytest -v --color=yes --cov=wurlitzer test.py
+          "
+
+      - name: Submit codecov report
+        run: |
+          vagrant ssh ${{ matrix.box }} -c "
+            cd /vagrant
+            codecov
+          "

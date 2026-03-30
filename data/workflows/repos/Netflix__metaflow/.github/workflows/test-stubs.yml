@@ -1,0 +1,79 @@
+name: Test Stubs
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+  workflow_call:
+
+permissions: read-all
+
+jobs:
+  Python:
+    name: core / Python ${{ matrix.ver }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        ver: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+        include:
+          - os: macos-latest
+            ver: "3.14"
+          - os: macos-latest
+            ver: "3.13"
+          - os: macos-latest
+            ver: "3.12"
+          - os: macos-latest
+            ver: "3.11"
+          - os: macos-latest
+            ver: "3.10"
+
+    steps:
+    - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+      with:
+        python-version: ${{ matrix.ver }}
+
+    - name: Install Python ${{ matrix.ver }} dependencies
+      run: |
+        python3 -m pip install --upgrade pip setuptools
+        if python3 -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)"; then
+          python3 -m pip install pytest build "mypy<1.9" "pytest-mypy-plugins>=4"
+        else
+          python3 -m pip install pytest build "mypy<1.9" "pytest-mypy-plugins<4"
+        fi
+
+    - name: Install metaflow
+      run: pip install .
+
+    - name: Install metaflow-stubs
+      run: metaflow develop stubs install --force
+
+    - name: Create version-specific mypy config
+      run: |
+          # Copy the existing setup.cfg
+          cp ./stubs/test/setup.cfg ./stubs/test/mypy_${{ matrix.ver }}.cfg
+          # Add Python version setting
+          echo "python_version = ${{ matrix.ver }}" >> ./stubs/test/mypy_${{ matrix.ver }}.cfg
+          if [[ "${{ matrix.ver }}" == "3.7" ]]; then
+            echo "follow_imports = skip" >> ./stubs/test/mypy_${{ matrix.ver }}.cfg
+          fi
+
+    - name: Run mypy tests
+      uses: nick-fields/retry@v2
+      with:
+        max_attempts: 2
+        timeout_minutes: 3
+        retry_on: error
+        command: |
+          cd ./stubs
+          if python3 -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)"; then
+            pytest --mypy-ini-file test/mypy_${{ matrix.ver }}.cfg
+          else
+            pytest --mypy-ini-file test/mypy_${{ matrix.ver }}.cfg --mypy-only-local-stub
+          fi

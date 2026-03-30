@@ -1,0 +1,108 @@
+name: Patchright Release Workflow
+
+on:
+  # enabling manual trigger
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Playwright Version (Base)'
+        default: ''
+      patchright_release:
+        description: 'Patchright Release Version (e.g. `1.55.2`)'
+        default: ''
+  # running every hour
+  schedule:
+    - cron: '0 * * * *'
+
+env:
+  REPO: ${{ github.repository }}
+
+jobs:
+  patchright-release-workflow:
+    name: "Patchright-Python Workflow: Install, Patch, Build and Publish Patchright Python Package"
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/patchright
+    permissions:
+      contents: write
+      id-token: write # For trusted Publishing
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Check Release Version
+        id: version_check
+        run: |
+          echo "patchright_release=${{ github.event.inputs.patchright_release }}" >> $GITHUB_ENV
+          PLAYWRIGHT_VERSION=""
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            PLAYWRIGHT_VERSION="${{ github.event.inputs.version }}"
+            echo "proceed=true" >>$GITHUB_OUTPUT
+            echo "playwright_version=$PLAYWRIGHT_VERSION" >> $GITHUB_ENV
+          else
+            chmod +x utils/release_version_check.sh
+            utils/release_version_check.sh
+            PLAYWRIGHT_VERSION=$(grep '^playwright_version=' "$GITHUB_ENV" | tail -n1 | cut -d= -f2-)
+          fi
+          if [ -n "$PLAYWRIGHT_VERSION" ]; then
+            echo "playwright_version=$PLAYWRIGHT_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Playwright-Python Package
+        if: steps.version_check.outputs.proceed == 'true'
+        run: |
+          uv sync --all-groups
+          if [ -n "$patchright_release" ]; then
+            PATCHRIGHT_RELEASE="$patchright_release"
+          else
+            PLAYWRIGHT_MINOR=${playwright_version#v}
+            PLAYWRIGHT_MINOR=${PLAYWRIGHT_MINOR%.*}
+            PATCHRIGHT_RELEASE=$(curl -fsSL "https://api.github.com/repos/Kaliiiiiiiiii-Vinyzu/patchright/releases?per_page=100" | jq -r --arg minor "$PLAYWRIGHT_MINOR" '[.[].tag_name | ltrimstr("v") | select(startswith($minor + ".")) | select((try (split(".") | map(tonumber) | length) catch 0) == 3)] | sort_by(split(".") | map(tonumber)) | last')
+            test -n "$PATCHRIGHT_RELEASE" -a "$PATCHRIGHT_RELEASE" != "null"
+          fi
+          echo "patchright_release=$PATCHRIGHT_RELEASE" >> $GITHUB_ENV
+          git clone https://github.com/microsoft/playwright-python --branch "$playwright_version"
+          uv add -r playwright-python/local-requirements.txt --dev
+
+      - name: Patch Playwright-Python Package
+        if: steps.version_check.outputs.proceed == 'true'
+        run: |
+          uv run patch_python_package.py
+          uvx ruff format playwright-python
+
+      - name: Build Patchright-Python Package
+        if: steps.version_check.outputs.proceed == 'true'
+        run: |
+          cd playwright-python
+          uv pip install -e .
+          for wheel in $(uv run setup.py --list-wheels); do
+            PLAYWRIGHT_TARGET_WHEEL=$wheel uv build --wheel
+          done
+
+      - name: Create Empty Versioning Release
+        if: steps.version_check.outputs.proceed == 'true'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version_check.outputs.playwright_version }}
+          release_name: ${{ steps.version_check.outputs.playwright_version }}
+          body: |
+            This is an automatic deployment in response to a new release of [microsoft/playwright-python](https://github.com/microsoft/playwright-python).
+            This Release is only used for Versioning.
+          draft: false
+          prerelease: false
+
+      - name: Publish Patchright-Python Package
+        if: steps.version_check.outputs.proceed == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: playwright-python/dist/
+          verbose: true

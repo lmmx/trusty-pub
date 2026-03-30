@@ -1,0 +1,24 @@
+name: Website
+
+on:
+  push:
+    branches: [master, test]
+  pull_request:
+    branches: [master, test]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: sudo apt-get install hunspell hunspell-en-us
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev --group docs
+      - run: uv run doit -v2 website
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Website
+          path: ./doc/_build

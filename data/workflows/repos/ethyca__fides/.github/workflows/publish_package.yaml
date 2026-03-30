@@ -1,0 +1,117 @@
+name: Publish Fides
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  upload_to_pypi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # This is required to properly tag packages
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install node modules
+        run: |
+          cd clients
+          npm ci
+
+      - name: Build and export frontend files
+        run: |
+          cd clients
+          npm run prod-export-admin-ui
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      # The git reset is required here because the build modifies
+      # metadata and the wheel becomes a dirty version
+      - name: Build the sdist
+        run: |
+          uv build --sdist
+          git reset --hard
+
+      - name: Build the wheel
+        run: uv build --wheel
+
+      - name: Check Prod Tag
+        id: check-prod-tag
+        run: |
+          if [[ ${{ github.event.ref }} =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "match=true" >> $GITHUB_OUTPUT
+          else
+            echo "match=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Check RC Tag
+        id: check-rc-tag
+        run: |
+          if [[ ${{ github.event.ref }} =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+rc[0-9]+$ ]]; then
+            echo "match=true" >> $GITHUB_OUTPUT
+          else
+            echo "match=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Check alpha Tag
+        id: check-alpha-tag
+        run: |
+          if [[ ${{ github.event.ref }} =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+a[0-9]+$ ]]; then
+            echo "match=true" >> $GITHUB_OUTPUT
+          else
+            echo "match=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Check beta Tag
+        id: check-beta-tag
+        run: |
+          if [[ ${{ github.event.ref }} =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+b[0-9]+$ ]]; then
+            echo "match=true" >> $GITHUB_OUTPUT
+          else
+            echo "match=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Prod, 'rc', 'beta', and 'alpha' tags go to PyPI; all other tags and untagged commits go to TestPyPI
+      #   2.10.0 (prod tag, official release commit) --> PyPI
+      #   2.10.0b1 (beta tag, used on main) --> PyPI
+      #   2.10.0rc0 (rc tag, used on release branches before release is cut) --> PyPI
+      #   2.10.0a0 (alpha tag, used on feature branches) --> PyPI (as pre-release)
+      #   2.10.0.dev0 (no match, arbitrary dev tag) --> TestPyPI
+      #   no tag, just a vanilla commit/merge pushed to `main` --> TestPyPI
+
+      # Upload to TestPyPI if it is not a release (prod), rc, beta, or alpha tag
+      - name: Upload to test pypi
+        if: steps.check-prod-tag.outputs.match == 'false' && steps.check-rc-tag.outputs.match == 'false' && steps.check-beta-tag.outputs.match == 'false' && steps.check-alpha-tag.outputs.match == 'false'
+        run: uvx twine upload --verbose --repository testpypi dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_TOKEN }}
+
+      # If the tag matches a release, rc, beta, or alpha tag, allow publishing to PyPI:
+      - name: Upload to pypi
+        if: steps.check-prod-tag.outputs.match == 'true' || steps.check-rc-tag.outputs.match == 'true' || steps.check-beta-tag.outputs.match == 'true' || steps.check-alpha-tag.outputs.match == 'true'
+        run: uvx twine upload --verbose dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+      # Notify Fidesplus about a feature tag to trigger an integrated build on an alpha/beta tag
+      - name: Send Repository Dispatch Event
+        # only run on an alpha or beta tag
+        if: steps.check-alpha-tag.outputs.match == 'true' || steps.check-beta-tag.outputs.match == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          client-payload: '{"tag": "${{ github.ref_name }}"}'
+          event-type: new-fides-feature-tag
+          repository: ethyca/fidesplus
+          token: ${{ secrets.DISPATCH_ACCESS_TOKEN }}

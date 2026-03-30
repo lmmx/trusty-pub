@@ -1,0 +1,49 @@
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        pandas-version: ["1.0", "2.0"]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install pandas
+      run: |
+        pip install pandas~=${{ matrix.pandas-version }}
+    - name: Package recordlinkage
+      run: |
+        pip install --upgrade pip
+        pip install build
+        python -m build
+    - name: Install recordlinkage
+      run: |
+        pip install networkx>=2
+        pip install ./dist/recordlinkage-*.whl
+    - name: Test with pytest
+      run: |
+        pip install pytest
+        # remove recordlinkage to prevent relative imports (use installed package)
+        # this is like wrapping stuff in a src folder
+        rm -r recordlinkage/
+        pytest
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-python@v1
+    - name: Install ruff
+      run: |
+        pip install ruff
+    - name: Lint with ruff
+      run: |
+        ruff .

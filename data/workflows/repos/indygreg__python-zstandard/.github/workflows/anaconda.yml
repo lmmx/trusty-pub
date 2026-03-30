@@ -1,0 +1,106 @@
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '30 13 * * *'
+permissions: { }
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        py:
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+          - '3.13'
+    runs-on: 'ubuntu-22.04'
+    env:
+      # Enable fuzzing tests, other expensive tests.
+      ZSTD_SLOW_TESTS: '1'
+      # Make all compile warnings fatal.
+      ZSTD_WARNINGS_AS_ERRORS: '1'
+      # More thorough fuzzing coverage.
+      HYPOTHESIS_PROFILE: 'ci'
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.py }}
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Create Anaconda Environment
+        run: |
+          $CONDA/bin/conda create --yes --quiet --name env python=${{ matrix.py }}
+
+      - name: Install Dependencies
+        run: |
+          source $CONDA/bin/activate env
+          $CONDA/bin/conda install --yes --quiet --name env conda-build pip
+          pip install --require-hashes -r ci/requirements.txt
+
+      - name: Build and Test
+        run: |
+          source $CONDA/bin/activate env
+          $CONDA/bin/conda build ci/conda
+          python ci/copy-conda-package.py
+
+      - name: Upload Package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-${{ matrix.py }}
+          path: dist
+
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        py:
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+          - '3.13'
+    runs-on: 'windows-2022'
+    env:
+      # Enable fuzzing tests, other expensive tests.
+      ZSTD_SLOW_TESTS: '1'
+      # Make all compile warnings fatal.
+      ZSTD_WARNINGS_AS_ERRORS: '1'
+      # More thorough fuzzing coverage.
+      HYPOTHESIS_PROFILE: 'ci'
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.py }}
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Create Anaconda Environment
+        run: |
+          C:\Miniconda\condabin\conda.bat create --yes --quiet --name env python=${{ matrix.py }}
+
+      - name: Install Dependencies
+        run: |
+          C:\Miniconda\condabin\conda.bat install --yes --quiet --name env conda-build pip
+          C:\Miniconda\envs\env\python.exe -m pip install --user --require-hashes -r ci/requirements.txt
+
+      # Disabled because we appear to be hitting https://github.com/conda/conda-build/issues/4835
+      # and we're not sure how to work around.
+      #- name: Build and Test
+      #  run: |
+      #    C:\Miniconda\envs\env\Scripts\conda-build.exe ci/conda
+      #    C:\Miniconda\envs\env\python.exe ci/copy-conda-package.py
+
+      - name: Upload Package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-${{ matrix.py }}
+          path: dist

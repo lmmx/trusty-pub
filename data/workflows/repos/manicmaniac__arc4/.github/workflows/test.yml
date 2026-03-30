@@ -1,0 +1,60 @@
+---
+name: Test
+on:
+- push
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+        - '3.9'
+        - '3.10'
+        - '3.11'
+        - 'pypy-3.9'
+        - 'pypy-3.10'
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "${{ matrix.python-version }}"
+    - name: Install lcov
+      run: sudo apt-get update && sudo apt-get install -y lcov
+    - uses: qltysh/qlty-action/install@v2
+    - run: python setup.py build_ext --inplace
+      env:
+        CFLAGS: --coverage
+    - run: python -m unittest discover --verbose
+    - name: Format coverage
+      run: |
+        lcov --capture --directory . --output-file coverage.info --no-external
+        qlty coverage transform coverage.info --output "coverage.${{ matrix.python-version }}.jsonl"
+    - uses: actions/upload-artifact@v7
+      with:
+        name: coverages-${{ matrix.python-version }}
+        path: coverage.${{ matrix.python-version }}.jsonl
+  upload-coverage:
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: coverages-*
+        merge-multiple: true
+    - uses: qltysh/qlty-action/coverage@v2
+      with:
+        token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+        files: coverage.*.jsonl
+        skip-errors: false
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: clang-format
+      run: clang-format --Werror --dry-run arc4.c
+    - run: pip install . flake8 mypy pygments restructuredtext_lint
+    - run: flake8
+    - run: stubtest arc4
+    - run: rst-lint README.rst

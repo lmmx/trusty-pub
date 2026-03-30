@@ -1,0 +1,96 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    paths:
+      - src/**
+      - integration/example-library/**
+      - noxfile.py
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/integration_tests.yml
+      - .github/workflows/resources/constraints.txt
+  push:
+    branches:
+      - main
+      - 'v*'
+    paths:
+      - src/**
+      - integration/example-library/**
+      - noxfile.py
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/integration_tests.yml
+      - .github/workflows/resources/constraints.txt
+  workflow_dispatch:
+    inputs: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Integration Tests
+    strategy:
+      matrix:
+        include:
+        - { integration_test: "meltano-basics", needs_postgres: false}
+        - { integration_test: "meltano-run", needs_postgres: true}
+        - { integration_test: "meltano-objects", needs_postgres: false}
+        - { integration_test: "meltano-migrations", needs_postgres: false}
+        - { integration_test: "meltano-state-s3", needs_postgres: false}
+        - { integration_test: "meltano-state-local", needs_postgres: false}
+        - { integration_test: "meltano-config", needs_postgres: false}
+        - { integration_test: "meltano-annotations", needs_postgres: false}
+        - { integration_test: "meltano-manifest", needs_postgres: false}
+        - { integration_test: "meltano-run-merge-states", needs_postgres: false}
+        - { integration_test: "meltano-expand-envvars-in-array", needs_postgres: false}
+      fail-fast: false
+
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+
+    - name: Setup Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      id: setup-python
+      with:
+        python-version-file: .python-version
+
+    - name: Setup uv
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+    - name: Install Dependencies
+      env:
+        UV_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+      run: |
+        uv sync --extra "s3"
+
+    - name: Start Postgres Container
+      if: always() && (matrix.needs_postgres == true)
+      run: >
+        docker run -d
+        -p "5432:5432"
+        -e "POSTGRES_PASSWORD=postgres"
+        -e "POSTGRES_DB=warehouse"
+        --name postgres
+        --health-cmd "pg_isready -d postgres -U postgres"
+        --health-interval 10s
+        --health-timeout 5s
+        --health-retries 5
+        postgres:13
+
+    - name: Run integration tests
+      env:
+        INTEGRATION_TEST_NAME: ${{ matrix.integration_test }}
+      run: |
+        uv run bash integration/validate.sh $INTEGRATION_TEST_NAME

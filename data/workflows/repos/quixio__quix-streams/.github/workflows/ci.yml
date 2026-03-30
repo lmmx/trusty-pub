@@ -1,0 +1,79 @@
+name: 'CI'
+
+on:
+  pull_request:
+
+
+# Run only one workflow per PR or commit
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+# Disable default permissions for all jobs
+permissions: { }
+
+jobs:
+  lint:
+    permissions:
+      contents: read # to fetch code (actions/checkout)
+    name: Run linters
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.13
+      - name: Install requirements
+        run: |
+          python -m pip install -U pip
+          python -m pip install -U -r requirements.txt -r tests/requirements.txt -r requirements-mypy.txt
+      - uses: pre-commit/action@v3.0.1
+
+  test:
+    if: github.head_ref != 'auto/update-documentation'
+    needs: lint
+    permissions:
+      contents: read # to fetch code (actions/checkout)
+    name: Run Python tests (python${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python: [3.9, 3.13]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install requirements
+        run: |
+          python -m pip install -U pip
+          python -m pip install -U -r requirements.txt -r tests/requirements.txt
+      - name: Run tests
+        run: |
+          python -m pytest -v --log-cli-level=ERROR
+
+  docs:
+    if: github.head_ref == 'auto/update-documentation'
+    permissions:
+      contents: read
+    name: Check docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.13
+      - name: Install requirements
+        run: |
+          python -m pip install -U pip
+          python -m pip install mkdocs mkdocs-material mkdocs-material-extensions
+      - name: Build docs
+        run: |
+          mkdocs build --strict

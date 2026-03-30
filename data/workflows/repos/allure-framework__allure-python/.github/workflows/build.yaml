@@ -1,0 +1,158 @@
+name: build allure python
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  pytest-changes:
+    name: Collect allure-pytest file changes
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.allure-pytest }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            allure-pytest:
+              - allure-pytest/**
+              - allure-python-commons/**
+              - allure-python-commons-test/**
+              - tests/*.py
+              - tests/allure_pytest/**
+              - .github/workflows/build.yaml
+  other-changes:
+    name: Collect file changes other than allure-pytest
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            allure-behave:
+              - allure-behave/**
+              - allure-python-commons/**
+              - allure-python-commons-test/**
+              - tests/*.py
+              - tests/allure_behave/**
+              - .github/workflows/build.yaml
+            allure-nose2:
+              - allure-nose2/**
+              - allure-python-commons/**
+              - allure-python-commons-test/**
+              - tests/*.py
+              - tests/allure_nose2/**
+              - .github/workflows/build.yaml
+            allure-pytest-bdd:
+              - allure-pytest-bdd/**
+              - allure-python-commons/**
+              - allure-python-commons-test/**
+              - tests/*.py
+              - tests/allure_pytest_bdd/**
+              - .github/workflows/build.yaml
+            allure-robotframework:
+              - allure-robotframework/**
+              - allure-python-commons/**
+              - allure-python-commons-test/**
+              - tests/*.py
+              - tests/allure_robotframework/**
+              - .github/workflows/build.yaml
+            allure-python-commons:
+              - allure-python-commons/**
+              - .github/workflows/build.yaml
+            allure-python-commons-test:
+              - allure-python-commons-test/**
+              - .github/workflows/build.yaml
+
+  lint:
+    name: Static check
+    runs-on: ubuntu-latest
+    needs: [pytest-changes, other-changes]
+    if: ${{ needs.pytest-changes.outputs.changed == 'true' || needs.other-changes.outputs.packages != '[]' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install linting packages
+        run: pip install -r ./requirements/linting.txt
+
+      - name: Linting the codebase
+        run: poe linter --output-format=github
+
+  test-pytest:
+    name: Test allure-pytest
+    runs-on: ubuntu-latest
+    needs: [pytest-changes]
+    if: ${{ needs.pytest-changes.outputs.changed == 'true' }}
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        pytest-version: ["7.*", "8.*"]
+    env:
+      TEST_TMP: /tmp
+      ALLURE_INDENT_OUTPUT: yep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install packages
+        run: |
+          pip install ./allure-python-commons \
+            ./allure-python-commons-test \
+            ./allure-pytest \
+            pytest==${{ matrix.pytest-version }} \
+            -r ./requirements/testing.txt \
+            -r ./requirements/testing/allure-pytest.txt
+
+      - name: Test allure-pytest
+        working-directory: allure-pytest
+        run: poe tests
+
+  test-others:
+    name: Test other packages
+    runs-on: ubuntu-latest
+    needs: [other-changes]
+    if: ${{ needs.other-changes.outputs.packages != '[]' }}
+    strategy:
+      matrix:
+        package: ${{ fromJSON(needs.other-changes.outputs.packages) }}
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          - package: allure-pytest
+    env:
+      TEST_TMP: /tmp
+      ALLURE_INDENT_OUTPUT: yep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install packages
+        run: |
+          pip install ./allure-python-commons \
+            ./allure-python-commons-test \
+            ./${{ matrix.package }} \
+            -r ./requirements/testing.txt \
+            -r ./requirements/testing/${{ matrix.package }}.txt
+
+      - name: Test ${{ matrix.package }}
+        working-directory: ${{ matrix.package }}
+        run: poe tests

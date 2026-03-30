@@ -1,0 +1,155 @@
+name: Build Docs
+
+# We don't want pushes (or PRs) to gh-pages to kick anything off
+on:
+  push:
+    branches:
+      - main
+      - '[0-9]+.[0-9]+.x'
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow}}-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  #
+  # Build our docs on Linux against multiple Pythons
+  #
+  Docs:
+    name: "Linux ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.11, 3.12, 3.13]
+        check-links: [false]
+        include:
+          - python-version: 3.14
+            check-links: true
+    outputs:
+      doc-version: ${{ steps.build-docs.outputs.doc-version }}
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: 150
+        persist-credentials: false
+
+    # Can't use fetch-tags on a tag apparently. See actions/checkout#1467.
+    - name: Get tags
+      run: git fetch --depth=1 origin +refs/tags/*:refs/tags/*
+
+    - name: Install using PyPI
+      uses: ./.github/actions/install-pypi
+      with:
+        type: 'doc'
+        python-version: ${{ matrix.python-version }}
+        need-extras: true
+        need-cartopy: true
+
+    - name: Build docs
+      id: build-docs
+      uses: ./.github/actions/build-docs
+      with:
+        run-linkchecker: ${{ github.event_name == 'pull_request' && matrix.check-links == true }}
+        key: ${{ runner.os }}-${{ matrix.python-version }}
+
+  Deploy:
+    if: ${{ github.event_name != 'pull_request' }}
+    needs: Docs
+    environment:
+      name: github-pages
+      deployment: false
+    runs-on: ubuntu-slim
+    env:
+      DOC_VERSION: dev
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download doc build
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: Linux-3.13-docs
+        path: ./docs/build/html
+
+    # This overrides the version "dev" with the proper version if we're building off a
+    # branch that's not main (which is confined to n.nn.x above) or on a tag.
+    - name: Set doc version
+      if: ${{ github.event_name != 'push' || !contains(github.ref, 'main') }}
+      run: echo "DOC_VERSION=v${{ needs.Docs.outputs.doc-version }}" >> $GITHUB_ENV
+
+    - name: Export doc version
+      run: echo "doc-version=${{ env.DOC_VERSION }}" >> $GITHUB_OUTPUT
+
+    - name: Upload to GitHub Pages
+      uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4.0.0
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs/build/html
+        exclude_assets: '.buildinfo,_static/jquery-*.js,_static/underscore-*.js'
+        destination_dir: ./${{ env.DOC_VERSION }}
+        keep_files: false
+        full_commit_message: Deploy ${{ env.DOC_VERSION }} to GitHub Pages
+
+  UpdateVersions:
+    needs: Deploy
+    if: ${{ needs.Deploy.outputs.doc-version != 'dev' }}
+    name: "Manage doc versions"
+    environment:
+      name: github-pages
+      deployment: false
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout docs
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: "gh-pages"
+
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+
+    - name: Install packaging
+      run: python -m pip install packaging
+
+    - name: Update listing of versions
+      run: |
+        python << EOF
+        import json
+        from pathlib import Path
+        from packaging import version
+
+        # Get all paths that are versions
+        vers = sorted(version.parse(str(p)) for p in Path().glob('v[0-9]*'))
+
+        # Set up our version dictionary
+        versions = dict(versions=['latest', 'dev'],
+                        latest=f'v{vers[-1].major}.{vers[-1].minor}', prereleases=[])
+        versions['versions'].extend(f'v{v.major}.{v.minor}' for v in vers[-4:])
+
+        # Write to JSON file
+        with open('versions.json', 'wt') as verfile:
+            json.dump(versions, verfile)
+
+        # Update the 'latest' symlink
+        latest = Path('latest')
+        latest.unlink(missing_ok=True)
+        latest.symlink_to(versions['latest'], target_is_directory=True)
+        EOF
+
+    - name: Commit changes
+      run: |
+        git config user.name $GITHUB_ACTOR
+        git config user.email $GITHUB_ACTOR@users.noreply.github.com
+        git add latest versions.json
+        git commit -am "Update version listing and latest link" || true
+        git push

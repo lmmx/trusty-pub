@@ -1,0 +1,76 @@
+name: Publish docs to gh-pages
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.7'
+    - name: Install dependencies
+      run: |
+        export DEBIAN_FRONTEND=noninteractive
+        sudo apt-get -q -y install dvipng texlive-latex-extra
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install sphinx
+        pip install numpydoc
+    - name: Install numpy-financial
+      run: |
+        pip install .
+    - name: Build documentation with Sphinx
+      run: |
+        cd doc
+        make html
+        mv build/html /tmp
+        cd ..
+    - name: Deploy to gh-pages branch
+      env:
+        GH_ACTION_PAGES_DEPLOY_KEY: ${{ secrets.GH_ACTION_PAGES_DEPLOY_KEY }}
+      run: |
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        # Set up SSH key
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        mkdir -p ~/.ssh/
+        echo "$GH_ACTION_PAGES_DEPLOY_KEY" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan github.com >> ~/.ssh/known_hosts
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        # Reconfigure the git remote to use SSH
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        git remote rm origin
+        git remote add origin git@github.com:numpy/numpy-financial.git
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        # Configure the git user
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        git config user.name "${GITHUB_ACTOR}"
+        git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        # Go to work on gh-pages...
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        echo "Fetching gh-pages"
+        git fetch origin gh-pages
+        echo "Checking out gh-pages branch"
+        git checkout gh-pages
+        echo "Removing old dev documentation"
+        git clean -xdf .
+        cd dev
+        git rm -r '*'
+        cd ..
+        echo "Committing emptied dev directory"
+        git commit -m "Remove old dev documentation"
+        mkdir dev
+        cd dev
+        echo "Copying /tmp/html here"
+        cp -v -r /tmp/html/* .
+        echo "Adding new dev documentation"
+        git add -A .
+        git commit -m "Add new dev documentation"
+        echo "Pushing new documentation to origin"
+        git push -v origin gh-pages

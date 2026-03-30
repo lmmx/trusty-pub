@@ -1,0 +1,246 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions and Operating Systems
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Test Changes
+
+on: 
+  push:
+    branches: [ "master" ]
+  merge_group:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Log level'
+        required: true
+        default: 'warning'
+        type: choice
+        options:
+        - info
+        - warning
+        - debug
+
+jobs:
+  run-guard:
+    # it succeeds if any of the following conditions are met:
+    #   - when the PR is not a draft and is not labeled 'prevent-ci'
+    #   - when the PR is labeled 'force-ci'
+    runs-on: ubuntu-latest
+    if: |
+      (  (!github.event.pull_request.draft) &&
+         (github.event.action != 'labeled') &&
+         (!contains( github.event.pull_request.labels.*.name, 'prevent-ci')) )
+      || ((github.event.action != 'labeled') && contains( github.event.pull_request.labels.*.name, 'force-ci'))
+      || (github.event.label.name == 'force-ci')
+    steps:
+      - name: Checking if CI shoud run for this push/PR...
+        run: echo Resuming CI. Continuing next jobs...
+
+  test-source-code:
+    needs: run-guard
+    strategy:
+      fail-fast: false
+      matrix:
+        #@ https://github.com/actions/runner-images#available-images
+        #@ https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        os: [ "ubuntu-latest", "windows-latest", "macos-latest", "macos-13" ]
+        #@ https://github.com/marketplace/actions/setup-python
+        #@ https://github.com/actions/setup-python/blob/main/docs/advanced-usage.md#python
+        python: ['3.6', '3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        # TODO: Also test with PyPy and GraalPy @https://github.com/actions/setup-python/blob/main/docs/advanced-usage.md#graalpy
+        include:
+          # Default configuration for all jobs
+          - mode: 'full'
+          - install: 'no'
+          - primary: '3.8'
+          # Conditional configuration overrides
+          - python: '3.6'
+            install: 'yes'
+          - python: '3.7'
+            install: 'yes'
+          - os: 'windows-latest'
+            mode: 'basic'
+          # Handle random test failures
+          - os: 'ubuntu-latest'
+            python: '3.9'
+            mode: 'basic'
+          # Additional Jobs not included in the matrix above
+          - python: '2.7'
+            os: 'ubuntu-latest'
+            mode: 'basic'
+            install: 'yes'
+        exclude:
+          # macos-latest == macOS-14-arm64
+          # macos-13 == Intel
+          - os: 'macos-latest'
+            python: '3.6'
+          - os: 'macos-latest'
+            python: '3.7'
+          # python 3.7 too slow on ubuntu-latest
+          - os: 'ubuntu-latest'
+            python: '3.7'
+
+    runs-on: "${{ matrix.os }}"
+    steps:
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install linux tools
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-h5py
+
+      - name: Set up Python ${{ matrix.python }} with install = ${{ matrix.install }}
+        if: matrix.install == 'no'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up Python ${{ matrix.python }} discontinued on ${{ matrix.os }}
+        if: matrix.install == 'yes'
+        uses: MatteoH2O1999/setup-python@v3
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --prefer-binary -r requirements-tests.txt
+
+      - name: Setup environment variables for remote filesystem testing with primary = ${{ matrix.primary }}
+        if: matrix.os == 'ubuntu-latest' && matrix.python == matrix.primary
+        run: |
+          echo "Setup SMB environment variable to trigger testing in Petl"
+          echo 'PETL_TEST_SMB=smb://WORKGROUP;petl:test@localhost/public/' >> $GITHUB_ENV
+          echo "Setup SFTP environment variable to trigger testing in Petl"
+          echo 'PETL_TEST_SFTP=sftp://petl:test@localhost:2244/public/' >> $GITHUB_ENV
+          echo "::group::Install remote test dependencies"
+          python -m pip install --prefer-binary -r requirements-remote.txt
+          echo "::endgroup::"
+
+      - name: Install optional test dependencies with install = ${{ matrix.install }}
+        if: matrix.os == 'ubuntu-latest' && matrix.install == 'no'
+        env:
+          DISABLE_BLOSC_AVX2: 1
+        run: |
+          echo "::group::Install tricky test dependencies"
+          if ! pip install --prefer-binary -r requirements-optional.txt ; then
+            echo 'Dismissed failure installing some optional package.  Resuming tests...'
+          fi
+          # DISABLE_BLOSC_AVX2=1 && export DISABLE_BLOSC_AVX2
+          # pip install --prefer-binary bcolz
+          echo "::endgroup::"
+
+      - name: Install containers for remote filesystem testing with install = ${{ matrix.install }}
+        if: matrix.os == 'ubuntu-latest' && matrix.install == 'no'
+        run: |
+          echo "::group::Setup docker for SMB at: ${{ env.PETL_TEST_SMB }}$"
+          docker run -it --name samba -p 139:139 -p 445:445 -d "dperson/samba" -p -u "petl;test" -s "public;/public-dir;yes;no;yes;all"
+          echo "::endgroup::"
+          echo "::group::Setup docker for SFTP at: ${{ env.PETL_TEST_SFTP }}$"
+          docker run -it --name sftp -p 2244:22 -d atmoz/sftp petl:test:::public
+          echo "::endgroup::"
+
+      - name: Install containers for remote database testing with mode = ${{ matrix.mode }}
+        if: matrix.os == 'ubuntu-latest' && matrix.mode == 'full'
+        run: |
+          echo "::group::Setup docker for MySQL"
+          docker run -it --name mysql -p 3306:3306 -p 33060:33060 -e MYSQL_ROOT_PASSWORD=pass0 -e MYSQL_DATABASE=petl -e MYSQL_USER=petl -e MYSQL_PASSWORD=test -d mysql:latest
+          echo "::endgroup::"
+          echo "::group::Setup docker for Postgres"
+          docker run -it --name postgres -p 5432:5432 -e POSTGRES_DB=petl -e POSTGRES_USER=petl -e POSTGRES_PASSWORD=test -d postgres:latest
+          echo "::endgroup::"
+          echo "::group::Install database test dependencies"
+          python -m pip install --prefer-binary -r requirements-database.txt
+          echo "::endgroup::"
+
+      - name: Setup petl package with mode = ${{ matrix.mode }}
+        run: python setup.py sdist bdist_wheel
+
+      - name: Install extra packages dependencies for mode full
+        if: matrix.mode == 'full'
+        run: python -m pip install --prefer-binary -r requirements-formats.txt
+
+      - name: List Installed Packages for Throubleshooting
+        run: |
+          echo "::group::List Installed Packages for Throubleshooting"
+          python -m pip list --format freeze
+          echo "::endgroup::"
+
+      - name: Test python source code for mode basic
+        if: matrix.mode == 'basic'
+        run: pytest --cov=petl petl
+
+      - name: Test documentation inside source code for mode full
+        if: matrix.mode == 'full'
+        run: |
+          echo "::group::Perform doctest-modules execution with coverage"
+          pytest --doctest-modules --cov=petl petl
+          echo "::endgroup::"
+
+      - name: Coveralls with primary = ${{ matrix.primary }}
+        if: matrix.os == 'ubuntu-latest' && matrix.python == matrix.primary
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m pip install --upgrade coveralls
+          coveralls --service=github
+
+      - name: Print source code coverage with mode = ${{ matrix.mode }}
+        run: coverage report -m
+
+  test-documentation:
+    needs: run-guard
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: [3.8]
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install doc generation dependencies
+        run: |
+          python -m pip install --prefer-binary -r requirements-docs.txt
+
+      - name: Setup petl package
+        run: python setup.py build
+
+      - name: Test docs generation
+        run: |
+          cd docs
+          sphinx-build -W -b singlehtml -d ../build/doctrees . ../build/singlehtml
+
+  # TODO: 1 configuration not found: https://docs.github.com/en/actions/using-workflows/reusing-workflows#overview
+  # call-workflow-codeql:
+  #   needs: test-source-code
+  #   uses: ./.github/workflows/codeql-analysis.yml
+  #   permissions:
+  #     actions: read
+  #     contents: read
+  #     pull-requests: write
+  #     security-events: write
+  #   secrets: inherit # pass all secrets
+
+  # call-workflow-codacity:
+  #   needs: test-source-code
+  #   uses: ./.github/workflows/codacy-analysis.yml
+  #   permissions:
+  #     actions: read
+  #     contents: read
+  #     pull-requests: write
+  #     security-events: write
+  #   secrets: inherit # pass all secrets
+

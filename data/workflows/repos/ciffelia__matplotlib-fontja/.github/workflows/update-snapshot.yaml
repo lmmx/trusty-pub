@@ -1,0 +1,45 @@
+name: Update snapshot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  create-snapshot:
+    uses: ./.github/workflows/create-snapshot.yaml
+    with:
+      artifact-name: snapshot
+
+  create-pr:
+    needs: create-snapshot
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: rm -rf test/snapshot
+
+      - name: Download snapshots
+        uses: actions/download-artifact@v5
+        with:
+          name: snapshot
+          path: test/snapshot
+
+      - name: Configure git author
+        run: |
+          git config user.name 'github-actions'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Create a pull request
+        run: |
+          git switch -c update-snapshots-${{ github.run_id }}
+          git add test/snapshot
+          git commit -m 'test: update snapshots'
+          git push origin update-snapshots-${{ github.run_id }}
+          gh pr create --fill --base "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}

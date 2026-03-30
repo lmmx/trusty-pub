@@ -1,0 +1,114 @@
+on: [push, pull_request]
+name: Continuous Integration
+jobs:
+  Tests:
+    name: base
+    continue-on-error: true
+    strategy:
+      matrix:
+        python:
+           - '3.9'
+           - '3.10'
+           - '3.11'
+           - '3.12'
+           - '3.13'
+           - '3.14'
+           - '3.14t'
+           - 'pypy-3.11'
+        java:
+          - '8'
+          - '11'
+          - '23'
+        os:
+          # macos-latest (ATM macos-15) runs on Apple Silicon,
+          # macos-15-intel runs on Intel
+          - 'ubuntu-latest'
+          - 'windows-latest'
+          - 'macos-latest'
+          - 'macos-15-intel'
+        architecture:
+          - 'x64'
+          - 'x86'
+          - 'aarch64'
+        exclude:
+          - python: '3.13'
+          - os: windows-latest
+            architecture: aarch64
+          - os: ubuntu-latest
+            architecture: aarch64
+          - os: ubuntu-latest
+            architecture: x86
+          - os: macos-15-intel
+            architecture: aarch64
+          - os: macos-15-intel
+            architecture: x86
+          - os: macos-latest
+            architecture: aarch64
+            java: '8'
+          - os: macos-latest
+            architecture: x64
+          - os: macos-latest
+            architecture: x86
+          - os: windows-latest
+            architecture: x86
+            python: 'pypy-3.11'
+          - os: windows-latest
+            architecture: x86
+            java: '20'
+          - os: windows-latest
+            architecture: x86
+            java: '21'
+          - os: windows-latest
+            architecture: x86
+            java: '22'
+          - os: windows-latest
+            architecture: x86
+            java: '23'
+          
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@master
+
+    - name: Setup Python ${{ matrix.python }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python }}
+        architecture: ${{ matrix.architecture == 'aarch64' && 'arm64' || matrix.architecture }}
+        allow-prereleases: true
+
+    - name: Setup Java ${{ matrix.java }}
+      uses: actions/setup-java@v5
+      with:
+        java-version: ${{ matrix.java }}
+        distribution: 'temurin'
+        architecture: ${{ matrix.architecture }}
+
+    - name: (macOS) Setup test dependencies
+      if: runner.os == 'macOS'
+      run: brew install ant
+
+    - name: Build test classes via ant
+      run: ant all
+
+    - name: Install pyjnius with [dev, ci] extras
+      run: |
+        pip install --timeout=120 .[dev,ci]
+  
+    - name: (Windows) Test pyjnius via pytest
+      if: runner.os == 'Windows'
+      run: |
+        $env:PATH +=";$env:JAVA_HOME\jre\bin\server\;$env:JAVA_HOME\jre\bin\client\;$env:JAVA_HOME\bin\server\"
+        $env:CLASSPATH ="../build/test-classes;../build/classes"
+        cd tests
+        pytest -v
+
+    - name: (Linux, macOS) Test pyjnius via pytest
+      if: runner.os != 'Windows'
+      run: |
+        cd tests
+        CLASSPATH=../build/test-classes:../build/classes python -m pytest -v
+
+#     - name: coveralls
+#       run: python -m coveralls
+#       env:
+#         COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}

@@ -1,0 +1,127 @@
+name: libunwind-linux-arm
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-libunwind-linux-arm:
+    name: Libunwind (Linux ARM64)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Hide system libunwind headers and libraries
+      run: |
+        # Hide system libunwind to ensure tests use bundled libunwind from clang-tool-chain
+        # Note: We don't use apt-get remove because it can cascade to remove other dependencies
+        echo "Checking for system libunwind packages..."
+        dpkg -l | grep -i libunwind || echo "No libunwind packages found"
+
+        # Hide libunwind headers by moving them
+        echo "Hiding libunwind headers from /usr/include..."
+        sudo mkdir -p /usr/include/hidden-libunwind
+        sudo mv /usr/include/libunwind*.h /usr/include/hidden-libunwind/ 2>/dev/null || true
+        sudo mv /usr/include/unwind.h /usr/include/hidden-libunwind/ 2>/dev/null || true
+
+        # Hide libunwind shared libraries by moving them (preserves other deps)
+        echo "Hiding libunwind libraries from /usr/lib..."
+        sudo mkdir -p /usr/lib/aarch64-linux-gnu/hidden-libunwind
+        sudo mv /usr/lib/aarch64-linux-gnu/libunwind*.so* /usr/lib/aarch64-linux-gnu/hidden-libunwind/ 2>/dev/null || true
+        sudo mv /usr/lib/aarch64-linux-gnu/libunwind*.a /usr/lib/aarch64-linux-gnu/hidden-libunwind/ 2>/dev/null || true
+
+        # Also check /usr/lib for non-multiarch systems
+        sudo mkdir -p /usr/lib/hidden-libunwind
+        sudo mv /usr/lib/libunwind*.so* /usr/lib/hidden-libunwind/ 2>/dev/null || true
+        sudo mv /usr/lib/libunwind*.a /usr/lib/hidden-libunwind/ 2>/dev/null || true
+
+        # Verify libunwind headers are not in standard paths
+        echo "Verifying no system libunwind headers in /usr/include..."
+        ls /usr/include/libunwind*.h 2>/dev/null && echo "WARNING: System libunwind headers found!" || echo "OK: No system libunwind headers"
+        ls /usr/include/unwind.h 2>/dev/null && echo "WARNING: System unwind.h found!" || echo "OK: No system unwind.h"
+
+        # Verify libunwind libraries are not in standard paths
+        echo "Verifying no system libunwind libraries in /usr/lib..."
+        ls /usr/lib/aarch64-linux-gnu/libunwind*.so* 2>/dev/null && echo "WARNING: System libunwind found!" || echo "OK: No system libunwind"
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Linux ARM64"
+        uname -a
+        python --version
+
+    - name: Download and install toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      timeout-minutes: 20
+
+    - name: Verify installation
+      run: |
+        uv run clang-tool-chain info
+
+    - name: Verify bundled libunwind exists in toolchain
+      run: |
+        # Check that bundled libunwind headers exist
+        CLANG_ROOT=$(uv run python -c "from clang_tool_chain.platform.detection import get_platform_binary_dir; print(get_platform_binary_dir().parent)")
+        echo "Clang root: $CLANG_ROOT"
+
+        echo "Checking for bundled libunwind headers..."
+        ls -la "$CLANG_ROOT/include/libunwind.h" 2>/dev/null && echo "OK: libunwind.h found" || echo "WARNING: libunwind.h not found"
+        ls -la "$CLANG_ROOT/include/unwind.h" 2>/dev/null && echo "OK: unwind.h found" || echo "WARNING: unwind.h not found"
+
+        echo "Checking for bundled libunwind libraries..."
+        ls -la "$CLANG_ROOT/lib/libunwind"* 2>/dev/null || echo "No bundled libunwind libraries found (may be expected)"
+
+    - name: Test libunwind header compilation
+      run: |
+        # Test that we can compile code using libunwind.h with bundled headers
+        cat > test_unwind.c << 'EOF'
+        // UNW_LOCAL_ONLY enables local unwinding symbols (_ULaarch64_*)
+        // Without this, the header uses remote unwinding symbols (_Uaarch64_*)
+        // which require libunwind-ptrace
+        #define UNW_LOCAL_ONLY
+        #include <libunwind.h>
+        #include <stdio.h>
+
+        void print_backtrace(void) {
+            unw_cursor_t cursor;
+            unw_context_t context;
+            unw_getcontext(&context);
+            unw_init_local(&cursor, &context);
+            printf("Backtrace initialized successfully\n");
+        }
+
+        int main() {
+            print_backtrace();
+            return 0;
+        }
+        EOF
+
+        echo "Compiling with bundled libunwind..."
+        uv run clang-tool-chain-c test_unwind.c -o test_unwind -lunwind
+
+        echo "Running test..."
+        ./test_unwind
+
+    - name: Run libunwind header tests
+      run: |
+        # Run comprehensive libunwind tests
+        uv run pytest tests/test_libunwind_headers.py -v -x

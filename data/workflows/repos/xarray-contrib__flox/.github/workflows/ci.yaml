@@ -1,0 +1,137 @@
+name: CI
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "*"
+  schedule:
+    - cron: "0 0 * * *" # Daily “At 00:00”
+  workflow_dispatch: # allows you to trigger manually
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{matrix.env}}, ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest"]
+        env: ["complete"]
+        python-version: ["3.11", "3.14"]
+        include:
+          - os: "windows-latest"
+            env: "complete"
+            python-version: "3.14"
+          - os: "ubuntu-latest"
+            env: "no-dask"
+            python-version: "3.14"
+          - os: "ubuntu-latest"
+            env: "minimal"
+            python-version: "3.11"
+          - os: "windows-latest"
+            env: "numpy1"
+            python-version: "3.11"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # Fetch all history for all branches and tags.
+      - name: Set environment variables
+        run: |
+          echo "PYTHON_VERSION=${{ matrix.python-version }}" >> $GITHUB_ENV
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install dependencies (with config file)
+        if: matrix.env == 'numpy1'
+        run: uv sync --group ${{ matrix.env }} --config-file uv-numpy1.toml --no-dev
+      - name: Install dependencies (without config file)
+        if: matrix.env != 'numpy1'
+        run: uv sync --group ${{ matrix.env }} --no-dev
+
+      # https://github.com/actions/cache/blob/main/tips-and-workarounds.md#update-a-cache
+      - name: Restore cached hypothesis directory
+        id: restore-hypothesis-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .hypothesis/
+          key: cache-hypothesis-${{ runner.os }}-${{ matrix.python-version }}-${{ github.run_id }}
+          restore-keys: |
+            cache-hypothesis-${{ runner.os }}-${{ matrix.python-version }}-
+
+      - name: Run Tests
+        id: status
+        run: |
+          uv run --no-dev python -c "import xarray; xarray.show_versions()" || true
+          uv run --no-dev pytest --durations=20 --durations-min=0.5 -n auto --cov=./ --cov-report=xml --hypothesis-profile ci
+      - name: Upload code coverage to Codecov
+        uses: codecov/codecov-action@v5.5.2
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          env_vars: RUNNER_OS,PYTHON_VERSION
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      # explicitly save the cache so it gets updated, also do this even if it fails.
+      - name: Save cached hypothesis directory
+        id: save-hypothesis-cache
+        if: always() && steps.status.outcome != 'skipped'
+        uses: actions/cache/save@v5
+        with:
+          path: .hypothesis/
+          key: cache-hypothesis-${{ runner.os }}-${{ matrix.python-version }}-${{ github.run_id }}
+
+  xarray-groupby:
+    name: xarray-groupby
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: "pydata/xarray"
+          fetch-depth: 0 # Fetch all history for all branches and tags.
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install xarray and dependencies
+        run: |
+          uv add --dev ".[dev]" "pint>=0.22"
+          uv pip uninstall h5netcdf
+          uv pip install pytz
+      - name: Install upstream flox
+        run: |
+          uv add git+https://github.com/dcherian/flox.git@${{ github.ref }}
+      - name: Version info
+        run: |
+          uv tree
+          uv run --no-dev python xarray/util/print_versions.py
+      - name: import xarray
+        run: |
+          uv run --no-dev python -c 'import xarray'
+      - name: import flox
+        run: |
+          uv run --no-dev python -c 'import flox'
+      - name: Run Tests
+        if: success()
+        id: status
+        run: |
+          set -euo pipefail
+          uv run --no-dev python -m pytest -n auto \
+              xarray/tests/test_groupby.py \
+              xarray/tests/test_units.py::TestDataArray::test_computation_objects \
+              xarray/tests/test_units.py::TestDataArray::test_grouped_operations \
+              xarray/tests/test_units.py::TestDataArray::test_resample \
+              xarray/tests/test_units.py::TestDataset::test_computation_objects \
+              xarray/tests/test_units.py::TestDataset::test_grouped_operations \
+              xarray/tests/test_units.py::TestDataset::test_resample

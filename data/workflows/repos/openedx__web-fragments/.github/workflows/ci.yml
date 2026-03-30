@@ -1,0 +1,44 @@
+name: Python CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+
+jobs:
+  run_tests:
+    name: tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python-version:
+        - '3.12'
+        toxenv: [django42, django52, docs, quality]
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: setup python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install pip
+      run: pip install -r requirements/pip.txt
+
+    - name: Install Dependencies
+      run: pip install -r requirements/ci.txt
+
+    - name: Run Tests
+      env:
+        TOXENV: ${{ matrix.toxenv }}
+      run: tox
+
+    - name: Run coverage
+      if: matrix.python-version == '3.12' && matrix.toxenv == 'django42'
+      uses: codecov/codecov-action@v6
+      with:
+        flags: unittests
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true

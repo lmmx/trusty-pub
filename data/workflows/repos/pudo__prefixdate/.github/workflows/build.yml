@@ -1,0 +1,35 @@
+name: Build and publish
+
+on: [push]
+permissions:
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: deploy
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Validate type annotations
+        run: |
+          mypy --strict prefixdate
+      - name: Run tests
+        run: |
+          pytest --cov=prefixdate tests/
+      - name: Build a distribution
+        run: |
+          python3 -m build --wheel
+      - name: Publish to PyPI
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

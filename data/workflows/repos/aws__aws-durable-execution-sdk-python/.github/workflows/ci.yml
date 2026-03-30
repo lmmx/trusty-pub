@@ -1,0 +1,53 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Python package
+permissions:
+  contents: read
+
+on:
+  push:
+
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-commits:
+    # Note: To re-run `lint-commits` after fixing the PR title, close-and-reopen the PR.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Use Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22.x
+      - name: Check PR title
+        run: |
+          node "$GITHUB_WORKSPACE/.github/workflows/lintcommit.js"
+
+  build:
+    needs: lint-commits
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11","3.12","3.13","3.14"]
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install Hatch 
+      run: |
+        python -m pip install hatch==1.16.5
+    - name: static analysis
+      run: hatch fmt --check
+    - name: type checking
+      run: hatch run types:check
+    - name: Run tests + coverage
+      run: hatch run test:cov
+    - name: Build distribution
+      run: hatch build

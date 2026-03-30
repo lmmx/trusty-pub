@@ -1,0 +1,114 @@
+name: build
+
+on:
+  pull_request:
+    paths:
+      - '**.py'
+      - '.github/workflows/*.yml'
+      - '.pylintrc'
+      - '.pre-commit-config.yaml'
+      - '.pydocstyle'
+      - '.relint.yml'
+      - '.yamllint'
+      - 'poetry.lock'
+      - 'pyproject.toml'
+      - 'tox.ini'
+  push:
+    branches:
+      - master
+
+jobs:
+  pre-commit:
+    name: Generic pre-commit checks
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+
+      - run: pip install pre-commit
+      - run: SKIP=pylint pre-commit run --all-files
+
+  pylint:
+    name: Pylint
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+
+      - run: pip install pre-commit
+      - run: pre-commit run pylint --all-files
+
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, windows-latest]
+        python: ["3.6", "3.7", "3.8", "3.9", "3.10", "pypy-3.7", "pypy-3.8"]
+
+    name: ${{ matrix.python }} on ${{ matrix.os }} tests
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+
+      - run: pip install tox coverage
+
+      - name: Run Python ${{ matrix.python }} tox job
+        run: tox -e py-django32
+
+      - run: coverage combine
+      - run: coverage report
+      - run: coverage xml -i
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2.1.0
+        with:
+          file: ./coverage.xml
+          name: codecov-py${{ matrix.python }}
+
+  tests-django:
+    strategy:
+      matrix:
+        django_version: ["22", "32", "40"]
+
+    name: Django ${{ matrix.django_version }} tests
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: "3.9"
+
+      - run: pip install tox coverage
+
+      - name: Run Django ${{ matrix.django_version }} tox job
+        run: tox -e ${TOX_JOB//.}
+        env:
+          TOX_JOB: py39-django${{ matrix.django_version }}
+
+      - run: coverage combine
+      - run: coverage report
+      - run: coverage xml -i
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2.1.0
+        with:
+          file: ./coverage.xml
+          name: codecov-py39-django${{ matrix.django_version }}

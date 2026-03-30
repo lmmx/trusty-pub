@@ -1,0 +1,56 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 5.3.1). Leave empty for latest.'
+        required: false
+        type: string
+
+jobs:
+  publish-to-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pyodbc-mi
+    permissions:
+      id-token: write
+      contents: read  # Required for gh release download
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine Release Tag
+        id: get_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "${{ inputs.version }}" ]; then
+            echo "No version provided, fetching latest release..."
+            LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+            echo "Latest tag: $LATEST_TAG"
+            echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "Using provided version: v${{ inputs.version }}"
+            # Ensure v prefix if missing, though user prompt implies raw version
+            if [[ "${{ inputs.version }}" == v* ]]; then
+               echo "tag=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            else
+               echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Download Release Assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Downloading assets for tag: ${{ steps.get_tag.outputs.tag }}"
+          gh release download ${{ steps.get_tag.outputs.tag }} --dir dist --pattern "*"
+
+      - name: List files
+        run: ls -R dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

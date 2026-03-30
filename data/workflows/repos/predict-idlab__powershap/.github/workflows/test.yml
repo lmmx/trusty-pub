@@ -1,0 +1,73 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Unit tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "powershap/**"
+      - "tests/**"
+      - "uv.lock"
+      - ".github/workflows/test.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "powershap/**"
+      - "tests/**"
+      - "uv.lock"
+      - ".github/workflows/test.yml"
+
+jobs:
+  test:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['ubuntu-latest', 'windows-latest']  # TODO - do we add other OSes?
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - name: Install llvm on Ubuntu
+      if: runner.os == 'Linux'
+      run: sudo apt-get install llvm # Because https://github.com/slundberg/shap/issues/1854
+
+    - name: Install MSVC build tools on Windows
+      if: runner.os == 'Windows'
+      uses: microsoft/setup-msbuild@v1
+
+
+    - name: Install dependencies
+      run: uv sync --locked --all-extras --dev
+
+    - name: Test with pytest
+      run: |
+        uv run pytest --cov=powershap --junitxml=junit/test-results-${{ matrix.python-version }}.xml --cov-report=xml tests
+
+    - name: Upload pytest test results
+      uses: actions/upload-artifact@v4
+      with:
+        name: pytest-results-${{ matrix.python-version }}-${{matrix.os}}
+        path: junit/test-results-${{ matrix.python-version }}-${{matrix.os}}.xml
+        # Use always() to always run this step to publish test results when there are test failures
+      if: ${{ always() }}
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5

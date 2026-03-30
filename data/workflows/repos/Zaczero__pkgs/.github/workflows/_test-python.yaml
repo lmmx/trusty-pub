@@ -1,0 +1,73 @@
+name: Test Pure Python Package
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        required: true
+        type: string
+
+jobs:
+  resolve_python_versions:
+    runs-on: ubuntu-latest
+    outputs:
+      python-versions: ${{ steps.resolve.outputs.python-versions }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: resolve
+        run: |
+          set -euo pipefail
+
+          versions_file="${{ inputs.package }}/.python-versions"
+          if [ ! -f "$versions_file" ]; then
+            versions_file=".python-versions"
+          fi
+
+          versions="$(jq -R -s -c '
+            split("\n")
+            | map(gsub("\r$"; ""))
+            | map(select(length > 0))
+            | map(select(startswith("#") | not))
+          ' "$versions_file")"
+
+          echo "python-versions=$versions" >> "$GITHUB_OUTPUT"
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@main
+
+      - name: Build
+        run: uv build -o dist ${{ inputs.package }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ inputs.package }}-ubuntu-latest
+          path: dist
+
+  test:
+    needs: resolve_python_versions
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.resolve_python_versions.outputs.python-versions) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@main
+        with:
+          python-version: ${{ matrix.python-version }}
+          working-directory: ${{ inputs.package }}
+          cache-dependency-glob: |
+            pyproject.toml
+          cache-suffix: ${{ inputs.package }}-py${{ matrix.python-version }}
+
+      - name: Install Python
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Test
+        run: |
+          cd ${{ inputs.package }}
+          uv sync && uv run pytest

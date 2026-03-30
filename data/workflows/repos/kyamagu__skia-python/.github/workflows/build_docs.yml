@@ -1,0 +1,33 @@
+name: Build and Upload Docs
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+# This is identical to "build_docs" in ci except for not using/dependent on
+# newly built wheels, and trigged on manual.
+  build_docs:
+    name: Build docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: '3.11'
+
+      - name: Build docs
+        run: |
+          # installing libegl1 will also install libegl-mesa0
+          sudo apt-get -y install libegl1
+          python -m pip install --pre skia-python
+          python -m pip install sphinx sphinx-rtd-theme
+          sphinx-build -b html docs docs/_build/html
+
+      - name: Deploy docs
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/_build/html

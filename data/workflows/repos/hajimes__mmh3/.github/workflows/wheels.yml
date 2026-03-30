@@ -1,0 +1,193 @@
+---
+name: Wheel-Builder
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build_wheels:
+    name: Build wheel for ${{ matrix.platform }} ${{ matrix.archs }} ${{ matrix.build }} (runs on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04]
+        archs: [x86_64, i686, aarch64, ppc64le, s390x]
+        build: [manylinux, musllinux]
+        include:
+          - os: windows-2025
+            archs: AMD64
+          - os: windows-2025
+            archs: x86
+          - os: windows-2025
+            archs: ARM64
+          - os: macos-26-intel
+            archs: x86_64
+          - os: macos-26
+            archs: arm64
+          - os: macos-26
+            archs: universal2
+          - os: ubuntu-24.04
+            platform: android
+            archs: x86_64
+            build: android
+          - os: macos-26
+            platform: android
+            archs: arm64_v8a
+            build: android
+          - os: macos-26
+            platform: ios
+            archs: arm64_iphoneos
+          - os: macos-26
+            platform: ios
+            archs: arm64_iphonesimulator
+          - os: macos-26-intel
+            platform: ios
+            archs: x86_64_iphonesimulator
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Set dev version for TestPyPI
+        if: github.event_name == 'workflow_dispatch'
+        shell: python
+        run: |
+          import re, datetime
+          timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M")
+          text = open("pyproject.toml", encoding="utf-8").read()
+          m = re.search(r'version\s*=\s*"(.+?)"', text)
+          if not m:
+            raise RuntimeError("version field not found in pyproject.toml")
+          version = m.group(1)
+          base_version = version.split("-")[0]
+          new_text = re.sub(
+            r'version\s*=\s*".*?"',
+            f'version = "{base_version}.dev{timestamp}"',
+            text,
+            count=1
+          )
+          open("pyproject.toml", "w", encoding="utf-8").write(new_text)
+      - name: Set up QEMU
+        if: runner.os == 'Linux' && matrix.platform != 'android'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      # https://github.blog/changelog/2024-04-02-github-actions-hardware-accelerated-android-virtualization-now-available/
+      - name: Set up KVM for Android emulation
+        if: runner.os == 'Linux' && matrix.platform == 'android'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build wheels
+        uses: pypa/cibuildwheel@ee02a1537ce3071a004a6b08c41e72f0fdc42d9a # v3.4.0
+        with:
+          output-dir: wheelhouse
+        env:
+          CIBW_BUILD: "{cp310,cp311,cp312,cp313,cp314,cp314t}-${{ matrix.build }}*"
+          CIBW_PLATFORM: ${{ matrix.platform || 'auto' }}
+          CIBW_ARCHS: ${{ matrix.archs }}
+          CIBW_BUILD_FRONTEND: "build"
+          CIBW_TEST_REQUIRES: "pytest"
+          CIBW_TEST_SOURCES_ANDROID: "./tests"
+          CIBW_TEST_SOURCES_IOS: "./tests"
+          CIBW_TEST_COMMAND: "pytest {project}"
+          CIBW_TEST_COMMAND_ANDROID: "python -m pytest ./tests"
+          CIBW_TEST_COMMAND_IOS: "python -m pytest ./tests"
+          CIBW_TEST_SKIP: "*-win_arm64 *-android_arm64_v8a"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: Wheel-${{ matrix.os }}-${{ matrix.platform }}-${{ matrix.build }}${{ matrix.archs }}
+          path: ./wheelhouse/*.whl
+  build_sdist:
+    name: Build a source distribution
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Set dev version for TestPyPI
+        if: github.event_name == 'workflow_dispatch'
+        shell: python
+        run: |
+          import re, datetime
+          timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M")
+          text = open("pyproject.toml", encoding="utf-8").read()
+          m = re.search(r'version\s*=\s*"(.+?)"', text)
+          if not m:
+            raise RuntimeError("version field not found in pyproject.toml")
+          version = m.group(1)
+          base_version = version.split("-")[0]
+          new_text = re.sub(
+            r'version\s*=\s*".*?"',
+            f'version = "{base_version}.dev{timestamp}"',
+            text,
+            count=1
+          )
+          open("pyproject.toml", "w", encoding="utf-8").write(new_text)
+      - name: Build sdist
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools build
+          python -m build --sdist
+      - name: Test building from the source distribution
+        shell: bash
+        run: |
+          pip install ".[test,type]"
+          pip uninstall -y mmh3
+          python -m pip install dist/*.tar.gz
+          python -m pytest
+          mypy --strict tests
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          path: dist/*.tar.gz
+  publish-to-pypi:
+    name: "Publish artifacts to PyPI"
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mmh3
+    permissions:
+      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
+    steps:
+      - name: Set up built items
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+  publish-to-testpypi:
+    name: "Publish artifacts to TestPyPI"
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-24.04
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/mmh3
+    permissions:
+      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
+    steps:
+      - name: Set up built items
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          repository-url: https://test.pypi.org/legacy/

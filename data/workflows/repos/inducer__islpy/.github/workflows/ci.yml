@@ -1,0 +1,161 @@
+name: CI
+on:
+    push:
+        branches:
+        - main
+    pull_request:
+    schedule:
+        - cron:  '17 3 * * 0'
+
+concurrency:
+    group: ${{ github.head_ref || github.ref_name }}
+    cancel-in-progress: true
+
+jobs:
+    ruff:
+        name: Ruff
+        runs-on: ubuntu-latest
+        steps:
+        -   uses: actions/checkout@v6
+        -   uses: actions/setup-python@v6
+        -   name: "Main Script"
+            run: |
+                pipx install ruff
+                ruff check
+
+    pytest:
+        name: Pytest Linux on Py${{ matrix.python-version }}
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                python-version: ['3.10', '3.12', '3.x']
+        steps:
+        -   uses: actions/checkout@v6
+        -
+            uses: actions/setup-python@v6
+            with:
+                python-version: ${{ matrix.python-version }}
+        -   name: "Main Script"
+            run: |
+                EXTRA_INSTALL="numpy"
+                curl -L -O https://gitlab.tiker.net/inducer/ci-support/raw/main/build-and-test-py-project.sh
+                . ./build-and-test-py-project.sh
+
+    basdedpyright:
+        runs-on: ubuntu-latest
+        steps:
+        -   uses: actions/checkout@v6
+        -   uses: actions/setup-python@v6
+            with:
+                python-version: '3.x'
+        -   name: "Main Script"
+            run: |
+                curl -L -O https://tiker.net/ci-support-v0
+                . ./ci-support-v0
+                build_py_project_in_venv
+                pip install nanobind typing-extensions basedpyright
+                (cd stubgen; python stubgen.py)
+                basedpyright islpy/_isl.pyi islpy/_monkeypatch.py islpy/__init__.py
+
+    examples:
+        name: Examples Linux on Py${{ matrix.python-version }}
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                python-version: ['3.10', '3.12', '3.x']
+        steps:
+        -   uses: actions/checkout@v6
+        -
+            uses: actions/setup-python@v6
+            with:
+                python-version: ${{ matrix.python-version }}
+        -   name: "Main Script"
+            run: |
+                EXTRA_INSTALL="matplotlib numpy"
+                curl -L -O https://tiker.net/ci-support-v0
+                . ./ci-support-v0
+                build_py_project_in_venv
+                run_examples
+
+    pytest_mac:
+        name: Pytest macOS
+        runs-on: macos-latest
+        steps:
+        -   uses: actions/checkout@v6
+        -
+            uses: actions/setup-python@v6
+            with:
+                python-version: '3.x'
+        -   name: "Main Script"
+            run: |
+                export MACOS_DEPLOYMENT_TARGET=10.14
+                curl -L -O https://gitlab.tiker.net/inducer/ci-support/raw/main/build-and-test-py-project.sh
+                . ./build-and-test-py-project.sh
+
+    docs:
+        name: Documentation
+        runs-on: ubuntu-latest
+        steps:
+        -   uses: actions/checkout@v6
+        -
+            uses: actions/setup-python@v6
+            with:
+                python-version: '3.x'
+        -   name: "Main Script"
+            run: |
+                curl -L -O https://tiker.net/ci-support-v0
+                . ./ci-support-v0
+                build_py_project_in_venv
+                build_docs
+
+    downstream_tests:
+        strategy:
+            matrix:
+                downstream_project: [loopy]
+        name: Tests for downstream project ${{ matrix.downstream_project }}
+        runs-on: ubuntu-latest
+        steps:
+        -   uses: actions/checkout@v6
+        -   name: "Main Script"
+            env:
+                DOWNSTREAM_PROJECT: ${{ matrix.downstream_project }}
+            run: |
+                curl -L -O https://tiker.net/ci-support-v0
+                . ./ci-support-v0
+
+                git clone "https://github.com/inducer/$DOWNSTREAM_PROJECT.git"
+                cd "$DOWNSTREAM_PROJECT"
+                echo "*** $DOWNSTREAM_PROJECT version: $(git rev-parse --short HEAD)"
+
+                edit_requirements_txt_for_downstream_in_subdir
+                sed -i '/islpy/ d' .test-conda-env-py3.yml
+
+                export CONDA_ENVIRONMENT=.test-conda-env-py3.yml
+
+                # Avoid slow or complicated tests in downstream projects
+                export PYTEST_ADDOPTS="-k 'not (slowtest or octave or mpi)'"
+
+                build_py_project_in_conda_env
+                test_py_project
+
+    barvinok:
+        name: "Test barvinok build script"
+        runs-on: ubuntu-latest
+        env:
+            GITHUB_HEAD_REPOSITORY: ${{github.event.pull_request.head.repo.full_name}}
+        steps:
+        -   uses: actions/checkout@v6
+        -
+            uses: actions/setup-python@v6
+            with:
+                python-version: "3.x"
+        -   name: "Main Script"
+            run: |
+                python3 -m venv .env
+                source .env/bin/activate
+                python -m ensurepip
+                pip install pcpp pytest numpy
+                ./build-with-barvinok.sh "$HOME/barvinok-build"
+                (cd test; LD_LIBRARY_PATH="$HOME/barvinok-build/lib" python -m pytest --tb=native -rxsw)
+
+# vim: sw=4

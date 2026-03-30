@@ -1,0 +1,147 @@
+name: emscripten
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-emscripten-linux:
+    name: Emscripten (Linux x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Download Emscripten toolchain
+      run: uv run clang-tool-chain-emcc --version
+      timeout-minutes: 20
+
+    - name: Verify Emscripten installation
+      run: |
+        echo "Testing basic Emscripten compilation..."
+        cat > test_wasm.cpp << 'EOF'
+        #include <iostream>
+        int main() {
+            std::cout << "Hello WebAssembly!" << std::endl;
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-empp test_wasm.cpp -o test_wasm.js
+        node test_wasm.js
+
+    - name: Run Emscripten basic tests
+      run: uv run pytest tests/test_emscripten.py -v
+
+    - name: Run Emscripten full pipeline tests
+      run: uv run pytest tests/test_emscripten_full_pipeline.py -v
+
+  # macOS and Windows jobs will be enabled when Emscripten archives are available
+  # Currently, only Linux x86_64 has Emscripten binaries (v4.0.15)
+  # See manifests for status: Windows and macOS marked as "PENDING"
+
+  # test-emscripten-macos-x86:
+  #   name: Emscripten (macOS x86_64)
+  #   runs-on: macos-15-intel
+  #
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #
+  #   - name: Set up Python
+  #     uses: actions/setup-python@v5
+  #     with:
+  #       python-version: '3.11'
+  #
+  #   - name: Install uv
+  #     run: curl -LsSf https://astral.sh/uv/install.sh | sh
+  #
+  #   - name: Install package
+  #     run: |
+  #       uv venv
+  #       uv pip install -e ".[dev]"
+  #
+  #   - name: Download Emscripten toolchain
+  #     run: uv run clang-tool-chain-emcc --version
+  #     timeout-minutes: 20
+  #
+  #   - name: Run Emscripten tests
+  #     run: |
+  #       uv run pytest tests/test_emscripten.py -v
+  #       uv run pytest tests/test_emscripten_full_pipeline.py -v
+
+  # test-emscripten-macos-arm:
+  #   name: Emscripten (macOS ARM64)
+  #   runs-on: macos-latest
+  #
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #
+  #   - name: Set up Python
+  #     uses: actions/setup-python@v5
+  #     with:
+  #       python-version: '3.11'
+  #
+  #   - name: Install uv
+  #     run: curl -LsSf https://astral.sh/uv/install.sh | sh
+  #
+  #   - name: Install package
+  #     run: |
+  #       uv venv
+  #       uv pip install -e ".[dev]"
+  #
+  #   - name: Download Emscripten toolchain
+  #     run: uv run clang-tool-chain-emcc --version
+  #     timeout-minutes: 20
+  #
+  #   - name: Run Emscripten tests
+  #     run: |
+  #       uv run pytest tests/test_emscripten.py -v
+  #       uv run pytest tests/test_emscripten_full_pipeline.py -v
+
+  # test-emscripten-windows:
+  #   name: Emscripten (Windows x86_64)
+  #   runs-on: windows-latest
+  #
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #
+  #   - name: Set up Python
+  #     uses: actions/setup-python@v5
+  #     with:
+  #       python-version: '3.11'
+  #
+  #   - name: Install uv
+  #     run: irm https://astral.sh/uv/install.ps1 | iex
+  #
+  #   - name: Install package
+  #     run: |
+  #       uv venv
+  #       uv pip install -e ".[dev]"
+  #
+  #   - name: Download Emscripten toolchain
+  #     run: uv run clang-tool-chain-emcc --version
+  #     timeout-minutes: 20
+  #
+  #   - name: Run Emscripten tests
+  #     run: |
+  #       uv run pytest tests/test_emscripten.py -v
+  #       uv run pytest tests/test_emscripten_full_pipeline.py -v

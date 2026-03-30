@@ -1,0 +1,30 @@
+name: Pytest
+
+on: [workflow_call]
+
+permissions: read-all
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    env:
+      BACKEND_DIR: ./backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/pnpm-node-install
+        name: Install Node, pnpm and dependencies.
+      - uses: ./.github/actions/uv-python-install
+        name: Install Python, uv and Python dependencies
+        with:
+          python-version: ${{ matrix.python-version }}
+          extra-dependencies: --extra tests --extra mypy --extra custom-data
+          working-directory: ${{ env.BACKEND_DIR }}
+      - name: Build UI components
+        run: pnpm run buildUi
+        timeout-minutes: 5
+      - name: Run Pytest
+        run: uv run --no-project pytest --cov=chainlit/
+        working-directory: ${{ env.BACKEND_DIR }}

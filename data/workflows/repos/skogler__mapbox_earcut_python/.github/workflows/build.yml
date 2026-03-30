@@ -1,0 +1,53 @@
+name: Build
+
+on: [push, pull_request, workflow_call]
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - windows-latest
+          - windows-11-arm
+          - macos-15-intel
+          - macos-14
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.0
+        env:
+          # Only build native arch on linux (x86_64 and arm64)
+          CIBW_ARCHS_LINUX: auto
+          # Need this to be >= 10.13 to support C++17 aligned allocations on Intel
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.os == 'macos-15-intel' && '10.13' || (startsWith(matrix.os, 'macos') && '11.0' || '') }}
+          # Only build Python 3.11+ on Windows 11 ARM
+          CIBW_BUILD: ${{ matrix.os == 'windows-11-arm' && 'cp311-* cp312-* cp313-* cp314-*' || '' }}
+
+      - name: Show files
+        run: ls -lh wheelhouse
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz

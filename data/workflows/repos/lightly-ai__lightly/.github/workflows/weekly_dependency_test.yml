@@ -1,0 +1,41 @@
+# Install lightly from scratch and run tests.
+# Python environment for regular unit tests is cached. In this workflow,
+# we always pick up the latest dependencies and therefore check if a new
+# external release breaks lightly.
+name: Weekly Dependency Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 22 * * THU' # each Thursday night, at 22:00 UTC
+
+jobs:
+  test_fresh_install:
+    name: Test fresh install
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set Up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Set Up Environment
+      run: |
+        make install-uv reset-venv
+        source .venv/bin/activate
+        make install-latest
+    - name: Run Tests
+      id: run_tests
+      run: |
+        source .venv/bin/activate
+        python -m pytest -s -v --runslow
+    - name: Slack Notification
+      if: always()
+      uses: rtCamp/action-slack-notify@v2
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_NIGHTLY }}
+        SLACK_ICON_EMOJI: ":github:"
+        SLACK_USERNAME: Lightly PIP Package ${{ github.workflow }}
+        SLACK_COLOR: ${{ steps.run_tests.outcome }}
+        SLACK_FOOTER: ""

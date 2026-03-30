@@ -1,0 +1,54 @@
+name: Minimal Dependency Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  detect-code-changes:
+    name: Detect Code Changes
+    runs-on: ubuntu-22.04
+    outputs:
+      run-tests: ${{ steps.filter.outputs.run-tests }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          list-files: shell
+          filters: |
+            run-tests:
+              - '!docs/**'
+              - '!examples/**'
+              - '!benchmarks/**'
+
+  test:
+    name: Test
+    needs: detect-code-changes
+    if: needs.detect-code-changes.outputs.run-tests == 'true'
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python: ["3.7"]
+        dependencies: ["minimal", "minimal-extras"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Set Up Environment
+        run: |
+          # Install system dependencies required by PyAV on CI.
+          make install-av-system-deps
+          make install-uv reset-venv
+          source .venv/bin/activate
+          make install-${{ matrix.dependencies }}
+      - name: Run Tests
+        run: |
+          source .venv/bin/activate
+          export LIGHTLY_SERVER_LOCATION="localhost:-1"
+          python -m pytest -s -v --runslow

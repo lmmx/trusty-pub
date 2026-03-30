@@ -1,0 +1,41 @@
+name: test-release
+
+on:
+    push:
+        branches:
+            - master
+    workflow_run:
+        workflows:
+            - "production-tests"
+        types:
+            - completed
+jobs:
+    test-release:
+        name: "Release on Test Pypi"
+        runs-on: ubuntu-latest
+        concurrency: release
+
+        steps:
+            -   uses: actions/checkout@v2
+
+            -   name: Install poetry
+                run: |
+                    which python
+                    which pipx
+                    pipx install poetry
+
+            -   name: View poetry version
+                run: poetry --version
+
+            -   name: Update version
+                run: poetry version patch
+
+            -   name: Build package
+                run: poetry build
+
+            -   name: Publish package to TestPyPI
+                uses: pypa/gh-action-pypi-publish@release/v1
+                with:
+                    user: __token__
+                    password: ${{ secrets.TEST_PYPI_TOKEN }}
+                    repository_url: https://test.pypi.org/legacy/

@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: github.repository_owner == 'jazzband'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: "pyproject.toml"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip
+          python -m pip install build twine
+
+      - name: Build package
+        run: |
+          python -m build
+          twine check dist/*
+
+      - name: Upload packages to Jazzband
+        if: github.event.action == 'published'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: jazzband
+          password: ${{ secrets.JAZZBAND_RELEASE_KEY }}
+          repository-url: https://jazzband.co/projects/tablib/upload

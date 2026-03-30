@@ -1,0 +1,42 @@
+name: Performance
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  benchmarks:
+    name: 📈 Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        id: checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.14
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          architecture: x64
+
+      - name: Install uv
+        id: setup-uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install tox
+        id: install-tox
+        run: |
+          uv pip install --system tox tox-uv
+
+      - name: Run benchmarks with CodSpeed
+        id: run-benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: instrumentation
+          token: ${{ secrets.CODSPEED_TOKEN }}
+          run: tox -e py313 -- -k benchmarks --benchmark-enable --codspeed

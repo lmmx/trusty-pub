@@ -1,0 +1,33 @@
+name: style
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/style.yaml
+      - docs/.snippets/**
+      - src/**
+      - tests/**
+      - justfile
+      - pyproject.toml
+      - uv.lock
+
+jobs:
+  style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup just
+        uses: extractions/setup-just@v3
+        with:
+          just-version: 1.38.0
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: 0.6.4
+
+      - name: Run style
+        run: just style

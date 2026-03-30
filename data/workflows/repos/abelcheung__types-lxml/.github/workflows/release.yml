@@ -1,0 +1,88 @@
+name: Publish releases
+
+on:
+  push:
+    tags:
+      - '20*'
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      checks: write
+    uses: ./.github/workflows/build_inc.yml
+    with:
+      gitref: ${{ github.ref }}
+
+  all_tests:
+    needs: build
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    uses: ./.github/workflows/test_inc.yml
+    with:
+      flavor: ${{ matrix.flavor }}
+
+  pypi-rel:
+    needs: all_tests
+    runs-on: ubuntu-slim
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    steps:
+
+    - uses: actions/download-artifact@v8
+      with:
+        name: dist-${{ matrix.flavor }}
+        path: dist
+
+    - name: Determine PyPI URL
+      uses: haya14busa/action-cond@v1
+      id: pypi-url
+      with:
+        cond: ${{ vars.OFFICIAL_PYPI || false }}
+        if_true: "https://upload.pypi.org/legacy/"
+        if_false: "https://test.pypi.org/legacy/"
+
+    - uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: ${{ steps.pypi-url.outputs.value }}
+
+  gh-rel:
+    needs: all_tests
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: dist-*
+        path: dist
+        merge-multiple: true
+
+    - uses: actions/attest-build-provenance@v4
+      with:
+        subject-path: |
+          dist/*.whl
+          dist/*.tar.gz
+
+    # only need contents: write
+    - uses: ncipollo/release-action@v1
+      with:
+        artifacts: "dist/*.whl,dist/*.tar.gz"
+        artifactErrorsFailBuild: true
+        draft: true
+

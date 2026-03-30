@@ -1,0 +1,47 @@
+# safe runs from main
+
+name: publish
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  version_or_publish:
+    runs-on: ubuntu-22.04
+    environment: publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm
+        uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # @v4
+        with:
+          version: 9.1.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install changesets
+        run: pnpm i --frozen-lockfile
+      - name: create and publish versions
+        id: changesets
+        uses: changesets/action@aba318e9165b45b7948c60273e0b72fce0a64eb9 # @v1
+        with:
+          version: pnpm ci:version
+          commit: "chore: update versions"
+          title: "chore: update versions"
+          publish: pnpm ci:tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GRADIO_PAT }}
+      - name: publish to pypi
+        if: steps.changesets.outputs.hasChangesets != 'true'
+        uses: "gradio-app/github/actions/publish-pypi@main"
+        with:
+          use-oidc: true

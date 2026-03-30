@@ -1,0 +1,197 @@
+name: Test with coverage
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SKIP_SLOW_TESTS: 1
+  RUSTFLAGS: "-C instrument-coverage -C codegen-units=1 -C link-dead-code"
+  LLVM_PROFILE_FILE: "%p-%m.profraw"
+  CFLAGS: "--coverage -O0 -g"
+  LDFLAGS: "--coverage -g"
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v6
+        with:
+          python-version: "3.10"
+      - name: Restore test durations cache
+        uses: actions/cache/restore@v5
+        with:
+          path: test_durations.json
+          key: cov-test-durations-${{ github.sha }}
+          restore-keys: cov-test-durations-
+      - name: Build
+        run: uv sync -v -p 3.10 --all-groups
+      - name: Archive environment
+        run: tar -cpf /tmp/env.tzst --absolute-names --zstd $PWD $UV_CACHE_DIR $UV_PYTHON_INSTALL_DIR
+      - name: Upload environment artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4
+        with:
+          name: env
+          path: /tmp/env.tzst
+          if-no-files-found: error
+          compression-level: 0
+
+  test:
+    needs: [build]
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runner_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: env
+          path: .
+      - name: Extract environment
+        run: |
+          tar -xpf $PWD/env.tzst -C /
+          rm env.tzst
+      - name: Download test binaries
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        with:
+          repository: angr/binaries
+          path: binaries
+      - name: Relocate binaries directory
+        run: mv binaries ..
+      - name: Run tests
+        run: |
+          source .venv/bin/activate
+          pytest -vv \
+            -n auto --forked --splits 10 --group ${{ matrix.runner_id }} --splitting-algorithm=least_duration \
+            --cov=angr --cov=tests --cov-report=xml \
+            --junitxml=junit.xml -o junit_family=legacy \
+            --store-durations --clean-durations --durations-path=test_durations.json \
+            || [[ $? -lt 2 ]]  # Accept success and test failures, fail on infrastructure problems (exit codes >1)
+          gcovr -r native --print-summary --xml-pretty -o coverage-native.xml
+      - name: Check for results
+        run: |
+          [[ -e junit.xml && -e coverage.xml && -e coverage-native.xml && -e test_durations.json ]]
+      - name: Upload results artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: results-${{ matrix.runner_id }}
+          if-no-files-found: error
+          path: |
+            ./junit.xml
+            ./coverage.xml
+            ./coverage-native.xml
+            ./test_durations.json
+            ./*.profraw
+
+  test_rust:
+    name: Test Rust packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1
+      - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
+        with:
+          tool: cargo-llvm-cov
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
+        with:
+          python-version: "3.10"
+      - name: Run tests
+        run: |
+          cargo test --release
+          cargo llvm-cov --lcov --output-path lcov.info
+      - name: Upload results artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: results-rust
+          if-no-files-found: error
+          path: lcov.info
+
+  report:
+      name: Report
+      runs-on: ubuntu-latest
+      permissions:
+        id-token: write
+        checks: write
+      needs: [test, test_rust]
+      steps:
+      - name: Download environment
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: env
+          path: .
+      - name: Extract environment
+        run: |
+          tar -xpf $PWD/env.tzst -C /
+          rm env.tzst
+      - name: Download results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "results-*"
+          path: results
+      - name: Combine Rust coverage
+        run: |
+          find results
+
+          # XXX: Workaround slow `Processing triggers for man-db...`
+          echo 'set man-db/auto-update false' | sudo debconf-communicate
+          sudo dpkg-reconfigure man-db
+
+          sudo apt-get install -qq llvm-20 llvm-20-tools
+          echo "Merging coverage..."
+          llvm-profdata-20 merge -sparse $(find . -name '*.profraw') -o default.profdata
+          echo "Generating report..."
+          llvm-cov-20 report ./angr/rustylib*.so -instr-profile=default.profdata --sources $(find native -name "*.rs")
+          llvm-cov-20 export ./angr/rustylib*.so -instr-profile=default.profdata --sources $(find native -name "*.rs") --format=lcov > lcov-py.info
+      - name: Collect results
+        id: files
+        run: |
+          coverage=$(find . -type f \( -name 'coverage*.xml' -o -name 'lcov*.info' \) | paste -sd, -)
+          echo "coverage=$coverage" >> "$GITHUB_OUTPUT"
+          junit=$(find . -type f -name 'junit.xml' | paste -sd, -)
+          echo "junit=$junit" >> "$GITHUB_OUTPUT"
+      - name: Upload test coverage to Codecov
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5
+        with:
+          use_oidc: true
+          verbose: true
+          files: ${{ steps.files.outputs.coverage }}
+      - name: Upload test results to Codecov
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5
+        with:
+          use_oidc: true
+          fail_ci_if_error: true
+          verbose: true
+          files: ${{ steps.files.outputs.junit }}
+          report_type: test_results
+      - name: Combine test durations
+        run: jq -Ss 'add' results/**/test_durations.json > test_durations.json
+      - name: Upload combined test durations artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: test_durations
+          path: ./test_durations.json
+          if-no-files-found: error
+      - name: Update test durations cache
+        uses: actions/cache/save@v5
+        with:
+          path: test_durations.json
+          key: cov-test-durations-${{ github.sha }}
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@c950f6fb443cb5af20a377fd0dfaa78838901040 # v2
+        with:
+          files: "results/**/junit.xml"
+          action_fail_on_inconclusive: true
+          comment_mode: off  # codecov already leaves a comment, and more details
+                             # from this action can be found in the check it creates.

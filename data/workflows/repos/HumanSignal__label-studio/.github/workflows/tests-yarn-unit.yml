@@ -1,0 +1,72 @@
+name: "yarn unit"
+
+on:
+  workflow_call:
+    inputs:
+      head_sha:
+        required: true
+        type: string
+
+env:
+  NODE: "22"
+  FRONTEND_MONOREPO_DIR: "web"
+
+jobs:
+  main:
+    name: "yarn unit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: hmarr/debug-action@v3.0.0
+
+      - name: Configure git
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          git config --global user.name 'robot-ci-heartex'
+          git config --global user.email 'robot-ci-heartex@users.noreply.github.com'
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.head_sha }}
+
+      - name: Setup frontend environment
+        uses: ./.github/actions/setup-frontend-environment
+        with:
+          node-version: "${{ env.NODE }}"
+          directory: "${{ env.FRONTEND_MONOREPO_DIR }}"
+
+      # Nx db cache ties artifacts to machine ID; restored cache from other runners is not used.
+      - name: Cache Nx
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.FRONTEND_MONOREPO_DIR }}/.nx/cache
+          key: nx-v2-${{ runner.os }}-${{ env.NODE }}-${{ hashFiles('web/package.json', 'web/yarn.lock') }}
+          restore-keys: |
+            nx-v2-${{ runner.os }}-${{ env.NODE }}-
+
+      - name: Run tests
+        working-directory: ${{ env.FRONTEND_MONOREPO_DIR }}
+        env:
+          NODE_ENV: "development"
+        run: |
+          yarn test:unit:coverage
+
+      - name: Upload coverage to Codecov
+        if: ${{ always() && github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login != 'dependabot[bot]' }}
+        uses: codecov/codecov-action@v5
+        with:
+          name: lsf-unit
+          flags: lsf-unit
+          directory: web/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+          fail_ci_if_error: true
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unit coverage
+          path: web/coverage

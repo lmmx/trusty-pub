@@ -1,0 +1,203 @@
+name: ParallelCluster CI
+
+on: [push, pull_request]
+
+jobs:
+  depcheck:
+    name: Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v2
+        - name: Dependency Check
+          uses: dependency-check/Dependency-Check_Action@main
+          with:
+            path: './cli'
+            format: 'HTML'
+            project: 'aws-parallelcluster'
+        - name: Upload Test results
+          uses: actions/upload-artifact@master
+          with:
+            name: CLI Depcheck report
+            path: ${{github.workspace}}/reports
+        - name: AWS Batch CLI Dependency Check
+          uses: dependency-check/Dependency-Check_Action@main
+          with:
+            path: './awsbatch-cli'
+            format: 'HTML'
+            project: 'aws-parallelcluster'
+        - name: Upload AWS Batch CLI Test results
+          uses: actions/upload-artifact@master
+          with:
+            name: AWS Batch CLI Depcheck report
+            path: ${{github.workspace}}/reports
+  cli-tests:
+    name: CLI Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        name:
+          - Python 3.9 Tests
+          - Python 3.10 Tests
+          - Python 3.11 Tests
+          - Python 3.12 Tests
+          - Python 3.10 Tests Coverage
+          - Code Checks
+          - CLI CloudFormation Templates Checks
+          - API CloudFormation Templates Checks
+          - Integration Tests Config Checks
+        include:
+          - name: Python 3.9 Tests
+            python: 3.9
+            toxdir: cli
+            toxenv: py39-nocov
+          - name: Python 3.10 Tests
+            python: '3.10'
+            toxdir: cli
+            toxenv: py310-nocov
+          - name: Python 3.11 Tests
+            python: '3.11'
+            toxdir: cli
+            toxenv: py311-nocov
+          - name: Python 3.12 Tests
+            python: '3.12'
+            toxdir: cli
+            toxenv: py312-nocov
+          - name: Python 3.10 Tests Coverage
+            python: '3.10'
+            toxdir: cli
+            toxenv: py310-cov
+          - name: Code Checks
+            python: '3.10'
+            toxdir: cli
+            toxenv: code-linters
+          - name: CLI CloudFormation Templates Checks
+            python: '3.10'
+            toxdir: cli
+            toxenv: cfn-format-check,cfn-lint,cfn-tests
+          - name: API CloudFormation Templates Checks
+            python: '3.10'
+            toxdir: api
+            toxenv: cfn-lint
+          - name: Integration Tests Config Checks
+            python: '3.10'
+            toxdir: tests/integration-tests
+            toxenv: validate-test-configs
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Tox and any other packages
+        run: pip install tox
+      - name: Run Tox
+        run: cd ${{ matrix.toxdir }} && tox -e ${{ matrix.toxenv }}
+      - name: Upload code coverage report to Codecov
+        uses: codecov/codecov-action@v3
+        if: ${{ endsWith(matrix.toxenv, '-cov') }}
+        with:
+          files: cli/coverage.xml
+          flags: unittests
+          verbose: true
+  awsbatch-cli-tests:
+    name: AWS Batch CLI Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        name:
+          - Python 3.9 AWS Batch CLI Tests
+          - Python 3.10 AWS Batch CLI Tests
+          - Python 3.11 AWS Batch CLI Tests
+          - Python 3.12 AWS Batch CLI Tests
+          - Python 3.10 AWS Batch CLI Tests Coverage
+          - Code Checks AWS Batch CLI
+        include:
+          - name: Python 3.9 AWS Batch CLI Tests
+            python: 3.9
+            toxdir: awsbatch-cli
+            toxenv: py39-nocov
+          - name: Python 3.10 AWS Batch CLI Tests
+            python: '3.10'
+            toxdir: awsbatch-cli
+            toxenv: py310-nocov
+          - name: Python 3.11 AWS Batch CLI Tests
+            python: '3.11'
+            toxdir: awsbatch-cli
+            toxenv: py311-nocov
+          - name: Python 3.12 AWS Batch CLI Tests
+            python: '3.12'
+            toxdir: awsbatch-cli
+            toxenv: py312-nocov
+          - name: Python 3.10 AWS Batch CLI Tests Coverage
+            python: '3.10'
+            toxdir: awsbatch-cli
+            toxenv: py310-cov
+          - name: Code Checks AWS Batch CLI
+            python: '3.10'
+            toxdir: awsbatch-cli
+            toxenv: code-linters
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Tox and any other packages
+        run: pip install tox
+      - name: Run Tox
+        run: cd ${{ matrix.toxdir }} && tox -e ${{ matrix.toxenv }}
+  validate-api-model:
+    name: API Model Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      - run: |
+          sudo npm install -g redoc-cli
+          sudo snap install yq
+      - working-directory: api
+        run: ./gradlew buildSmithyModel openApiValidate redoc
+      - name: Verify Generation of OpenAPI Specs
+        run: |
+          git diff --exit-code --quiet api/spec/openapi
+      - working-directory: api
+        run: ./gradlew generatePythonClient
+      - name: Verify Generation of API client
+        run: |
+          git diff --exit-code --quiet -- api/client/src/ ':!api/client/src/.openapi-generator/FILES'
+  validate-external-slurmdbd-template:
+    name: External SlurmDBD Template Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.12'
+      - name: Install AWS CDK
+        run: |
+          pip install typeguard~=2.13
+          npm install -g aws-cdk
+          pip install -r cloudformation/external-slurmdbd/requirements.txt
+      - working-directory: cloudformation/external-slurmdbd
+        run: cdk synth --no-version-reporting
+      - name: Verify External SlurmDBD Template
+        run:
+          git diff --exit-code --quiet cloudformation/external-slurmdbd/external-slurmdbd.json cloudformation/external-slurmdbd/cdk.out/ExternalSlurmdbdStack.template.json
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          severity: warning
+          ignore_paths: tests
+          ignore_names: user_data.sh

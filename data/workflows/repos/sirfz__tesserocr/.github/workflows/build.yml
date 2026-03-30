@@ -1,0 +1,86 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+    branches:
+      - "*"
+  pull_request:
+
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: Build wheel for ${{ matrix.config.build }}-${{ matrix.config.platform }}
+
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: ubuntu-24.04, arch: x86_64, platform: manylinux_x86_64, build: cp*, tag: cpall }
+          - { os: ubuntu-24.04-arm, arch: aarch64, platform: manylinux_aarch64, build: cp*, tag: cpall }
+          - { os: ubuntu-24.04, arch: x86_64, platform: musllinux_x86_64, build: cp*, tag: cpall }
+          - { os: macos-15-intel, arch: x86_64, platform: macosx_x86_64, build: cp*, tag: cpall }
+          - { os: macos-15, arch: arm64,  platform: macosx_arm64, build: cp*, tag: cpall }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set macOS deployment target
+        if: runner.os == 'macOS'
+        run: echo "MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion | cut -d '.' -f 1-2)" | tee -a $GITHUB_ENV
+
+      - name: Build wheel
+        uses: pypa/cibuildwheel@v3.2.0
+        env:
+          CIBW_ARCHS: "${{ matrix.config.arch }}"
+          CIBW_BUILD: "${{ matrix.config.build }}-${{ matrix.config.platform }}"
+
+      - name: Test wheel
+        if: matrix.config.platform != 'musllinux_x86_64'
+        run: |
+          for wheel in wheelhouse/*-cp*.whl ; do
+            python_version=$(echo $wheel | sed -n -E 's/.*-cp3([0-9]+t?)-.*/3.\1/p')
+            echo "Testing $wheel with Python $python_version"
+            venv_dir="/tmp/test-env-$python_version"
+            uv venv --python "$python_version" "$venv_dir"
+            source "$venv_dir/bin/activate"
+            uv pip install "$wheel"
+            pushd "$venv_dir"
+            python -c "import tesserocr"
+            popd
+            deactivate
+          done
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: "wheels-${{ matrix.config.platform }}-${{ matrix.config.tag }}"
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Build sdist
+        run: python setup.py sdist
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: source
+          path: ./dist/*

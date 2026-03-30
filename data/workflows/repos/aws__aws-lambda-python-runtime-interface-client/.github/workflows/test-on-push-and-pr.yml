@@ -1,0 +1,48 @@
+name: test-on-push-and-pr
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ '*' ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run 'pr' target
+      run: make pr
+
+  alpine:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run alpine integration tests
+      run: DISTRO=alpine make test-integ
+
+  amazonlinux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run amazonlinux integration tests
+      run: DISTRO=amazonlinux make test-integ
+
+  debian:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run debian integration tests
+      run: DISTRO=debian make test-integ
+
+  ubuntu:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run ubuntu integration tests
+      run: DISTRO=ubuntu make test-integ

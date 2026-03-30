@@ -1,0 +1,72 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'dockers/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'dockers/**'
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: ${{ github.repository_owner }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        include:
+          - dockerfile: dockers/python311.Dockerfile
+            image: sandbox-python-311-bullseye
+          - dockerfile: dockers/java11.Dockerfile
+            image: sandbox-java-11-bullseye
+          - dockerfile: dockers/node22.Dockerfile
+            image: sandbox-node-22-bullseye
+          - dockerfile: dockers/cpp11.Dockerfile
+            image: sandbox-cpp-11-bullseye
+          - dockerfile: dockers/go123.Dockerfile
+            image: sandbox-go-123-bullseye
+          - dockerfile: dockers/ruby302.Dockerfile
+            image: sandbox-ruby-302-bullseye
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

@@ -1,0 +1,58 @@
+name: Run checks on kedro-docker
+
+on:
+  workflow_call:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "kedro-airflow/**"
+      - "kedro-datasets/**"
+      - "kedro-telemetry/**"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "kedro-airflow/**"
+      - "kedro-datasets/**"
+      - "kedro-telemetry/**"
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+        python-version: [ "3.10", "3.11", "3.12", "3.13" ]
+    uses: ./.github/workflows/unit-tests.yml
+    with:
+      plugin: kedro-docker
+      os: ${{ matrix.os }}
+      python-version: ${{ matrix.python-version }}
+
+  lint:
+    uses: ./.github/workflows/lint.yml
+    with:
+      plugin: kedro-docker
+      os: ubuntu-latest
+      python-version: "3.11"
+
+  e2e-tests:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ "3.10", "3.11", "3.12", "3.13" ]
+    uses: ./.github/workflows/e2e-tests.yml
+    with:
+      plugin: kedro-docker
+      os: ${{ matrix.os }}
+      python-version: ${{ matrix.python-version }}
+
+  detect-secrets:
+    uses: ./.github/workflows/detect-secrets.yml
+    with:
+      plugin: kedro-docker
+      os: ubuntu-latest
+      python-version: "3.11"

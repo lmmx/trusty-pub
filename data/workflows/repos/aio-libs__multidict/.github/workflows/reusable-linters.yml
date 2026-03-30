@@ -1,0 +1,86 @@
+---
+
+name: Linters
+
+on:
+  workflow_call:
+
+env:
+  COLOR: >-  # Supposedly, pytest or coveragepy use this
+    yes
+  FORCE_COLOR: 1  # Request colored output from CLI tools supporting it
+  MYPY_FORCE_COLOR: 1  # MyPy's color enforcement
+  PIP_DISABLE_PIP_VERSION_CHECK: 1
+  PIP_NO_PYTHON_VERSION_WARNING: 1
+  PIP_NO_WARN_SCRIPT_LOCATION: 1
+  PRE_COMMIT_COLOR: always
+  PY_COLORS: 1  # Recognized by the `py` package, dependency of `pytest`
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: 1
+  PYTHON_LATEST: 3.12
+
+jobs:
+
+  lint:
+    name: Linter
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+    - name: Setup Python ${{ env.PYTHON_LATEST }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_LATEST }}
+    - name: Cache PyPI
+      uses: actions/cache@v5
+      with:
+        key: pip-lint-${{ hashFiles('requirements/*.txt') }}
+        path: ~/.cache/pip
+        restore-keys: |
+            pip-lint-
+    - name: Cache pre-commit.com virtualenvs
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pre-commit
+        key: >-
+          ${{
+            runner.os
+          }}-pre-commit-${{
+            hashFiles('.pre-commit-config.yaml')
+          }}
+    - name: Install dependencies
+      uses: py-actions/py-dependency-install@v4
+      with:
+        path: requirements/lint.txt
+    - name: Run linters
+      run: |
+        make lint
+    - name: Send coverage data to Coveralls
+      uses: coverallsapp/github-action@v2
+      with:
+        debug: ${{ runner.debug == 1 && true || false }}
+        fail-on-error: ${{ runner.debug == 1 && false || true }}
+        files: >-
+          .tox/.tmp/.mypy/python-3.13/cobertura.xml
+          .tox/.tmp/.mypy/python-3.11/cobertura.xml
+        flag-name: MyPy
+        format: cobertura
+        measure: ${{ runner.debug == 1 && true || false }}
+    - name: Install spell checker
+      run: |
+        pip install -r requirements/doc.txt
+    - name: Run docs spelling
+      run: |
+        make doc-spelling
+    - name: Prepare twine checker
+      run: |
+        pip install -U build twine
+        python -m build
+      env:
+        MULTIDICT_NO_EXTENSIONS: 1
+    - name: Run twine checker
+      run: |
+        twine check --strict dist/*
+
+...

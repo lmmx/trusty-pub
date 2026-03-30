@@ -1,0 +1,41 @@
+name: Update Docs
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  generate-docs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+
+    - name: Install Oras and Dependencies
+      run: |
+        root=$PWD
+        cd /tmp
+        git clone https://github.com/oras-project/oras-py
+        cd oras-py
+        pip install -e .
+        cd docs/
+        pip install -r requirements.txt
+        make html
+        cp -R $root/.git _build/html/.git
+        rm -rf $root
+        mv _build/html $root
+        cd $root
+        touch .nojekyll
+        ls
+
+    - name: Deploy 🚀
+      uses: JamesIves/github-pages-deploy-action@v4
+      with:
+        branch: gh-pages
+        folder: .

@@ -1,0 +1,31 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Dependencies
+        run: |
+          pip install .
+          pip install setuptools wheel twine
+
+      - name: Deploy
+        run: |
+          python setup.py sdist bdist_wheel
+          twine upload dist/*
+        env:
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}

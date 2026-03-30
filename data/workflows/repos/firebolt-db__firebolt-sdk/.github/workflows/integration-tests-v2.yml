@@ -1,0 +1,80 @@
+name: Integration tests FB 2.0
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      FIREBOLT_CLIENT_ID_STG_NEW_IDN:
+        required: true
+      FIREBOLT_CLIENT_SECRET_STG_NEW_IDN:
+        required: true
+    inputs:
+      engine-version:
+        description: 'Engine version to use for integration tests'
+        required: false
+        type: string
+        default: ''
+      token:
+        description: 'GitHub token if called from another workflow'
+        required: false
+        type: string
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: 'firebolt-db/firebolt-python-sdk'
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.9
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Setup database and engine
+        id: setup
+        uses: firebolt-db/integration-testing-setup@813c4835ef38adcba3f8760e7afc21a3c7248023 # v2.6.2
+        with:
+          firebolt-client-id: ${{ secrets.FIREBOLT_CLIENT_ID_STG_NEW_IDN }}
+          firebolt-client-secret: ${{ secrets.FIREBOLT_CLIENT_SECRET_STG_NEW_IDN }}
+          account: ${{ vars.FIREBOLT_ACCOUNT }}
+          api-endpoint: "api.staging.firebolt.io"
+          engine-version: ${{ inputs.engine-version }}
+
+      - name: Run integration tests
+        env:
+          SERVICE_ID: ${{ secrets.FIREBOLT_CLIENT_ID_STG_NEW_IDN }}
+          SERVICE_SECRET: ${{ secrets.FIREBOLT_CLIENT_SECRET_STG_NEW_IDN }}
+          DATABASE_NAME: ${{ steps.setup.outputs.database_name }}
+          ENGINE_NAME: ${{ steps.setup.outputs.engine_name }}
+          STOPPED_ENGINE_NAME: ${{ steps.setup.outputs.stopped_engine_name }}
+          API_ENDPOINT: "api.staging.firebolt.io"
+          ACCOUNT_NAME: ${{ vars.FIREBOLT_ACCOUNT }}
+          LONG_TEST_VALUE: ${{ vars.LONG_TEST_VALUE_V2 }}
+        run: |
+          pytest -n 6 --dist loadgroup --timeout_method "signal" -o log_cli=true -o log_cli_level=WARNING tests/integration -k "not V1 and not core" --runslow  --alluredir=allure-results
+
+      # Need to pull the pages branch in order to fetch the previous runs
+      - name: Get Allure history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: always()
+        continue-on-error: true
+        with:
+            ref: gh-pages
+            path: gh-pages
+
+      - name: Allure Report
+        uses: firebolt-db/action-allure-report@781b4529b67b4f393c63d7dc1e098cb558e1ab16 # v1.4.1
+        if: always()
+        with:
+          github-key: ${{ inputs.token || secrets.GITHUB_TOKEN }}
+          test-type: integration
+          allure-dir: allure-results
+          pages-branch: gh-pages
+          repository-name: python-sdk

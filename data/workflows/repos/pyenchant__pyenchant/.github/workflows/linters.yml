@@ -1,0 +1,26 @@
+name: linters
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  run_linters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install tox
+        run: |
+          pip install tox
+
+      - name: Run linters
+        run: |
+          tox -e linters

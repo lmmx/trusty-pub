@@ -1,0 +1,183 @@
+name: Run tests, measure coverage and upload results to codecov
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Enter PR number coming from community to run coverage on it. Do not run for PR coming from hazelcast organization, they will be run automatically.
+        required: true
+  push:
+    branches:
+      - master
+      - '[45].*.z'
+  pull_request_target:
+    branches:
+      - master
+      - '[45].*.z'
+      
+jobs:
+  check_for_membership:
+    runs-on: ubuntu-latest
+    name: Check membership of given user  
+    outputs:
+      check-result: ${{ steps.composite.outputs.check-result }}
+    steps: 
+      - name: Action for membership check
+        id: composite
+        uses: hazelcast/hazelcast-tpm/membership@main
+        with:
+          organization-name: 'hazelcast'
+          member-name: ${{ github.actor }}
+          token: ${{ secrets.PAT }}
+          
+  python-versions:
+    uses: ./.github/workflows/get-python-versions.yml
+
+  run-tests:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
+    needs: [check_for_membership, python-versions]
+    if: github.event_name == 'push' || needs.check_for_membership.outputs.check-result == 'true' || github.event_name == 'workflow_dispatch'
+    name: Run tests with Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version:
+          - ${{ needs.python-versions.outputs.earliest-python-version }}
+          - ${{ needs.python-versions.outputs.latest-python-version }}
+        os: [ ubuntu-latest, windows-latest ]
+        hz_version: [ "5.6.0" ]
+      fail-fast: false
+      
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          
+      - name: Install JDK      
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Checkout code for PR
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          
+      - name: Checkout repository for push event
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+              
+      - name: Checkout PR coming from community.
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.inputs.pr_number }}/merge
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_HAZELCAST_OIDC_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: 'us-east-1'
+
+      - name: Get Secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            HAZELCAST_ENTERPRISE_KEY,CN/HZ_LICENSE_KEY
+            
+      - name: Checkout to certificates
+        uses: actions/checkout@v3
+        with:
+          repository: hazelcast/private-test-artifacts
+          path: certs
+          ref: data
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Create the test jar with certificates (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: certs
+        run: |
+          zip -r -j certs.jar $GITHUB_WORKSPACE/tests/integration/backward_compatible/ssl_tests/hostname_verification/*.p12
+          cp certs.jar ../hazelcast-enterprise-${{ matrix.hz_version }}-tests.jar            
+
+      - name: Create the test jar with certificates (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: certs
+        run: |
+          $compress = @{
+            Path = "../tests/integration/backward_compatible/ssl_tests/hostname_verification/*.p12"
+            CompressionLevel = "Fastest"
+            DestinationPath = "certs.jar"
+          }
+          Compress-Archive -Update @compress
+          cp certs.jar ../hazelcast-enterprise-${{ matrix.hz_version }}-tests.jar            
+
+      - name: Download RCD (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          wget -q https://client-rcd-download.s3.us-east-2.amazonaws.com/rcd-ubuntu-latest
+
+      - name: Download RCD (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest https://client-rcd-download.s3.us-east-2.amazonaws.com/rcd-windows-latest.exe -OutFile rcd-windows-latest.exe
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-test.txt
+
+      - name: Run tests (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          HZ_VERSION: ${{ matrix.hz_version }}
+        run: |
+          chmod +x rcd-ubuntu-latest 
+          ./rcd-ubuntu-latest -version $HZ_VERSION &
+          # wait for a bit for RCD to download artifacts
+          sleep 10
+          pytest --verbose --cov=hazelcast --cov-report=xml
+
+      - name: Run tests (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          HZ_VERSION: ${{ matrix.hz_version }}
+        run: |
+          Start-Process -FilePath .\rcd-windows-latest -ArgumentList '-version', $Env:HZ_VERSION  -RedirectStandardOutput rcd-stdout.log  -RedirectStandardError rcd-stderr.log
+          # wait for a bit for RCD to download artifacts
+          sleep 10
+          echo "RCD Log:"
+          cat rcd-stdout.log
+          cat rcd-stderr.log
+          pytest --verbose --cov=hazelcast --cov-report=xml
+
+      - name: Publish results to Codecov for PR coming from hazelcast organization
+        if: ${{ matrix.python-version == needs.python-versions.outputs.latest-python-version && matrix.os == 'ubuntu-latest' &&  github.event_name == 'pull_request_target' }}
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: ./coverage.xml
+          override_pr: ${{ github.event.pull_request.number }}
+          fail_ci_if_error: true
+
+      - name: Publish results to Codecov for Push
+        if: ${{ matrix.python-version == needs.python-versions.outputs.latest-python-version && matrix.os == 'ubuntu-latest' &&  github.event_name == 'push' }}
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: ./coverage.xml
+          fail_ci_if_error: true
+
+      - name: Publish result to Codecov for PR coming from community
+        if: ${{ matrix.python-version == needs.python-versions.outputs.latest-python-version && matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' }}
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: ./coverage.xml
+          override_pr: ${{ github.event.inputs.pr_number }}
+          fail_ci_if_error: true

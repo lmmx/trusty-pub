@@ -1,0 +1,138 @@
+name: Release CI
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0' # Run at midnight (00:00) every Sunday
+
+jobs:
+  get-changes:
+    name: Get upstream changes
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Checkout Microsoft's Python Type Stubs
+        uses: actions/checkout@v5
+        with:
+          repository: 'microsoft/python-type-stubs'
+          path: 'original-stubs'
+          sparse-checkout: stubs/sklearn
+          sparse-checkout-cone-mode: false
+
+      - name: Update stubs
+        run: |
+          # Remove old version
+          rm -rf src/sklearn-stubs
+          # Replace it with the new one
+          mv original-stubs/stubs/sklearn src/sklearn-stubs
+          # Check for changes
+          if git diff --exit-code; then
+            echo "NEW_VERSION=true" >> $GITHUB_ENV
+          else
+            echo "NEW_VERSION=false" >> $GITHUB_ENV
+          fi
+
+    outputs:
+      new_version: ${{ env.NEW_VERSION }}
+
+  create-release:
+    name: Create release
+    runs-on: ubuntu-latest
+    needs: ["get-changes"]
+    if: needs.get-changes.outputs.new_version == 'true'
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Checkout Microsoft's Python Type Stubs
+        uses: actions/checkout@v5
+        with:
+          repository: 'microsoft/python-type-stubs'
+          path: 'original-stubs'
+          sparse-checkout: stubs/sklearn
+          sparse-checkout-cone-mode: false
+
+      - name: Update stubs
+        run: |
+          # Remove old version
+          rm -rf src/sklearn-stubs
+          # Replace it with the new one
+          mv original-stubs/stubs/sklearn src/sklearn-stubs
+
+      - name: Bump the version
+        run: |
+          current_patch=$(grep 'version = "0.0.' pyproject.toml | sed 's|version = "0.0.\([0-9]\+\)".*|\1|')
+          echo "Current version: 0.0.$current_patch"
+
+          # Increment the patch version
+          new_patch=$((current_patch + 1))
+          new_version="0.0.$new_patch"
+          echo "New version: $new_version"
+
+          # Update the version in pyproject.toml
+          sed -i "s|version = \"0.0.[0-9]\+\"|version = \"$new_version\"|" pyproject.toml
+          echo "Updated pyproject.toml with new version $new_version"
+
+          echo "NEW_VERSION=$new_version" >> $GITHUB_ENV
+
+      - name: Create commit and tag
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src
+          git commit -m "feat: add upstream changes"
+          git add pyproject.toml
+          git commit -m "chore: bump version to v$NEW_VERSION"
+          git push
+
+          # Wait for push to complete, just in case
+          sleep 1
+
+          git tag v$NEW_VERSION
+          git push origin v$NEW_VERSION
+
+          # Wait for tag push to complete, just in case
+          sleep 1
+
+          echo "GH_RELEASE_TAG=v$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create $GH_RELEASE_TAG --verify-tag --title $GH_RELEASE_TAG
+
+      # Publish to PyPI
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          version: "0.8.13"
+          python-version: "3.13"
+
+      - name: Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build and publish to PyPi
+        run: |
+          uv build
+          uv publish
+
+      - name: Upload release
+        env:
+          GITHUB_TOKEN: ${{ github.TOKEN }}
+        run: |
+          set -e
+          gh release upload $GH_RELEASE_TAG ./dist/* --clobber

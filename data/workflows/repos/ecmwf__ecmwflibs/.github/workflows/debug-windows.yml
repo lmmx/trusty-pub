@@ -1,0 +1,45 @@
+# (C) Copyright 2020 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+name: Debug Windows
+
+on:
+  workflow_dispatch: {}
+
+  push:
+    paths:
+      - 'scripts/debug-windows.sh'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    name: Debug Windows
+    env:
+      WINARCH: x64
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: seanmiddleditch/gha-setup-vsdevenv@master
+        with:
+          arch: x64
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+          architecture: x64
+
+      - run: ./scripts/debug-windows.sh
+        env:
+          WINARCH: x64

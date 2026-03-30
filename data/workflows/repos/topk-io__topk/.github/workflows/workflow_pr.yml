@@ -1,0 +1,20 @@
+name: Pull Request
+
+on:
+  pull_request:
+    types: [synchronize, opened, reopened, labeled, unlabeled]
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      tests: ${{ contains(github.event.pull_request.labels.*.name, 'ready') }}
+    secrets: inherit
+
+  ready:
+    name: Ready
+    needs: [ci]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ready
+        run: echo "Ready"

@@ -1,0 +1,28 @@
+name: weekly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 11 4 * * 0
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.14", "3.15"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: Sync Environment
+        run: uv sync --frozen
+      - name: Test
+        run: make test
+      - name: Type check
+        run: make type-check
+
+# vim: sw=2

@@ -1,0 +1,64 @@
+name: Publish Simple Index
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/release_wheels.csv
+      - .github/workflows/PublishSimpleIndex.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish-simple-index:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Build simple index
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          uv run scripts/build_simple_index.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --package tzfpy \
+            --min-tag v0.6.0 \
+            --csv docs/release_wheels.csv \
+            --skip-fetch \
+            --output site
+      - name: Verify Pages artifact has no wheel files
+        run: |
+          set -euo pipefail
+          if find site -type f -name '*.whl' | grep -q .; then
+            echo "site contains .whl files, aborting."
+            exit 1
+          fi
+          test -f site/docs/release_wheels.csv
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

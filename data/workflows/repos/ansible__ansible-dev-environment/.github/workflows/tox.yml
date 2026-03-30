@@ -1,0 +1,44 @@
+---
+name: tox
+
+on:
+  merge_group:
+    branches:
+      - "main"
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  checks: read
+  contents: write
+  id-token: write
+  packages: write
+  pull-requests: write
+
+jobs:
+  tox:
+    uses: ansible/team-devtools/.github/workflows/tox.yml@main
+    with:
+      max_python: "3.13"
+      jobs_producing_coverage: 8
+      skip_explode: "1"
+      other_names: |
+        docs
+        lint
+        pkg
+        py313-devel
+        py-mise:tox -e py:mise=true
+        py311-macos:tox -e py311
+        py313-macos:tox -e py313
+    secrets: inherit

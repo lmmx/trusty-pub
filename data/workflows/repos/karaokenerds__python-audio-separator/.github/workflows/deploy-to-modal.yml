@@ -1,0 +1,53 @@
+name: deploy-to-modal
+
+on:
+  # Deploy after PyPI publish (when new version is available)
+  workflow_run:
+    workflows: ["publish-to-pypi"]
+    types:
+      - completed
+  # Also deploy on direct changes to Modal deployment files
+  push:
+    branches:
+      - main
+    paths:
+      - 'audio_separator/remote/deploy_modal.py'
+  # Manual trigger
+  workflow_dispatch:
+
+jobs:
+  deploy-modal:
+    # Only run if publish-to-pypi succeeded (or if triggered directly)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Modal CLI and dependencies
+        run: |
+          pip install modal
+          # Install dependencies needed to parse deploy_modal.py
+          pip install fastapi filetype python-multipart
+
+      - name: Deploy to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          modal deploy audio_separator/remote/deploy_modal.py
+
+      - name: Verify deployment
+        run: |
+          sleep 10  # Wait for container to be ready
+          VERSION=$(curl -s https://nomadkaraoke--audio-separator-api.modal.run/health | jq -r '.version')
+          echo "Deployed version: $VERSION"

@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.14"
+    - uses: astral-sh/setup-uv@v7
+    - run: uv pip install twine --system
+    - run: uv build
+    - run: twine check dist/*
+    - name: Publish packages to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1

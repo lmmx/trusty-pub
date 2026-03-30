@@ -1,0 +1,92 @@
+name: python-test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-python:
+    if: ${{ contains(github.event.head_commit.message, '!test') || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
+    name: test ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.13t"
+          - "3.14"
+          - "3.14t"
+          - "pypy3.11"
+
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ endsWith(matrix.python-version, 't') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - run: pip install pytest pytest-asyncio "maturin[patchelf]"
+
+      - run: pip install -e .
+        env:
+          RUST_BACKTRACE: 1
+
+      - run: pip freeze
+
+      - run: pytest -vv
+        env:
+          RUST_BACKTRACE: 1
+          HYPOTHESIS_PROFILE: slow
+
+  test-os:
+    if: ${{ contains(github.event.head_commit.message, '!test') || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
+    name: test on ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu, macos, windows]
+
+    runs-on: ${{ matrix.os }}-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install pytest pytest-asyncio maturin
+
+      - run: pip install -e .
+        env:
+          RUST_BACKTRACE: 1
+
+      - run: pip freeze
+
+      - run: pytest -vv
+        env:
+          RUST_BACKTRACE: 1
+          HYPOTHESIS_PROFILE: slow

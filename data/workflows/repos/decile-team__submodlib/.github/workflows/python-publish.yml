@@ -1,0 +1,90 @@
+# .github/workflows/publish-to-pypi.yml
+
+name: Build and Publish Python Wheels to PyPI
+
+on:
+  push:
+    tags:
+      - "v*" # Trigger workflow on push events to tags starting with 'v'
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-13
+          - macos-14
+          - macos-latest
+          # - windows-latest # Add back if needed
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python # Use ONE version to run cibuildwheel
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Or another recent version like '3.12'
+
+      - name: Install cibuildwheel
+        run: python -m pip install --upgrade pip cibuildwheel
+
+      - name: Build wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          # --- CORRECT way to specify target Python versions ---
+          # Uncomment and adjust this list as needed
+          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*" # Build wheels FOR CPython 3.8, 3.9, 3.10, 3.11, 3.12
+
+          # --- Other cibuildwheel configurations ---
+          CIBW_SKIP: "pp* *_i686"
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+          CIBW_ARCHS_MACOS: "auto"
+          # ... other CIBW_* vars or pyproject.toml config ...
+
+      - name: Upload wheels artifact (optional, for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  # --- Publishing Job ---
+  # This job runs only after all build_wheels jobs complete successfully.
+  # It uses trusted publishing, so it needs the environment and permissions.
+  publish_wheels:
+    name: Publish wheels to PyPI
+    needs: build_wheels # Run after all builds are finished
+    runs-on: ubuntu-latest # Use a single OS for the publishing step
+
+    environment:
+      name: pypi
+      url: https://pypi.org/project/submodlib-py # Link shown in GitHub Deployments tab
+
+    permissions:
+      id-token: write # Required for PyPI trusted publishing (OIDC)
+
+    steps:
+      # No checkout needed if only publishing pre-built wheels
+
+      - name: Download all wheels artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # Downloads artifacts from all matrix jobs into respective directories
+          # e.g., ./wheels-ubuntu-latest/*.whl, ./wheels-windows-latest/*.whl
+          pattern: wheels-* # Download all artifacts matching 'wheels-*'
+          path: dist # Put all downloaded wheels into the 'dist' directory
+          merge-multiple: true # Merge artifacts from different jobs into the same directory
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No 'with:' block needed here if using Trusted Publishing
+        # PyPA action automatically finds wheels/sdist in the default './dist/' directory
+        # If you kept the output dir as './wheelhouse' in the download step, you would use:
+        # with:
+        #   packages-dir: ./wheelhouse/
+

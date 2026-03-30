@@ -1,0 +1,61 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  get-tox-envlist:
+    runs-on: ubuntu-latest
+    outputs:
+      envlist: ${{ steps.generate-tox-envlist.outputs.envlist }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install tox tox-gh-matrix
+      - id: generate-tox-envlist
+        run: python -m tox --gh-matrix
+
+  build:
+    name: Test ${{ matrix.tox.name }}
+    runs-on: ubuntu-latest
+    needs: get-tox-envlist
+    strategy:
+      fail-fast: false
+      matrix:
+        tox: ${{ fromJSON(needs.get-tox-envlist.outputs.envlist) }}
+    # Service containers to run with `container-job`
+    services:
+      # Label used to access the service container
+      redis:
+        # Docker Hub image
+        image: redis
+        # Set health checks to wait until redis has started
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          # Maps port 6379 on service container to the host
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Python ${{ matrix.tox.python.version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.tox.python.spec }}
+          cache: pip
+      - name: Install dependencies
+        run: pip install tox codecov
+      - name: Tox tests
+        run: python -m tox -v -e ${{ matrix.tox.name }}
+      - name: Upload coverage
+        run: python -m codecov --name "Python ${{ matrix.tox.python.spec }}"

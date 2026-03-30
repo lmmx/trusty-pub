@@ -1,0 +1,78 @@
+name: emscripten-sccache-win
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-emscripten-sccache-win:
+    name: Emscripten + sccache (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        irm https://astral.sh/uv/install.ps1 | iex
+      shell: pwsh
+
+    - name: Install package with sccache support
+      run: |
+        uv venv
+        uv pip install -e ".[dev,sccache]"
+      shell: bash
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Windows x64 with Emscripten and sccache"
+        python --version
+      shell: bash
+
+    - name: Download Emscripten toolchain
+      run: uv run clang-tool-chain-emcc --version
+      shell: bash
+      timeout-minutes: 20
+
+    - name: Verify sccache installation
+      run: |
+        uv run clang-tool-chain-sccache --version
+        uv run clang-tool-chain-sccache --show-stats
+      shell: bash
+
+    - name: Test Emscripten compilation with sccache
+      run: |
+        cat > test_em_sccache.cpp << 'EOF'
+        #include <iostream>
+        int main() {
+            std::cout << "Hello WebAssembly from Windows with sccache!" << std::endl;
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-empp test_em_sccache.cpp -o test_em_sccache.js
+        node test_em_sccache.js
+      shell: bash
+
+    - name: Check sccache statistics
+      run: uv run clang-tool-chain-sccache --show-stats
+      shell: bash
+
+    - name: Run Emscripten basic tests
+      run: uv run pytest tests/test_emscripten.py -v
+      shell: bash
+
+    - name: Run Emscripten full pipeline tests
+      run: uv run pytest tests/test_emscripten_full_pipeline.py -v
+
+    - name: Run LLVM version consistency tests
+      run: uv run pytest tests/test_version_consistency.py -v
+      shell: bash

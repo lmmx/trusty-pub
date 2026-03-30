@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# Copyright Quantinuum
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -evu
+
+cd /tket
+
+export PYBIN=/opt/python/${PY_TAG}/bin
+export PYEX=${PYBIN}/python
+${PYEX} -m venv env
+. env/bin/activate
+${PYEX} -m pip install -U pip build conan
+CONAN_CMD=${PYBIN}/conan
+${CONAN_CMD} profile detect
+DEFAULT_PROFILE_PATH=`${CONAN_CMD} profile path default`
+PROFILE_PATH=./conan-profiles/${CONAN_PROFILE}
+diff ${DEFAULT_PROFILE_PATH} ${PROFILE_PATH} || true
+cp ${PROFILE_PATH} ${DEFAULT_PROFILE_PATH}
+${CONAN_CMD} remote add tket-libs https://quantinuumsw.jfrog.io/artifactory/api/conan/tket1-libs --index 0
+
+# Build tket
+${CONAN_CMD} create tket --user tket --channel stable --build=missing -o boost/*:header_only=True -o tklog/*:shared=True -o tket/*:shared=True -tf ""
+
+# Work around https://github.com/pypa/manylinux/issues/1309
+git config --global --add safe.directory "*"
+
+mkdir /tket/pytket/wheelhouse
+mkdir /tket/pytket/audited
+
+# build pytket
+cd pytket
+${PYEX} -m build
+LD_LIBRARY_PATH=./pytket/_tket auditwheel repair "dist/pytket-"*".whl" -w "audited/"

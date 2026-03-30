@@ -1,0 +1,24 @@
+name: Lint
+
+on:
+  push:
+    paths:
+      - 'src/'
+      - 'tests/'
+
+jobs:
+  flake8:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11.5
+      - name: Install dependencies
+        run: pip install .[linting]
+      - name: Run flake8
+        run: |
+          ruff check .
+          ruff format --check .
+          isort src/organizations --check --diff

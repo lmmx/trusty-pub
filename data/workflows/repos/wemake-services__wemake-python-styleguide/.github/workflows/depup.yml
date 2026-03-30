@@ -1,0 +1,33 @@
+name: depup
+
+'on':
+  workflow_dispatch:
+  schedule:
+    - cron: '30 7 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  reviewdog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: haya14busa/action-depup@v1
+        id: depup
+        with:
+          file: Dockerfile
+          version_name: REVIEWDOG_VERSION
+          repo: reviewdog/reviewdog
+      - name: Create Pull Request to update reviewdog
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: "chore(deps): update reviewdog to ${{ steps.depup.outputs.latest }}"
+          commit-message: "chore(deps): update reviewdog to ${{ steps.depup.outputs.latest }}"

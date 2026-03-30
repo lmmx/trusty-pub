@@ -1,0 +1,83 @@
+name: Run e2e tests - neptune-query
+
+permissions:
+  checks: write
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # Run at 8:00 daily
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - dev/.*
+  pull_request: # Don't run e2e tests on PRs that don't modify source code
+    paths:
+      - 'src/**'
+      - 'tests/e2e/**'
+      - 'dev_requirements.txt'
+      - 'pyproject.toml'
+      - '.github/**'
+
+jobs:
+  test:
+    runs-on: tools-gha-runners
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: "AZURE"
+            env_suffix: ""
+            test_markers: ""
+          - env: "GCP"
+            env_suffix: "_GCP"
+            test_markers: "files"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip &&
+          pip install -r dev_requirements.txt
+
+      - name: Run tests
+        env:
+          NEPTUNE_E2E_WORKSPACE: ${{ vars.NEPTUNE_E2E_WORKSPACE }}
+          NEPTUNE_E2E_API_TOKEN: ${{ secrets[format('E2E_API_TOKEN{0}', matrix.env_suffix)] }}
+          NEPTUNE_HTTP_REQUEST_TIMEOUT_SECONDS: "15"
+          NEPTUNE_QUERY_FILES_TIMEOUT: "240"
+          NEPTUNE_QUERY_RETRY_HARD_TIMEOUT: "240"
+          NEPTUNE_QUERY_RETRY_SOFT_TIMEOUT: "120"
+          TEST_MARKERS: ${{ matrix.test_markers }}
+        run: |
+          curl -vsI "$(base64 -d <<< "$NEPTUNE_E2E_API_TOKEN" | jq .api_url -r )/api/leaderboard/" 2> >(head) &&
+          pytest --capture=no tests/e2e/pre_test_connectivity.py &&
+          pytest --retries=1 --retry-delay=2 --junitxml="test-results/test-e2e.xml" ${TEST_MARKERS:+-m "$TEST_MARKERS"} tests/e2e
+        # --capture=no is passed to the test_connectivity run, so that we can see logs from data ingestion
+        # This helps with debugging. At the very least, it shows the URL of the environment under test
+
+      - name: Notify on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: ./.github/actions/workflow-notify
+        with:
+          slack-webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          failure-message: "E2E tests failed"
+
+      - name: Report
+        uses: mikepenz/action-junit-report@v5
+        if: always()
+        with:
+          check_name: 'E2E tests report'
+          report_paths: "./test-results/test-e2e*.xml"
+          detailed_summary: true
+          verbose_summary: true
+          include_passed: true
+          include_time_in_summary: true
+          resolve_ignore_classname: true

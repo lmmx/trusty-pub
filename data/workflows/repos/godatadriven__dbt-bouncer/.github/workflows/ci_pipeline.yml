@@ -1,0 +1,277 @@
+---
+name: CI pipeline
+
+on:
+  pull_request:
+      branches:
+          - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DBT_PROFILES_DIR: dbt_project
+  DBT_PROJECT_DIR: dbt_project
+  IMAGE_NAME: ${{ github.repository }}
+  REGISTRY: ghcr.io
+  UV_SYSTEM_PYTHON: 1
+
+jobs:
+    prek:
+        permissions:
+          contents: read
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+              with:
+                fetch-depth: "0"
+
+            - name: checkout-merge
+              uses: check-spelling/checkout-merge@v0.0.6
+
+            - name: Determine python version
+              id: python-version
+              run: |
+                  export PYTHON_VERSION=$(cat .python-version)
+                  echo "PYTHON_VERSION: $PYTHON_VERSION"
+                  echo "PYTHON_VERSION=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+
+            - name: Setup Python
+              uses: ./.github/actions/setup_python_env
+              with:
+                python-version: ${{ steps.python-version.outputs.PYTHON_VERSION }}
+
+            - name: Run prek
+              run: |
+                git diff --name-status origin/main..HEAD > changed_files.txt
+                cat changed_files.txt
+                cat changed_files.txt | xargs uv run prek run --files
+
+    schema-check:
+        needs: [prek]
+        permissions:
+          contents: read
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+
+            - name: checkout-merge
+              uses: check-spelling/checkout-merge@v0.0.6
+
+            - name: Determine python version
+              id: python-version
+              run: |
+                  export PYTHON_VERSION=$(cat .python-version)
+                  echo "PYTHON_VERSION: $PYTHON_VERSION"
+                  echo "PYTHON_VERSION=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+
+            - name: Setup Python
+              uses: ./.github/actions/setup_python_env
+              with:
+                python-version: ${{ steps.python-version.outputs.PYTHON_VERSION }}
+
+            - name: Verify schema.json is up to date
+              run: |
+                uv run python scripts/generate_schema.py
+                git diff --exit-code schema.json || {
+                  echo "::error::schema.json is out of date. Run 'make generate-schema' and commit the result."
+                  exit 1
+                }
+
+    unit-tests:
+        needs: [prek]
+        runs-on: ${{ matrix.operating-system }}
+        # permissions:
+        #     checks: write
+        #     contents: write
+        #     id-token: write
+        #     issues: write
+        #     pull-requests: write
+        strategy:
+            fail-fast: false
+            matrix:
+                operating-system:
+                  - ubuntu-24.04
+                  - windows-2025
+                python-version:
+                    - '3.11'
+                    - '3.12'
+                    - '3.13'
+                    - '3.14'
+        steps:
+            - uses: actions/checkout@v6
+
+            - name: checkout-merge
+              if: matrix.operating-system != 'windows-2025'
+              uses: check-spelling/checkout-merge@v0.0.6
+
+            - name: Setup Python
+              uses: ./.github/actions/setup_python_env
+              with:
+                python-version: ${{ matrix.python-version }}
+
+            - name: Run pytest (Windows)
+              if: matrix.operating-system == 'windows-2025'
+              run: make test-windows
+
+            - name: Run pytest (unit tests)
+              if: matrix.operating-system != 'windows-2025'
+              run: make test-unit | tee uv pytest-coverage.txt && exit ${PIPESTATUS[0]}
+
+            # TODO: Fix permissions issue
+            # - name: Pytest coverage comment
+            #   if: matrix.python-version == '3.11' && matrix.operating-system != 'windows-2025'
+            #   uses: MishaKav/pytest-coverage-comment@main
+            #   with:
+            #       github-token: ${{ github.token }}
+            #       pytest-coverage-path: ./pytest-coverage.txt
+            #       title: Coverage Report
+            #       badge-title: Coverage
+            #       junitxml-path: ./coverage.xml
+
+            - name: Run pytest (integration tests)
+              if: matrix.operating-system != 'windows-2025'
+              run: make test-integration
+
+            - name: Regenerate dbt artifacts and run `dbt-bouncer`
+              if: matrix.operating-system == 'windows-2025'
+              run: |
+                $env:Path += ';C:\Users\runneradmin\.local\bin'
+                make build-and-run-dbt-bouncer
+
+            - name: Regenerate dbt artifacts and run `dbt-bouncer`
+              if: matrix.operating-system != 'windows-2025'
+              run: |
+                  (r=3;while ! make build-and-run-dbt-bouncer ; do ((--r))||exit;done)
+
+    benchmark-pr-branch:
+        needs: [prek]
+        permissions:
+          contents: read
+        runs-on: ubuntu-24.04
+        steps:
+          - uses: actions/checkout@v6
+
+          - name: Setup Python
+            uses: ./.github/actions/setup_python_env
+
+          - name: Install `dbt-bouncer`
+            run: make install
+
+          - name: Install Hyperfine
+            uses: taiki-e/install-action@v2
+            with:
+              tool: hyperfine@1.20
+
+          - name: Run benchmarks
+            run: |
+              hyperfine --export-json benchmark_results.json --runs 10 'uv run dbt-bouncer --config-file dbt-bouncer-example.yml'
+
+          - name: Upload Benchmark Results
+            uses: actions/upload-artifact@v6
+            with:
+              name: benchmark_results.json
+              path: ./benchmark_results.json
+
+          - name: Upload GitHub Pull Request Event
+            uses: actions/upload-artifact@v6
+            with:
+              name: event.json
+              path: ${{ github.event_path }}
+
+    dev-container:
+      needs: [prek]
+      runs-on: ubuntu-24.04
+      steps:
+        - uses: actions/checkout@v6
+
+        - name: Build container and run tests
+          uses: devcontainers/ci@v0.3
+          with:
+            runCmd: |
+              set -eou
+              uv run dbt-bouncer --config-file dbt-bouncer-example.yml
+              make test-dev-container
+              make test-perf
+
+    e2e-tests:
+        needs: [prek]
+        permissions:
+          contents: read
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+
+            - name: checkout-merge
+              uses: check-spelling/checkout-merge@v0.0.6
+
+            - name: Determine python version
+              id: python-version
+              run: |
+                  export PYTHON_VERSION=$(cat .python-version)
+                  echo "PYTHON_VERSION: $PYTHON_VERSION"
+                  echo "PYTHON_VERSION=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+
+            - name: Setup Python
+              uses: ./.github/actions/setup_python_env
+              with:
+                python-version: ${{ steps.python-version.outputs.PYTHON_VERSION }}
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Modify Dockerfile to use local dbt-bouncer version
+              run: |
+                set -eou
+                sed -i -E 's/ENTRYPOINT \["uvx", "dbt-bouncer==0.0.0"\]/ENTRYPOINT \["uvx", "."\]/' Dockerfile
+                sed -i -E '/ENTRYPOINT/i\COPY . .' ./Dockerfile
+
+            - name: Build image
+              uses: docker/build-push-action@v6
+              with:
+                  build-args: PYTHON_VERSION=${{ steps.python-version.outputs.PYTHON_VERSION }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  context: .
+                  load: true
+                  push: false
+                  tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci
+
+            - name: Run e2e test
+              run: |
+                docker run --rm \
+                  --volume "$PWD":/app \
+                  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci \
+                  --config-file /app/dbt-bouncer-example.yml
+
+    mkdocs-build:
+      needs: [prek]
+      permissions:
+        contents: read
+      runs-on: ubuntu-24.04
+      steps:
+          - name: Checkout
+            uses: actions/checkout@v6
+
+          - name: checkout-merge
+            uses: check-spelling/checkout-merge@v0.0.6
+
+          - name: Determine python version
+            id: python-version
+            run: |
+                export PYTHON_VERSION=$(cat .python-version)
+                echo "PYTHON_VERSION: $PYTHON_VERSION"
+                echo "PYTHON_VERSION=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+
+          - name: Setup Python
+            uses: ./.github/actions/setup_python_env
+            with:
+              python-version: ${{ steps.python-version.outputs.PYTHON_VERSION }}
+
+          - name: Build docs website
+            run: uv run mkdocs build

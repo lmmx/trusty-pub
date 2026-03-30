@@ -1,0 +1,85 @@
+name: build
+
+on:
+  push:
+    paths:
+      - 'models/**'
+      - CMakeLists.txt
+    branches:
+      - main
+    tags-ignore:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.os }} ${{ matrix.cublas == 'ON' && 'cuda' || matrix.instructions }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-20.04
+          - macos-latest
+          - windows-latest
+        instructions:
+          - avx2
+          - avx
+          - basic
+        cublas:
+          - OFF
+        include:
+          - os: ubuntu-20.04
+            instructions: avx2
+            cublas: ON
+          - os: windows-latest
+            instructions: avx2
+            cublas: ON
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - if: ${{ matrix.cublas == 'ON' && startsWith(runner.os, 'Linux') }}
+        uses: jlumbroso/free-disk-space@v1.2.0
+
+      - if: ${{ matrix.cublas == 'ON' }}
+        uses: Jimver/cuda-toolkit@v0.2.11
+        id: cuda-toolkit
+        with:
+          cuda: '12.1.0'
+
+      - name: Build
+        run: |
+          cmake -B build -DCT_INSTRUCTIONS=${{ matrix.instructions }} -DCT_CUBLAS=${{ matrix.cublas }}
+          cmake --build build --config Release
+
+          mkdir tmp
+          mv build/lib tmp/${{ matrix.cublas == 'ON' && 'cuda' || matrix.instructions }}
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: libraries
+          path: tmp
+          if-no-files-found: error
+
+  finish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: libraries
+          path: ctransformers/lib
+
+      - uses: git-actions/set-user@v1
+
+      - name: Save
+        run: |
+          git add ctransformers/lib
+          git commit -m 'Auto Build'
+          git push

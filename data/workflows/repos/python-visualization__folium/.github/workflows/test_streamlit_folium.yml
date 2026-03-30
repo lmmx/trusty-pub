@@ -1,0 +1,82 @@
+name: Run Streamlit Folium Tests
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+
+    - name: Checkout Folium
+      uses: actions/checkout@v6
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Checkout Streamlit Folium
+      uses: actions/checkout@v6
+      with:
+        repository: randyzwitch/streamlit-folium
+        ref: master
+        path: streamlit_folium  # Checkout into a subdirectory
+
+    - name: Build streamlit_folium javascript
+      run: |
+        cd streamlit_folium/streamlit_folium/frontend/
+        npm install
+        npm run build
+
+    - name: Install streamlit_folium dev dependencies
+      run: |
+        cd streamlit_folium
+        sudo apt-get install proj-bin
+        uv sync --group dev --group test
+
+    - name: Install playwright dependencies
+      run: |
+        cd streamlit_folium
+        uv run playwright install --with-deps
+
+    - name: Install annotate-failures-plugin
+      run: |
+        cd streamlit_folium
+        uv add pytest-github-actions-annotate-failures --dev
+
+    - name: Install folium from source
+      run: |
+        cd streamlit_folium
+        uv pip install -e .. --force-reinstall
+
+    - name: Test with pytest and retry flaky tests up to 3 times
+      run: |
+        cd streamlit_folium
+        uv run pytest tests/test_frontend.py --browser chromium -s --reruns 3 -k "not test_layer_control_dynamic_update"
+
+    - name: Surface failing tests
+      if: always()
+      uses: pmeier/pytest-results-action@main
+      with:
+        path: streamlit_folium/test-results.xml
+        fail-on-empty: false
+
+    - name: Upload coverage
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: coverage-test-streamlit-folium
+        path: |
+          .coverage*

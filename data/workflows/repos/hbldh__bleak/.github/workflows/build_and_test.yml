@@ -1,0 +1,108 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [master, develop]
+    paths: ["bleak/**", "tests/**", ".github/workflows/build_and_test.yml", "pyproject.toml"]
+  pull_request:
+    branches: [master, develop]
+    paths: ["bleak/**", "tests/**", ".github/workflows/build_and_test.yml", "pyproject.toml"]
+  workflow_dispatch:
+
+jobs:
+  build_desktop:
+    name: "Build and test"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Test with pytest
+        run: uv run pytest -v --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          report_type: coverage
+          flags: ${{ matrix.os }}-py${{ matrix.python-version }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          report_type: test_results
+          flags: ${{ matrix.os }}-py${{ matrix.python-version }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Type checking
+        # We don't do this in the lint job because we have conditionals
+        # on both the platform and the Python version in the code, so we
+        # need to check each matrix combination.
+        #
+        # We want always the latest version of pyright and mypy, to catch
+        # any breakage as soon as we can. That is why they are not dev
+        # dependencies in the pyproject.toml, because that would lock them to
+        # a specific version. Instead we install the latest version as tool.
+        run: |
+          uv tool install pyright
+          uv run pyright
+          uv tool install mypy
+          uv run mypy -p bleak -p tests -p examples
+
+
+  integration_tests_bluez:
+    name: "BlueZ integration tests"
+    runs-on: "ubuntu-latest"
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install QEMU
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-utils qemu-kvm
+
+      - name: Enable KVM group permissions
+        run: |
+          sudo chmod 666 /dev/kvm
+
+      - name: Build and boot Alpine VM
+        run: ./.github/alpine-vm/start-alpine-vm.sh
+
+      - name: Run pytest in VM
+        run: |
+          ./.github/alpine-vm/vm-ssh.sh '
+            bluetoothctl --version
+            export UV_PROJECT_ENVIRONMENT=../.venv  # We are in an mounted folder, so to speed things up put the venv outside the mount
+            export FORCE_COLOR=1
+            export CI=true
+            export GITHUB_ACTIONS=true
+            uv run --python ${{ matrix.python-version }} pytest -v tests --bleak-bluez-vhci -v --cov-report=xml --cov-report=html:../.htmlcov --junitxml=junit.xml -o junit_family=legacy -o cache_dir=../.pytest_cache
+          '
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          report_type: coverage
+          flags: bluez-integration-py${{ matrix.python-version }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          report_type: test_results
+          flags: bluez-integration-py${{ matrix.python-version }}
+          token: ${{ secrets.CODECOV_TOKEN }}

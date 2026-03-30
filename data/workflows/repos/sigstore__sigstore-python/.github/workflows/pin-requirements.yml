@@ -1,0 +1,150 @@
+name: Pin Requirements
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to pin dependencies against.
+        required: false
+        type: string
+
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to pin dependencies against.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update-pinned-requirements:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # Branch creation for PR.
+
+    outputs:
+      sigstore-release-tag: ${{ steps.get-branch.outputs.sigstore-release-tag }}
+      sigstore-pin-requirements-branch: ${{ steps.get-branch.outputs.sigstore-pin-requirements-branch }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          # NOTE: Needed for `git describe` below.
+          fetch-depth: 0
+          fetch-tags: true
+          # NOTE: Needed to push back to the repo.
+          persist-credentials: true
+
+      - name: Get latest tag
+        run: |
+          latest_tag=$(git describe --tags --abbrev=0)
+          echo "LATEST_TAG=${latest_tag}" >> "${GITHUB_ENV}"
+
+      - name: Set SIGSTORE_RELEASE_TAG and SIGSTORE_NEW_BRANCH
+        id: get-branch
+        env:
+          INPUT_TAG: "${{ inputs.tag }}"
+        run: |
+          if [[ -n "${INPUT_TAG}" ]]; then
+            effective_tag="${INPUT_TAG}"
+          else
+            effective_tag="${LATEST_TAG}"
+          fi
+
+          # Environment
+          echo "SIGSTORE_RELEASE_TAG=${effective_tag}" >> "${GITHUB_ENV}"
+          echo "SIGSTORE_NEW_BRANCH=pin-requirements/sigstore/${effective_tag}" >> "${GITHUB_ENV}"
+
+          # Outputs
+          echo "sigstore-release-tag=${effective_tag}" >> "${GITHUB_OUTPUT}"
+          echo "sigstore-pin-requirements-branch=pin-requirements/sigstore/${effective_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure git
+        run: |
+          # Set up committer info.
+          # https://github.com/orgs/community/discussions/26560
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version-file: install/.python-version
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: pip install pip-tools
+
+      - name: Compute version from tag
+        run: |
+          echo "SIGSTORE_RELEASE_VERSION=$(echo "${SIGSTORE_RELEASE_TAG}" | sed 's/^v//')" >> "${GITHUB_ENV}"
+
+      - name: Update requirements
+        run: |
+          cd install
+
+          echo "sigstore==${SIGSTORE_RELEASE_VERSION}" > requirements.in
+          pip-compile --allow-unsafe --generate-hashes --upgrade --output-file=requirements.txt requirements.in
+
+      - name: Commit changes and push to branch
+        run: |
+          git commit --all -s -m "[BOT] install: update pinned requirements"
+          git push -f origin "main:${SIGSTORE_NEW_BRANCH}"
+
+  test-requirements:
+    needs: update-pinned-requirements
+    uses: ./.github/workflows/requirements.yml
+    with:
+      # We can't use `env` variables in this context.
+      # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability
+      ref: ${{ needs.update-pinned-requirements.outputs.sigstore-pin-requirements-branch }}
+
+  create-pr:
+    needs:
+      - update-pinned-requirements
+      - test-requirements
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # Pull Request branch modification.
+      pull-requests: write # Pull Request creation.
+
+    env:
+      SIGSTORE_RELEASE_TAG: ${{ needs.update-pinned-requirements.outputs.sigstore-release-tag }}
+      SIGSTORE_PIN_REQUIREMENTS_BRANCH: ${{ needs.update-pinned-requirements.outputs.sigstore-pin-requirements-branch }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.SIGSTORE_PIN_REQUIREMENTS_BRANCH }}
+          # NOTE: Needed to push back to the repo.
+          persist-credentials: true
+
+      - name: Reset remote PR branch
+        run: |
+          git fetch origin main
+          git push -f origin "origin/main:${SIGSTORE_PIN_REQUIREMENTS_BRANCH}"
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Try to create a new PR, or update if it already exists
+          # NOTE: Branch deletion after merge is handled by repository settings
+          PR_TITLE="Update pinned requirements for ${SIGSTORE_RELEASE_TAG}"
+          PR_BODY="Pins dependencies for <https://github.com/sigstore/sigstore-python/releases/tag/${SIGSTORE_RELEASE_TAG}>."
+          
+          if ! gh pr create \
+            --title "${PR_TITLE}" \
+            --body "${PR_BODY}" \
+            --base main \
+            --head "${SIGSTORE_PIN_REQUIREMENTS_BRANCH}"; then
+            # PR already exists, update it
+            gh pr edit "${SIGSTORE_PIN_REQUIREMENTS_BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}"
+          fi

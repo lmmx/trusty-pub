@@ -1,0 +1,71 @@
+---
+name: Validation
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Check for common misspellings
+  codespell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: codespell-project/actions-codespell@master
+
+  # Markdown formatting
+  remark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Run style checks
+        run: npm run remark
+
+  # YAML
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - name: Lint yml files in src/schema
+        run: uvx yamllint -f standard src/schema/ -c .yamllint.yml
+
+  # Python best practices
+  python-style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uvx ruff format --diff
+      - run: uvx ruff check
+
+  # Avoid Latin phrases to improve readability
+  latin-phrases:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - name: Check for Latin phrases
+        run: uv run tools/no-bad-latin.py
+
+  # Validate CITATION.cff
+  validate_cff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - name: Validate CITATION.cff
+        run: uvx cffconvert --validate
+      - name: Check for Zenodo compatibility
+        run: uv run tools/validate_citation.py

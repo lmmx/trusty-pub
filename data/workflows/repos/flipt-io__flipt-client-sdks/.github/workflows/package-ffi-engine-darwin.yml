@@ -1,0 +1,118 @@
+name: Package FFI Engine (Darwin)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "flipt-engine-ffi/**"
+      - "flipt-evaluation/**"
+  push:
+    tags: ["flipt-engine-ffi-v**"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Darwin-aarch64
+            target: aarch64-apple-darwin
+
+          - name: Darwin-x86_64
+            target: x86_64-apple-darwin
+
+          - name: iOS-aarch64
+            target: aarch64-apple-ios
+
+          - name: iOS-aarch64-sim
+            target: aarch64-apple-ios-sim
+
+    runs-on: macos-latest
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustup default nightly
+          rustup target add ${{ matrix.platform.target }}
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-${{ matrix.platform.target}}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.platform.target }} --package flipt-engine-ffi
+        env:
+          RUSTFLAGS: "-Zlocation-detail=none -Zfmt-debug=none"
+
+      - name: Strip dylib
+        if: contains(matrix.platform.target, 'darwin')
+        run: strip -x target/${{ matrix.platform.target }}/release/libfliptengine.dylib
+
+      - name: Strip static library
+        if: contains(matrix.platform.target, 'ios')
+        run: strip -x target/${{ matrix.platform.target }}/release/libfliptengine.a
+
+      - name: Package
+        run: |
+          tar -czvf flipt-engine-ffi-${{ matrix.platform.name }}.tar.gz \
+            target/${{ matrix.platform.target }}/release/libfliptengine.* \
+            || true
+
+      - name: Upload Artifact (Pull Request)
+        uses: actions/upload-artifact@v7
+        if: github.event_name == 'pull_request'
+        with:
+          name: flipt-engine-ffi-${{ matrix.platform.name }}.tar.gz
+          path: flipt-engine-ffi-${{ matrix.platform.name }}.tar.gz
+          retention-days: 1
+
+      - name: Upload Release Assets (Tag)
+        uses: softprops/action-gh-release@v2.6.1
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/flipt-engine-ffi-v')
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: flipt-engine-ffi-${{ matrix.platform.name }}.tar.gz
+
+  trigger-ios-packaging:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/flipt-engine-ffi-v')
+    steps:
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.FLIPT_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.FLIPT_RELEASE_BOT_APP_PEM }}
+
+      - name: Trigger iOS Packaging workflow
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.generate_token.outputs.token }}
+          script: |
+            const release_tag = context.ref.replace('refs/tags/', '');
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'package-ffi-engine-ios.yml',
+              ref: 'main',
+              inputs: {
+                release_tag: release_tag
+              }
+            });
+
+            console.log(`Successfully triggered iOS packaging workflow for release tag: ${release_tag}`);

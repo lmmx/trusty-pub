@@ -1,0 +1,95 @@
+---
+name: Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests with python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+          - "3.14t"
+
+          - "pypy-3.10"
+          - "pypy-3.11"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up python version ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install project and deps
+        run: |
+          pip install .
+
+      - name: Run tests
+        run: |
+          python test_eradicate.py
+          # Integration:
+          python -m eradicate setup.py
+          eradicate setup.py
+
+
+  coverage:
+    name: Run tests with coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install project and deps
+        run: |
+          pip install coverage
+          pip install .
+
+      - name: Run test with coverage
+        run: |
+          coverage run --include='eradicate.py,test_eradicate.py' test_eradicate.py
+          coverage report --show-missing
+
+
+  windows:
+    name: Tests with python ${{ matrix.python-version }} on Windows
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.13"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up python version ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install project and deps
+        run: pip install .
+
+      - name: Run tests
+        run: |
+          python test_eradicate.py
+          # Integration:
+          python -m eradicate setup.py
+          eradicate setup.py

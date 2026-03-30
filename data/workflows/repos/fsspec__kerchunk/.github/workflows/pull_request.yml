@@ -1,0 +1,17 @@
+name: "Pull Request Docs Check"
+on:
+- pull_request
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: mamba-org/setup-micromamba@v1
+      with:
+        environment-file: ci/environment-docs.yml
+    - name: make docs
+      shell: bash -l {0}
+      run: |
+        cd docs
+        make html

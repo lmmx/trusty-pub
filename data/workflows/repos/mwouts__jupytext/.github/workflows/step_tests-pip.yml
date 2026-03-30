@@ -1,0 +1,113 @@
+name: test-pip
+run-name: Run main tests using Pip
+
+on:
+  workflow_call:
+    inputs:
+      coverage:
+        type: boolean
+        description: Upload coverage to CodeCov
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-pip:
+    name: >
+      🐍 ${{ matrix.python-version }}
+      ${{ matrix.dependency_type && format('({0})', matrix.dependency_type) }}
+      ${{ matrix.quarto && '(Quarto)' }}
+      ${{ matrix.no_kernel && '(No kernel)' }}
+      ${{ matrix.markdown-it-py && format('(markdown-it-py {0})', matrix.markdown-it-py) }}
+      ${{ matrix.no_markdown-it-py && '(No markdown-it-py)'}}
+      ${{ matrix.jupyter_server && format('(Jupyter-server {0})', matrix.jupyter_server) }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        experimental: [false]
+        include:
+          # Test with jupyter-server=2.10 that does not have the 'require_hash' argument
+          - python-version: "3.x"
+            jupyter_server: "2.10.0"
+          # Test minimum markdown-it-py supported (otherwise the most recent version is used)
+          - python-version: "3.x"
+            markdown-it-py: "~=2.0"
+          - python-version: "3.x"
+            no_markdown-it-py: true
+          - python-version: "3.x"
+            no_kernel: true
+          - python-version: "3.x"
+            quarto: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+        with:
+          python_version: ${{ matrix.python-version }}
+          dependency_type: ${{ matrix.dependency_type }}
+
+      - name: Install from source
+        run: >
+          HATCH_BUILD_HOOKS_ENABLE=true python -m pip install
+          -e '.[test-cov,test-external]'
+          jupyterlab
+          ${{ format('markdown-it-py{0}', matrix.markdown-it-py) }}
+
+      - name: Install Jupyter Server
+        if: ${{ matrix.jupyter_server }}
+        run: python -m pip install 'jupyter_server~=${{ matrix.jupyter_server }}'
+
+      - name: List the versions of the Jupyter components
+        run: jupyter --version
+
+      - name: Install a Jupyter Kernel
+        if: ${{ !matrix.no_kernel }}
+        run: python -m ipykernel install --name python_kernel --user
+
+      - name: Uninstall markdown-it-py
+        # Markdown-it-py is a dependency of Jupytext,
+        # but Jupytext should still work if it is not installed
+        if: ${{ matrix.no_markdown-it-py }}
+        run: python -m pip uninstall markdown-it-py --yes
+
+      - name: Install Quarto
+        if: ${{ matrix.quarto }}
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: |
+          # download the latest release
+          gh release download --repo quarto-dev/quarto-cli --pattern 'quarto-*-linux-amd64.deb'
+          # install it
+          sudo apt install ./*.deb
+
+      - name: Test with pytest
+        continue-on-error: ${{ matrix.experimental }}
+        run: pytest -n logical --cov --cov-report=xml
+
+      - name: Test lab extension
+        run: |
+          # Uninstall jupyter-fs as it overrides the original browser-test.js to
+          # check its own functionality (https://github.com/jpmorganchase/jupyter-fs/blob/main/jupyterfs/browser-test.js)
+          # So uninstall jupyter-fs before running browser check
+          #
+          pip uninstall jupyter-fs -y
+
+          # Check extension
+          jupyter labextension list
+          jupyter labextension list 2>&1 | grep -ie "jupyterlab-jupytext.*OK"
+
+          python -m jupyterlab.browser_check
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          verbose: true
+        if: inputs.coverage

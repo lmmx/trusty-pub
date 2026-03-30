@@ -1,0 +1,71 @@
+name: Test External Providers Installed via Module
+
+run-name: Test External Provider installation via Python module
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/llama_stack/**'
+      - 'tests/integration/**'
+      - 'uv.lock'
+      - 'pyproject.toml'
+      - 'tests/external/*'
+      - '.github/workflows/test-external-provider-module.yml' # This workflow
+
+jobs:
+  test-external-providers-from-module:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install dependencies
+        uses: ./.github/actions/setup-runner
+
+      - name: Install lmeval provider
+        run: |
+          uv pip install llama-stack-provider-lmeval
+
+      - name: Start Llama Stack server in background
+        env:
+          TRUSTYAI_LMEVAL_USE_K8S: "false"
+          LLAMA_STACK_LOG_FILE: "server.log"
+        run: |
+          nohup uv run llama stack run tests/external/llama-stack-provider-lmeval/config.yaml > server.log 2>&1 &
+
+      - name: Wait for Llama Stack server to be ready
+        run: |
+          for _ in {1..30}; do
+            if curl -s http://localhost:8321/v1/health | grep -q "OK"; then
+              echo "Server is ready"
+              exit 0
+            fi
+            echo "Waiting for server..."
+            sleep 1
+          done
+          echo "Server failed to start"
+          cat server.log
+          exit 1
+
+      - name: Verify external provider is loaded
+        run: |
+          response=$(curl -s http://localhost:8321/v1/providers)
+          echo "$response" | python3 -m json.tool
+          if echo "$response" | grep -q "trustyai_lmeval"; then
+            echo "lmeval external provider loaded successfully"
+          else
+            echo "ERROR: lmeval provider not found in providers list"
+            exit 1
+          fi
+
+      - name: Upload all logs to artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: logs-${{ github.run_id }}-${{ github.run_attempt }}-external-provider-module-test
+          path: |
+            *.log
+          retention-days: 1

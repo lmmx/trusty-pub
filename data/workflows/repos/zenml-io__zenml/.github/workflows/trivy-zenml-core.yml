@@ -1,0 +1,29 @@
+---
+name: Trivy ZenML (core) Scan
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: 0 4 * * 1  # At 04:00 on Monday
+jobs:
+  trivy-scan:
+    name: Trivy zenml scan & analysis
+    if: github.repository == 'zenml-io/zenml'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: zenml-Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@d710430a6722f083d3b36b8339ff66b32f22ee55  # 0.19.0
+        with:
+          image-ref: docker.io/zenmldocker/zenml:latest
+          format: sarif
+          output: trivy-results-zenml.sarif
+          # Ignore unfixed vulnerabilities (i.e. vulnerabilities that have no
+          # fix available and that we can't fix by updating the container
+          # packages)
+          ignore-unfixed: true
+      - name: Upload Trivy zenml scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@4bdb89f48054571735e3792627da6195c57459e2  # v3.31.10
+        with:
+          sarif_file: trivy-results-zenml.sarif

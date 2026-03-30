@@ -1,0 +1,163 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - "msgspec/**"
+      - ".github/workflows/ci.yml"
+      - ".pre-commit-config.yaml"
+      - "pyproject.toml"
+      - "setup.py"
+      - "setup.cfg"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to rebuild wheels for (e.g., 0.19.1)'
+        required: true
+        type: string
+
+jobs:
+  lint:
+    name: Run static analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build msgspec and install dependencies
+        run: |
+          pip install -e ".[dev]"
+
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.0
+
+      - name: mypy
+        run: pytest tests/test_mypy.py
+
+      - name: pyright
+        run: pytest tests/test_pyright.py
+
+      - name: doctests
+        run: pytest --doctest-modules msgspec
+
+      - name: Rebuild with sanitizers & coverage
+        env:
+          MSGSPEC_SANITIZE: "true"
+          MSGSPEC_COVERAGE: "true"
+        run: |
+          python setup.py clean --all
+          # I know this is deprecated, but I can't find a way to keep the build
+          # directory around anymore on new versions of setuptools
+          python setup.py develop
+
+      - name: Run tests with sanitizers
+        env:
+          PYTHONMALLOC: "malloc"
+          ASAN_OPTIONS: "detect_leaks=0"
+        run: |
+          LD_PRELOAD=`gcc -print-file-name=libasan.so` coverage run -m pytest -s -m "not mypy and not pyright"
+
+      - name: Generate coverage files
+        run: |
+          coverage xml
+          gcov -abcu `find build/ -name *.o`
+
+      - name: Upload Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: coverage.xml,_core.c.gcov,atof.h.gcov,ryu.h.gcov
+
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-13, windows-latest]
+
+    env:
+      CIBW_TEST_EXTRAS: "test"
+      CIBW_TEST_COMMAND: "pytest {project}/tests"
+      CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-* cp314t-*"
+      CIBW_SKIP: "*-win32 *_i686 *_s390x *_ppc64le"
+      CIBW_ARCHS_MACOS: "x86_64 arm64"
+      CIBW_ARCHS_LINUX: "x86_64 aarch64"
+      CIBW_TEST_SKIP: "*_arm64 *-musllinux_*"
+      CIBW_ENVIRONMENT: "CFLAGS=-g0"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || '' }}
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v1
+        with:
+          platforms: all
+
+      - name: Set up Environment
+        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+        run: |
+            echo "CIBW_SKIP=${CIBW_SKIP} *-musllinux_* cp39-*_aarch64 cp311-*_aarch64 cp312-*_aarch64 cp313-*_aarch64 cp314-*_aarch64 cp314t-*_aarch64" >> $GITHUB_ENV
+
+      - name: Build & Test Wheels
+        uses: pypa/cibuildwheel@v3.2.1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        if: (github.event_name == 'release' && github.event.action == 'published') || github.event_name == 'workflow_dispatch'
+        with:
+          name: artifact-wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build Source Distribution
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'release' && github.event.action == 'published') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || '' }}
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build source distribution
+        run: python setup.py sdist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-sdist
+          path: dist/*.tar.gz
+
+  upload_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    if: (github.event_name == 'release' && github.event.action == 'published') || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+          pattern: artifact-*
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true # allow appending wheels

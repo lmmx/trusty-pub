@@ -1,0 +1,62 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+  workflow_dispatch:
+
+jobs:
+
+  build:
+    name: build
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11']
+        architecture: ['x64']
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: setup
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.architecture }}
+
+      - name: deps
+        run: python -m pip install -U pip wheel setuptools
+
+      - name: wheel
+        run: python setup.py bdist_wheel
+
+  build-aarch64:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    env:
+      py: /opt/python/cp39-cp39/bin/python
+      img: quay.io/pypa/manylinux2014_aarch64
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Set up QEMU
+      id: qemu
+      uses: docker/setup-qemu-action@v1
+
+    - name: Install dependencies
+      run: |
+            docker run --rm -v ${{ github.workspace }}:/ws:rw --workdir=/ws \
+            ${{ env.img }} \
+            bash -exc '${{ env.py }} -m venv .env && \
+            source .env/bin/activate && \
+            python -m pip install -U pip wheel setuptools && \
+            python setup.py bdist_wheel && \
+            deactivate'

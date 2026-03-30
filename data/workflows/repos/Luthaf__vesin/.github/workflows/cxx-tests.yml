@@ -1,0 +1,134 @@
+name: C++ & Fortran tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # Check all PR
+
+concurrency:
+  group: cxx-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  rust-tests:
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }} / ${{ matrix.compiler }}
+    container: ${{ matrix.container }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            compiler: GCC - Valgrind
+            cc: gcc-14
+            cxx: g++-14
+            fc: gfortran-14
+            do-valgrind: true
+            setup-dependencies: |
+              sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+              sudo apt-get update
+              sudo apt-get install -y gcc-14 g++-14 gfortran-14
+
+          - os: ubuntu-24.04
+            compiler: Clang
+            cc: clang-21
+            cxx: clang++-21
+            fc: gfortran
+            setup-dependencies: |
+              wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+              sudo apt-get update
+              sudo apt-add-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main"
+              sudo apt-get install -y clang-21 gfortran
+
+          # check the build on a stock Ubuntu 20.04, which uses cmake 3.16
+          - os: ubuntu-24.04
+            compiler: GCC
+            cc: gcc
+            cxx: g++
+            fc: gfortran
+            container: ubuntu:20.04
+            setup-dependencies: |
+              apt update
+              apt install -y software-properties-common
+              apt install -y cmake make gcc g++ gfortran git curl
+
+          - os: macos-15
+            compiler: Clang
+            cc: clang
+            cxx: clang++
+            fc: gfortran-15
+
+          - os: windows-2022
+            compiler: MSVC
+            cc: cl.exe
+            cxx: cl.exe
+            cmake-extra-args:
+              - -G "Visual Studio 17 2022" -A x64
+
+          - os: windows-2022
+            compiler: MinGW
+            cc: gcc.exe
+            cxx: g++.exe
+            cmake-extra-args:
+              - -G "MinGW Makefiles"
+
+    steps:
+      - name: setup dependencies
+        run: ${{ matrix.setup-dependencies }}
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: install valgrind
+        if: matrix.do-valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      - name: configure cmake
+        shell: bash
+        run: |
+          mkdir vesin/build && cd vesin/build
+          cmake ${{ join(matrix.cmake-extra-args, ' ') }} \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+              -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+              -DVESIN_BUILD_TESTS=ON \
+              -DCMAKE_VERBOSE_MAKEFILE=ON \
+              ..
+
+      - name: build
+        run: |
+          cd vesin/build
+          cmake --build . --config Debug --parallel 2
+
+      - name: run tests
+        run: |
+          cd vesin/build
+          ctest --output-on-failure --build-config Debug --parallel 2
+
+      - name: configure Fortran
+        if: matrix.fc != null
+        run: |
+          mkdir fortran/build && cd fortran/build
+          cmake ${{ join(matrix.cmake-extra-args, ' ') }} \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_Fortran_COMPILER=${{ matrix.fc }} \
+              -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+              -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+              -DVESIN_FORTRAN_BUILD_TESTS=ON \
+              -DCMAKE_VERBOSE_MAKEFILE=ON \
+              ..
+
+      - name: build Fortran
+        if: matrix.fc != null
+        run: |
+          cd fortran/build
+          cmake --build . --config Debug --parallel 2
+
+      - name: run Fortran tests
+        if: matrix.fc != null
+        run: |
+          cd fortran/build
+          ctest --output-on-failure --build-config Debug --parallel 2

@@ -1,0 +1,36 @@
+name: Test with different Python versions
+on: [push, pull_request]
+jobs:
+  python:
+    strategy:
+      matrix:
+        python-version:
+          - "3.9"
+          - "3.13"
+          - "pypy-3.9"
+          - "pypy-3.11"
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install PortAudio
+        run: |
+          sudo apt-get install --no-install-recommends libportaudio2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Double-check Python version
+        run: |
+          python --version
+      - name: Clone Git repository
+        uses: actions/checkout@v6
+        with:
+          path: git-repo
+      - name: Install Python package
+        working-directory: git-repo
+        run: |
+          python -m pip install --group test .
+      - name: Run tests
+        run: |
+          python -m sounddevice
+          python -c "import sounddevice as sd; print(sd._libname)"
+          python -c "import sounddevice as sd; print(sd.get_portaudio_version())"

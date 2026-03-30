@@ -1,0 +1,63 @@
+name: Wheel building
+
+on:
+  schedule:
+    # run every day at 4:30am UTC
+    - cron: '30 4 * * *'
+  pull_request:
+    # We also want this workflow triggered if the 'Build all wheels'
+    # label is added or present when PR is updated
+    types:
+      - synchronize
+      - labeled
+  push:
+    branches:
+      - '*'
+    tags:
+      - '*'
+      - '!*dev*'
+      - '!*pre*'
+      - '!*post*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build_and_publish:
+    # This job builds the wheels and publishes them to PyPI for all
+    # tags, except those ending in ".dev". For PRs with the "Build all
+    # wheels" label, wheels are built, but are not uploaded to PyPI.
+
+    permissions:
+      contents: none
+
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/publish.yml@99401c364fa51c9c507d3cd6d272049278ac0b2c  # v2.4.0
+
+    if: (github.repository == 'astropy/photutils' && (github.event_name == 'push' ||  github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'Build all wheels')))
+    with:
+      # We upload to PyPI for all tag pushes, except tags ending in .dev
+      upload_to_pypi: ${{ startsWith(github.ref, 'refs/tags/') && !endsWith(github.ref, '.dev') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+
+      test_extras: test
+      test_command: pytest -p no:warnings --pyargs photutils
+      targets: |
+        # Linux wheels
+        - cp*-manylinux_x86_64
+
+        # MacOS X wheels
+        - cp*-macosx_x86_64
+        - cp*-macosx_arm64
+
+        # Windows wheels
+        - cp*-win_amd64
+
+      # Developer wheels
+      upload_to_anaconda: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+      anaconda_user: astropy
+      anaconda_package: photutils
+      anaconda_keep_n_latest: 10
+
+    secrets:
+      pypi_token: ${{ secrets.pypi_token }}
+      anaconda_token: ${{ secrets.anaconda_token }}

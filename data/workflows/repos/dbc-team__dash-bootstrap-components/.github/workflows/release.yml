@@ -1,0 +1,98 @@
+name: Publish release
+
+on:
+  pull_request:
+    types:
+      - closed
+
+permissions:
+  contents: write
+  id-token: write # Required for OIDC
+
+jobs:
+  release:
+    name: Release
+    if: github.event.pull_request.merged && (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'prerelease/'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GH_ACCESS_TOKEN_TOM }}
+
+      - id: get-release-type
+        run: |
+          echo "type=$(${{ startsWith(github.head_ref, 'prerelease/') }} && echo 'prerelease' || echo 'release')" >> "$GITHUB_OUTPUT"
+          echo "prefix=$(${{ startsWith(github.head_ref, 'prerelease/') }} && echo 'Prerelease' || echo 'Release')" >> "$GITHUB_OUTPUT"
+
+      - id: get-version
+        run: |
+          if [ ${{ steps.get-release-type.outputs.type }} = 'prerelease' ]; then
+            echo "version=$(echo ${{ github.head_ref }} | sed 's|prerelease/||')" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(echo ${{ github.head_ref }} | sed 's|release/||')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Use Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: 'latest'
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Update docs requirements
+        run: just _set-docs-version ${{ steps.get-version.outputs.version }}
+        if: ${{ steps.get-release-type.outputs.type == 'release' }}
+
+      - name: Build dash-bootstrap-components
+        run: just build
+
+      - name: Publish to npm
+        run: |
+          if [ ${{ steps.get-release-type.outputs.type }} = 'prerelease' ]; then
+            npm publish --provenance --access public --tag next
+          else
+            npm publish --provenance --access public --tag latest
+          fi
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.12.3
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages-dir: py-dist/
+
+      - name: Commit updated package-lock.json and docs requirements
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: ${{ steps.get-release-type.outputs.prefix }} ${{ steps.get-version.outputs.version }}
+          branch: main
+          push_options: --force
+          file_pattern: package-lock.json docs/requirements.txt
+
+      - name: Create GitHub release
+        id: create-release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.get-release-type.outputs.prefix }} ${{ steps.get-version.outputs.version }}
+          tag_name: ${{ steps.get-version.outputs.version }}
+          body: ${{ github.event.pull_request.body }}
+          prerelease: ${{ steps.get-release-type.outputs.type == 'prerelease' }}
+
+      - name: Post-release cleanup
+        run: just postrelease ${{ steps.get-version.outputs.version }}
+
+      - uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: Back to dev
+          branch: main
+          push_options: --force
+          file_pattern: package.json tests/test_version.py pyproject.toml uv.lock

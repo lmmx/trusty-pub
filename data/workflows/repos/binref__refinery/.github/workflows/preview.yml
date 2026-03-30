@@ -1,0 +1,34 @@
+name: preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      python:
+        description: 'The Python version to test against.'
+        default: '3.13'
+        required: true
+        type: string
+      system:
+        description: 'The Operating System to run on.'
+        default: 'windows-latest'
+        required: true
+        type: string
+
+jobs:
+  preview:
+    name: check forward compatibility
+    continue-on-error: true
+    runs-on: ${{ inputs.system }}
+    steps:
+      - name: Checkout Main Repository
+        uses: actions/checkout@v5
+      - name: Install Dependencies
+        uses: ./.github/actions/setup/
+        with:
+          py: ${{ inputs.python }}
+          os: ${{ inputs.system }}
+      - name: Run Tests
+        uses: ./.github/actions/test/
+        with:
+          py: ${{ inputs.python }}
+          os: ${{ inputs.system }}

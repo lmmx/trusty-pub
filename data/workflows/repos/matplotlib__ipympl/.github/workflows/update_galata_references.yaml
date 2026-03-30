@@ -1,0 +1,64 @@
+name: Update Galata References
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  update-reference-screenshots:
+    name: Update Galata References
+    runs-on: ubuntu-latest
+    if: github.event.issue.pull_request && contains(github.event.comment.body, 'please update snapshots')
+
+    steps:
+      - uses: jupyterlab/maintainer-tools/.github/actions/update-snapshots-checkout@main
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Conda environment with Micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: dev-environment.yml
+          create-args: >-
+            python=3.11
+
+      - name: Install ipympl
+        run: pip install .
+
+      - name: Install Galata
+        run: |
+          jlpm install
+          jlpm playwright install chromium
+        working-directory: ui-tests
+
+      - name: Generate updated Galata References
+        run: jlpm test:update
+        working-directory: ui-tests
+
+      - name: Compress screenshots
+        run: |
+          sudo apt install optipng
+          optipng *.png
+        working-directory: ui-tests/tests/ipympl.test.ts-snapshots
+
+      - name: Commit reference images
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          git pull
+
+          git add ui-tests/tests/ipympl.test.ts-snapshots
+
+          git commit -m "Update Galata References"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

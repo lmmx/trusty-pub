@@ -1,0 +1,104 @@
+on:
+  pull_request:
+  merge_group:
+name: PR Checks
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: short
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: true
+jobs:
+  pr-title:
+    name: PR Title Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check PR title follows conventional commits
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Conventional commit pattern: type(optional-scope): description
+          pattern='^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([a-zA-Z0-9_-]+\))?!?: .+'
+          if ! echo "$PR_TITLE" | grep -qE "$pattern"; then
+            echo "::error::PR title does not follow conventional commits format."
+            echo ""
+            echo "Expected format: type(optional-scope): description"
+            echo "  Types: feat, fix, chore, docs, style, refactor, perf, test, build, ci, revert"
+            echo "  Examples:"
+            echo "    feat: add new linting rule"
+            echo "    fix(parser): handle trailing commas"
+            echo "    chore: bump version to 1.0.0"
+            echo ""
+            echo "Got: $PR_TITLE"
+            exit 1
+          fi
+  bazel-lint:
+    name: Bazel Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v5
+      - uses: bazel-contrib/setup-bazel@083175551ceeceebc757ebee2127fde78840ca77 # ratchet:bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+      - name: Build all targets
+        run: bazelisk build --config=ci //...
+      - name: Run all tests
+        run: bazelisk test --config=ci //...
+  bazel-lockfile:
+    name: Bazel Lockfile Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v5
+      - uses: bazel-contrib/setup-bazel@083175551ceeceebc757ebee2127fde78840ca77 # ratchet:bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+      - name: Update lockfile
+        run: bazelisk mod deps --lockfile_mode=update
+      - name: Check lockfile is up to date
+        run: |
+          if ! git diff --quiet MODULE.bazel.lock; then
+            echo "::error::MODULE.bazel.lock is out of date. Run 'bazel mod deps --lockfile_mode=update' and commit the changes."
+            git diff MODULE.bazel.lock
+            exit 1
+          fi
+  build-binaries:
+    name: Build binaries for all platforms
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: sqruff-linux-x86_64-musl.tar.gz
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            bin: sqruff
+          - name: sqruff-linux-aarch64-musl.tar.gz
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            bin: sqruff
+          - name: sqruff-windows-x86_64.zip
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: sqruff.exe
+          - name: sqruff-darwin-x86_64.tar.gz
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            bin: sqruff
+          - name: sqruff-darwin-aarch64.tar.gz
+            os: macOS-latest
+            target: aarch64-apple-darwin
+            bin: sqruff
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v5
+      - uses: ./.github/actions/build-binaries
+        with:
+          package: false
+          publish: false

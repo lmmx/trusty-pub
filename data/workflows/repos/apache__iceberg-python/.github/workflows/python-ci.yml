@@ -1,0 +1,230 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+name: "Python CI"
+
+on:
+  push:
+    branches:
+    - 'main'
+  pull_request:
+    paths:
+    - '**'                              # Include all files and directories in the repository by default.
+    - '!.github/workflows/**'           # Exclude all workflow files
+    - '.github/workflows/python-ci.yml' # except the current file.
+    - '!.github/ISSUE_TEMPLATE/**'      # Exclude files and directories that don't impact tests or code like templates, metadata, and documentation.
+    - '!.gitignore'
+    - '!.asf.yml'
+    - '!mkdocs/**'
+    - '!.gitattributes'
+    - '!README.md'
+    - '!CONTRIBUTING.md'
+    - '!LICENSE'
+    - '!NOTICE'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint-and-unit-test:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 15
+      fail-fast: true
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install UV
+      uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+      with:
+        enable-cache: true
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libkrb5-dev # for kerberos
+    - name: Check uv.lock is up to date
+      run: uv lock --check
+    - name: Install
+      run: make install
+    - name: Run linters
+      run: make lint
+    - name: Run unit tests with coverage
+      run: COVERAGE=1 make test
+    - name: Generate coverage report (85%) # Coverage threshold should only increase over time — never decrease it!
+      run: COVERAGE_FAIL_UNDER=85 make coverage-report
+
+  integration-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install UV
+      uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+      with:
+        enable-cache: true
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libkrb5-dev # for kerberos
+    - name: Install
+      run: make install
+    - name: Run integration tests with coverage
+      run: COVERAGE=1 make test-integration
+    - name: Show debug logs
+      if: ${{ failure() }}
+      run: docker compose -f dev/docker-compose-integration.yml logs
+    - name: Upload coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-integration
+        path: .coverage*
+        include-hidden-files: true
+
+  integration-test-s3:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install UV
+      uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+      with:
+        enable-cache: true
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libkrb5-dev # for kerberos
+    - name: Install
+      run: make install
+    - name: Run s3 integration tests with coverage
+      run: COVERAGE=1 make test-s3
+    - name: Show debug logs
+      if: ${{ failure() }}
+      run: docker compose -f dev/docker-compose.yml logs
+    - name: Upload coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-s3
+        path: .coverage*
+        include-hidden-files: true
+
+  integration-test-adls:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install UV
+      uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+      with:
+        enable-cache: true
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libkrb5-dev # for kerberos
+    - name: Install
+      run: make install
+    - name: Run adls integration tests with coverage
+      run: COVERAGE=1 make test-adls
+    - name: Show debug logs
+      if: ${{ failure() }}
+      run: docker compose -f dev/docker-compose-azurite.yml logs
+    - name: Upload coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-adls
+        path: .coverage*
+        include-hidden-files: true
+
+  integration-test-gcs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install UV
+      uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+      with:
+        enable-cache: true
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libkrb5-dev # for kerberos
+    - name: Install
+      run: make install
+    - name: Run gcs integration tests with coverage
+      run: COVERAGE=1 make test-gcs
+    - name: Show debug logs
+      if: ${{ failure() }}
+      run: docker compose -f dev/docker-compose-gcs-server.yml logs
+    - name: Upload coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-gcs
+        path: .coverage*
+        include-hidden-files: true
+
+  integration-coverage-report:
+    runs-on: ubuntu-latest
+    needs: [integration-test, integration-test-s3, integration-test-adls, integration-test-gcs]
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install UV
+      uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+      with:
+        enable-cache: true
+    - name: Install dependencies
+      run: uv sync --group dev
+    - name: Download all coverage artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: coverage-*
+        merge-multiple: true
+    - name: Generate coverage report (75%) # Coverage threshold should only increase over time — never decrease it!
+      run: COVERAGE_FAIL_UNDER=75 make coverage-report
+
+  cibw-dev-env-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install UV
+      uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+      with:
+        enable-cache: true
+    # Why this exists:
+    # Catch import-time regressions (e.g., global conftest optional deps)
+    # in the same dev-only environment used by cibuildwheel wheel tests.
+    # Keep this in sync with wheel build test setup in
+    # .github/workflows/pypi-build-artifacts.yml:
+    #   CIBW_BEFORE_TEST: uv sync --directory {project} --only-group dev --no-install-project
+    #   CIBW_TEST_COMMAND: uv run --directory {project} pytest tests/avro/test_decoder.py
+    - name: Mirror wheel CIBW_BEFORE_TEST
+      run: uv sync --directory . --only-group dev --no-install-project
+    - name: Mirror wheel CIBW_TEST_COMMAND
+      run: uv run --directory . pytest tests/avro/test_decoder.py

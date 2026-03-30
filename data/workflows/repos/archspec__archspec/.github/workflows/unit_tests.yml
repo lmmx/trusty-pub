@@ -1,0 +1,69 @@
+name: Unit tests
+
+on:
+  push:
+    branches: [ master, 'releases/**' ]
+  pull_request:
+    branches: [ master, 'releases/**' ]
+  schedule:
+  - cron: "0 4 * * *"
+    
+jobs:
+  tox:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - macos-15-intel
+          - windows-latest
+
+    steps:
+    - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+      with:
+        submodules: true
+    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+      with:
+        python-version: |
+          3.8
+          3.9
+          3.10
+          3.11
+          3.12
+          3.13
+          3.14
+        cache: pip
+    - name: Install dependencies
+      run: |
+        pip install -U pip
+        pip install -U poetry tox-gh coverage
+    - name: Run tests with tox
+      run: |
+        tox
+        coverage xml
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true
+        fail_ci_if_error: false
+        flags: unittests
+  py36:
+    runs-on: ubuntu-latest
+    container: registry.access.redhat.com/ubi8/ubi
+    steps:
+    - name: Install git
+      run: |
+        dnf install -y git
+    - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+      with:
+        submodules: true
+    - name: Run tests using platform python (Python 3.6)
+      run: |
+        # We don't upload coverage, since we'd need as newer libc for codecov action
+        /usr/libexec/platform-python -m venv ./py36
+        . ./py36/bin/activate
+        pip install -U pip
+        pip install -U pytest jsonschema
+        pytest

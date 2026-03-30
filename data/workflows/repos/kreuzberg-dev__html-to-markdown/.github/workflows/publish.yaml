@@ -1,0 +1,2095 @@
+name: Publish Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g., v2.6.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Prepare artifacts without publishing"
+        required: false
+        type: boolean
+        default: false
+      ref:
+        description: "Git ref (branch, tag, or commit) to build; defaults to the tag"
+        required: false
+        type: string
+      force_republish_java:
+        description: "Force republish Java artifacts even if the version exists"
+        required: false
+        type: boolean
+        default: false
+      force_republish_wasm:
+        description: "Force republish WASM package even if the version exists"
+        required: false
+        type: boolean
+        default: false
+      republish:
+        description: "Delete and re-create the tag on current HEAD before publishing (retag + full republish)"
+        required: false
+        type: boolean
+        default: false
+  release:
+    types: [published]
+  repository_dispatch:
+    types: [publish-release]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.ref || github.event.inputs.tag)) || github.ref || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      ref: ${{ steps.meta.outputs.ref }}
+      dry_run: ${{ steps.meta.outputs.dry_run }}
+      checkout_ref: ${{ steps.meta.outputs.checkout_ref }}
+      target_sha: ${{ steps.meta.outputs.target_sha }}
+      matrix_ref: ${{ steps.meta.outputs.matrix_ref }}
+      is_tag: ${{ steps.meta.outputs.is_tag }}
+      force_republish_java: ${{ steps.republish.outputs.force_republish_java }}
+      force_republish_wasm: ${{ steps.republish.outputs.force_republish_wasm }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ (inputs.republish == true && (inputs.ref || github.event.repository.default_branch)) || inputs.ref || inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Retag for republish
+        if: ${{ inputs.republish == true || github.event.client_payload.republish == true }}
+        env:
+          TAG: ${{ inputs.tag || github.event.client_payload.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ -z "${TAG}" ]]; then
+            echo "::error::republish requires a tag input"
+            exit 1
+          fi
+          sha="$(git rev-parse HEAD)"
+          echo "::notice::Republish requested — deleting and re-creating tag ${TAG} on ${sha:0:8}"
+          # Delete via API (avoids workflows permission issue with git push)
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" -X DELETE 2>/dev/null || true
+          # Create via API
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f "ref=refs/tags/${TAG}" \
+            -f "sha=${sha}" --silent
+          # Update local state
+          git tag -d "${TAG}" 2>/dev/null || true
+          git tag "${TAG}" "${sha}"
+
+      - name: Validate tag and compute version
+        id: meta
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_REF: ${{ inputs.republish == true && format('refs/tags/{0}', inputs.tag) || inputs.ref }}
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EVENT_DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          EVENT_DISPATCH_DRY_RUN: ${{ github.event.client_payload.dry_run }}
+          EVENT_DISPATCH_REF: ${{ github.event.client_payload.ref }}
+        run: scripts/publish/validate-and-compute-metadata.sh
+      - name: Resolve republish flags
+        id: republish
+        env:
+          INPUT_FORCE_REPUBLISH_JAVA: ${{ inputs.force_republish_java }}
+          INPUT_FORCE_REPUBLISH_WASM: ${{ inputs.force_republish_wasm }}
+          EVENT_DISPATCH_FORCE_REPUBLISH_JAVA: ${{ github.event.client_payload.force_republish_java }}
+          EVENT_DISPATCH_FORCE_REPUBLISH_WASM: ${{ github.event.client_payload.force_republish_wasm }}
+        run: |
+          force_java="${INPUT_FORCE_REPUBLISH_JAVA:-${EVENT_DISPATCH_FORCE_REPUBLISH_JAVA:-false}}"
+          force_wasm="${INPUT_FORCE_REPUBLISH_WASM:-${EVENT_DISPATCH_FORCE_REPUBLISH_WASM:-false}}"
+          echo "force_republish_java=${force_java}" >>"$GITHUB_OUTPUT"
+          echo "force_republish_wasm=${force_wasm}" >>"$GITHUB_OUTPUT"
+      - name: Install Task
+        uses: go-task/setup-task@v2 # v2
+        with:
+          version: 3.46.4
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: release-metadata
+          path: release-metadata.json
+          retention-days: 14
+
+  check-pypi:
+    name: Check PyPI for existing version
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check PyPI version
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: pypi
+          package: html-to-markdown
+          version: ${{ needs.prepare.outputs.version }}
+
+  check-npm:
+    name: Check npm for existing versions
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      node_exists: ${{ steps.check.outputs.exists }}
+      wasm_exists: ${{ steps.check.outputs.wasm_exists }}
+      ts_exists: ${{ steps.check.outputs.ts_exists }}
+    steps:
+      - name: Check npm packages
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: npm
+          package: "@kreuzberg/html-to-markdown-node"
+          version: ${{ needs.prepare.outputs.version }}
+          extra-packages: |
+            wasm_exists=@kreuzberg/html-to-markdown-wasm
+            ts_exists=@kreuzberg/html-to-markdown
+
+  check-rubygems:
+    name: Check RubyGems for existing version
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check RubyGems version
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: rubygems
+          package: html-to-markdown
+          version: ${{ needs.prepare.outputs.version }}
+
+  check-hex:
+    name: Check Hex.pm for existing version
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check Hex version
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: hex
+          package: html_to_markdown
+          version: ${{ needs.prepare.outputs.version }}
+
+  check-maven:
+    name: Check Maven Central for existing version
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check Maven version
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: maven
+          package: "dev.kreuzberg:html-to-markdown"
+          version: ${{ needs.prepare.outputs.version }}
+
+  check-nuget:
+    name: Check NuGet for existing version
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check NuGet package
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: nuget
+          package: KreuzbergDev.HtmlToMarkdown
+          version: ${{ needs.prepare.outputs.version }}
+
+  check-packagist:
+    name: Check Packagist for existing version
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check Packagist version
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: packagist
+          package: kreuzberg-dev/html-to-markdown
+          version: ${{ needs.prepare.outputs.version }}
+
+  check-cratesio:
+    name: Check crates.io for existing versions
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      rs_exists: ${{ steps.check.outputs.exists }}
+      cli_exists: ${{ steps.check.outputs.cli_exists }}
+      all_exist: ${{ steps.derive.outputs.all_exist }}
+    steps:
+      - name: Query crates.io
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: cratesio
+          package: html-to-markdown-rs
+          version: ${{ needs.prepare.outputs.version }}
+          extra-packages: |
+            cli_exists=html-to-markdown-cli
+
+      - name: Derive all_exist
+        id: derive
+        run: |
+          if [[ "${{ steps.check.outputs.exists }}" == "true" && "${{ steps.check.outputs.cli_exists }}" == "true" ]]; then
+            echo "all_exist=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "all_exist=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  check-homebrew:
+    name: Check if Homebrew formula already published
+    needs: prepare
+    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check Homebrew tap for formula
+        id: check
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: homebrew
+          package: html-to-markdown
+          version: ${{ needs.prepare.outputs.version }}
+          tap-repo: kreuzberg-dev/homebrew-tap
+
+  python-wheels:
+    name: Build Python wheels (${{ matrix.os }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Build wheels
+        uses: kreuzberg-dev/actions/build-python-wheels@v1 # v1
+        with:
+          python-version: "3.13"
+          package-dir: packages/python
+          cibw-before-build-linux: >
+            yum install -y openssl-devel &&
+            pip install maturin uv &&
+            source ~/.cargo/env &&
+            python scripts/prepare_wheel.py
+          cibw-before-build-macos: >
+            pip install maturin uv &&
+            source ~/.cargo/env &&
+            python scripts/prepare_wheel.py
+          cibw-before-build-windows: >
+            pip install maturin uv &&
+            set PATH=%USERPROFILE%\.cargo\bin;%PATH% &&
+            python scripts\prepare_wheel.py
+          upload-artifact: "false"
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: python-wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+          retention-days: 14
+
+  python-sdist:
+    name: Build Python sdist
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Install build dependencies
+        run: scripts/publish/python/install-build-deps.sh
+        shell: bash
+
+      - name: Build CLI binary for sdist
+        run: scripts/publish/python/build-cli-for-sdist.sh
+        shell: bash
+
+      - name: Prepare sdist with CLI
+        run: scripts/publish/python/prepare-sdist-with-cli.sh
+        shell: bash
+
+      - name: Build sdist
+        run: scripts/publish/python/build-sdist.sh
+        shell: bash
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: python-sdist
+          path: packages/python/dist/*.tar.gz
+          retention-days: 14
+
+  php-pie:
+    name: Build PHP PIE source bundle
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+        with:
+          toolchain: stable
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@2.37.0 # 2
+        with:
+          php-version: "8.4"
+          tools: composer:2.9.1
+          coverage: none
+
+      - name: Ensure packaging script is executable
+        run: scripts/publish/php/ensure-package-script-executable.sh
+        shell: bash
+
+      - name: Assemble PIE source archive
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: scripts/publish/php/assemble-pie-archive.sh
+        shell: bash
+
+      - name: Download PIE CLI
+        run: scripts/publish/php/download-pie-cli.sh
+        shell: bash
+
+      - name: Verify PIE build from archive
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: scripts/publish/php/verify-pie-archive.sh
+        shell: bash
+
+      - name: Upload PIE source archive
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: php-pie-src
+          path: "build/artifacts/php_html_to_markdown-${{ needs.prepare.outputs.version }}-src.tgz"
+          retention-days: 14
+
+  node-typescript-defs:
+    name: Generate Node TypeScript definitions
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6 # v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Enable corepack
+        run: scripts/common/enable-corepack.sh
+        shell: bash
+
+      - name: Install Node dependencies
+        run: scripts/publish/node/install-node-deps.sh
+        shell: bash
+
+      - name: Generate TypeScript definitions
+        run: scripts/publish/node/generate-typescript-defs.sh
+        shell: bash
+
+      - name: Upload TypeScript definitions
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: node-typescript-defs
+          path: typescript-defs/
+          retention-days: 14
+
+  node-bindings:
+    name: Build Node bindings (${{ matrix.target }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            rust_target: ""
+            use_cross: false
+            use_napi_cross: false
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            rust_target: ""
+            use_cross: false
+            use_napi_cross: false
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            rust_target: x86_64-unknown-linux-musl
+            use_cross: true
+            use_napi_cross: false
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            rust_target: aarch64-unknown-linux-gnu
+            use_cross: false
+            use_napi_cross: true
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            rust_target: aarch64-unknown-linux-musl
+            use_cross: true
+            use_napi_cross: false
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            rust_target: armv7-unknown-linux-gnueabihf
+            use_cross: false
+            use_napi_cross: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust_target: ""
+            use_cross: false
+            use_napi_cross: false
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            rust_target: aarch64-pc-windows-msvc
+            use_cross: false
+            use_napi_cross: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target
+        if: ${{ matrix.rust_target != '' }}
+        env:
+          RUST_TARGET: ${{ matrix.rust_target }}
+        run: scripts/publish/common/add-rust-target.sh
+        shell: bash
+
+      - name: Install cross
+        if: ${{ matrix.use_cross }}
+        run: scripts/publish/cli/install-cross.sh
+        shell: bash
+
+      - name: Setup Node
+        uses: actions/setup-node@v6 # v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Enable corepack
+        run: scripts/common/enable-corepack.sh
+        shell: bash
+
+      - name: Install Node dependencies
+        run: scripts/publish/node/install-node-deps.sh
+        shell: bash
+
+      - name: Clean npm directory
+        if: runner.os != 'Windows'
+        run: scripts/publish/node/clean-npm-dir.sh
+        shell: bash
+
+      - name: Clean npm directory (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/publish/node/clean-npm-dir.ps1
+
+      - name: Create npm package structure
+        run: scripts/publish/node/create-npm-package-structure.sh
+        shell: bash
+
+      - name: Build native module
+        if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+          USE_CROSS: ${{ matrix.use_cross }}
+          USE_NAPI_CROSS: ${{ matrix.use_napi_cross }}
+        shell: bash
+        run: scripts/publish/node/build-native-module.sh
+
+      - name: Build native module (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+          USE_CROSS: ${{ matrix.use_cross }}
+          USE_NAPI_CROSS: ${{ matrix.use_napi_cross }}
+        run: scripts/publish/node/build-native-module.ps1
+
+      - name: Package artifacts
+        if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: scripts/publish/node/package-artifacts.sh
+        shell: bash
+
+      - name: Package artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: scripts/publish/node/package-artifacts.ps1
+
+      - name: Upload Node artifact
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: node-bindings-${{ matrix.target }}
+          path: node-bindings-${{ matrix.target }}.tar.gz
+          retention-days: 14
+
+  wasm-bindings:
+    name: Build WASM bindings
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Add wasm32 target
+        run: scripts/common/ensure-wasm-target.sh
+        shell: bash
+
+      - name: Install wasm-pack
+        run: scripts/common/install-wasm-pack.sh
+        shell: bash
+
+      - name: Setup Node
+        uses: actions/setup-node@v6 # v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Enable corepack
+        run: scripts/common/enable-corepack.sh
+        shell: bash
+
+      - name: Install dependencies
+        run: scripts/publish/wasm/install-deps.sh
+        shell: bash
+
+      - name: Build WASM bundles
+        run: scripts/publish/wasm/build-bundles.sh
+        shell: bash
+
+      - name: Package WASM artifacts
+        run: scripts/publish/wasm/package-artifacts.sh
+        shell: bash
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: wasm-bundles
+          path: wasm-artifacts/*
+          retention-days: 14
+
+  cli-binaries:
+    name: Build CLI binaries (${{ matrix.target }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            use_cross: false
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            use_cross: false
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use_cross: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            use_cross: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            use_cross: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Add compilation target
+        env:
+          RUST_TARGET: ${{ matrix.target }}
+        run: scripts/publish/common/add-rust-target.sh
+        shell: bash
+
+      - name: Install build dependencies
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: scripts/publish/cli/install-build-deps-linux.sh
+        shell: bash
+
+      - name: Configure cross linker
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: scripts/publish/cli/configure-cross-linker.sh
+        shell: bash
+
+      - name: Install cross
+        if: ${{ matrix.use_cross }}
+        run: scripts/publish/cli/install-cross.sh
+        shell: bash
+
+      - name: Build CLI
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          USE_CROSS: ${{ matrix.use_cross }}
+        run: scripts/publish/cli/build-cli.sh
+
+      - name: Package CLI artifact
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: scripts/publish/cli/package-cli-artifact.sh
+
+      - name: Package CLI artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: scripts/publish/cli/package-cli-artifact.ps1
+
+      - name: Upload CLI artifact
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: cli-${{ matrix.target }}
+          path: cli-${{ matrix.target }}.tar.gz
+          retention-days: 14
+
+      - name: Upload CLI artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: cli-${{ matrix.target }}
+          path: cli-${{ matrix.target }}.zip
+          retention-days: 14
+
+  ruby-gem:
+    name: Build Ruby gem (${{ matrix.label }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux
+          - os: macos-latest
+            label: macos-arm64
+          - os: windows-latest
+            label: windows-x64
+    runs-on: ${{ matrix.os }}
+    env:
+      RB_SYS_CARGO_PROFILE: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Remove cached CLI binaries
+        shell: bash
+        run: scripts/publish/ruby/remove-cached-cli.sh
+
+      - name: Install MSYS2 toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/publish/ruby/install-msys2-toolchain.ps1
+
+      - name: Install Rust (GNU on Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/publish/ruby/install-rust-gnu.ps1
+
+      - name: Configure bindgen sysroot (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: scripts/publish/ruby/configure-bindgen-windows.sh
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1 # v1
+        with:
+          ruby-version: "3.3"
+          bundler: "2.7.2"
+          bundler-cache: false
+
+      - name: Install Ruby dependencies (Unix)
+        if: runner.os != 'Windows'
+        run: scripts/publish/ruby/install-deps-unix.sh
+        shell: bash
+
+      - name: Install Ruby dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/publish/ruby/install-deps-windows.ps1
+
+      - name: Build gem artifacts (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/publish/ruby/build-gem-unix.sh
+
+      - name: Build gem artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/publish/ruby/build-gem-windows.ps1
+
+      - name: Upload gem artifacts
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: rubygems-${{ matrix.label }}
+          path: packages/ruby/pkg/*.gem
+          retention-days: 14
+
+  elixir-package:
+    name: Build Elixir Hex package (${{ matrix.label }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux
+            build_hex: true
+          - os: macos-latest
+            label: macos
+            build_hex: false
+    runs-on: ${{ matrix.os }}
+    env:
+      MIX_ENV: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Elixir
+        uses: erlef/setup-beam@v1 # v1
+        with:
+          elixir-version: "1.19"
+          otp-version: "28.1"
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Install Hex and Rebar
+        run: scripts/publish/elixir/install-hex-rebar.sh
+        shell: bash
+
+      - name: Install dependencies
+        run: scripts/publish/elixir/install-deps.sh
+        shell: bash
+
+      - name: Run Elixir tests
+        run: scripts/publish/elixir/run-tests.sh
+        shell: bash
+
+      - name: Build Hex package
+        if: ${{ matrix.build_hex }}
+        run: scripts/publish/elixir/build-hex-package.sh
+        shell: bash
+
+      - name: Upload Hex artifact
+        if: ${{ matrix.build_hex }}
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: elixir-hex-package
+          path: packages/elixir/html_to_markdown-*.tar
+          retention-days: 14
+
+  csharp-package:
+    name: Build C# NuGet package
+    needs: [prepare, check-nuget, csharp-ffi]
+    if: ${{ needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && needs.check-nuget.outputs.exists != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5 # v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Download C# native FFI libraries
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: csharp-ffi-*
+          path: dist/csharp-ffi
+          merge-multiple: true
+
+      - name: Install dependencies
+        run: scripts/publish/csharp/restore.sh packages/csharp/HtmlToMarkdown/HtmlToMarkdown.csproj
+        shell: bash
+
+      - name: Pack NuGet package
+        run: scripts/publish/csharp/pack.sh
+        shell: bash
+
+      - name: Upload NuGet artifact
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: csharp-nuget
+          path: artifacts/csharp/*.nupkg
+          retention-days: 14
+
+  csharp-ffi:
+    name: Build C# native FFI libraries
+    needs: [prepare, check-nuget]
+    if: ${{ needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && needs.check-nuget.outputs.exists != 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Build FFI library
+        env:
+          RID: ${{ matrix.rid }}
+        run: scripts/publish/csharp/build-ffi.sh "${RID}" dist/csharp-ffi
+        shell: bash
+
+      - name: Upload FFI artifact
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: csharp-ffi-${{ matrix.rid }}
+          path: dist/csharp-ffi
+          retention-days: 14
+
+  go-ffi:
+    name: Build Go native FFI libraries (${{ matrix.platform }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-latest
+            platform: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Package Go FFI library
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: scripts/publish/go/package-ffi.sh "${PLATFORM}" "${VERSION}" dist/go-ffi
+        shell: bash
+
+      - name: Upload Go FFI artifact
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: go-ffi-${{ matrix.platform }}
+          path: dist/go-ffi
+          retention-days: 14
+
+  c-ffi-libraries:
+    name: Build C FFI distribution packages (${{ matrix.platform }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-latest
+            platform: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Package C FFI distribution
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: scripts/publish/c-ffi/package-c-ffi.sh "${PLATFORM}" "${VERSION}" dist/c-ffi
+        shell: bash
+
+      - name: Upload C FFI artifact
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: c-ffi-${{ matrix.platform }}
+          path: dist/c-ffi
+          retention-days: 14
+
+  cargo-packages:
+    name: Package Rust crates
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Add Windows Rust target
+        if: runner.os == 'Windows'
+        run: rustup target add x86_64-pc-windows-msvc
+        shell: bash
+
+      - name: Package crates
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: scripts/publish/crates/package-crates.sh
+        shell: bash
+
+      - name: Upload crate packages
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: cargo-crates
+          path: crate-artifacts/*.crate
+          retention-days: 14
+
+  upload-release-artifacts:
+    name: Upload Release Artifacts
+    needs:
+      [
+        prepare,
+        python-wheels,
+        python-sdist,
+        php-pie,
+        node-typescript-defs,
+        node-bindings,
+        wasm-bindings,
+        cli-binaries,
+        ruby-gem,
+        go-ffi,
+        c-ffi-libraries,
+        cargo-packages,
+      ]
+    if: ${{ needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Download PHP PIE artifact
+        uses: actions/download-artifact@v8 # v8
+        with:
+          name: php-pie-src
+          path: dist/php-pie
+
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: cli-*
+          path: dist/cli
+          merge-multiple: false
+
+      - name: Download Go FFI artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: go-ffi-*
+          path: dist/go-ffi
+          merge-multiple: false
+
+      - name: Download C FFI artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: c-ffi-*
+          path: dist/c-ffi
+          merge-multiple: false
+
+      - name: Upload PHP PIE source bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: scripts/publish/upload-php-pie.sh
+        shell: bash
+
+      - name: Upload CLI binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: scripts/publish/upload-cli-artifacts.sh
+        shell: bash
+
+      - name: Upload Go FFI artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: scripts/publish/upload-go-ffi-artifacts.sh
+        shell: bash
+
+      - name: Upload C FFI artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: scripts/publish/upload-c-ffi-artifacts.sh
+        shell: bash
+
+      - name: Create Go module tag
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: scripts/publish/go/create-module-tag.sh "v${VERSION}"
+        shell: bash
+
+  publish-crates:
+    name: Publish crates.io packages
+    needs: [prepare, upload-release-artifacts, check-cratesio]
+    if: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.tag && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && needs.check-cratesio.outputs.all_exist != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Cargo.toml version matches tag
+        env:
+          TAG_VERSION: ${{ needs.prepare.outputs.version }}
+        run: scripts/publish/crates/verify-cargo-version.sh
+        shell: bash
+
+      - name: Re-check crates.io before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: cratesio
+          package: html-to-markdown-rs
+          version: ${{ needs.prepare.outputs.version }}
+          extra-packages: |
+            cli_exists=html-to-markdown-cli
+
+      - name: Publish html-to-markdown-rs
+        if: ${{ steps.recheck.outputs.exists != 'true' }}
+        env:
+          CARGO_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: scripts/publish/crates/publish-rs.sh
+        shell: bash
+
+      - name: Wait for indexing
+        if: ${{ steps.recheck.outputs.exists != 'true' }}
+        run: scripts/publish/crates/wait-for-indexing.sh
+        shell: bash
+
+      - name: Publish html-to-markdown-cli
+        if: ${{ steps.recheck.outputs.cli_exists != 'true' }}
+        env:
+          CARGO_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: scripts/publish/crates/publish-cli.sh
+        shell: bash
+
+  publish-pypi:
+    name: Publish Python packages to PyPI
+    needs: [prepare, upload-release-artifacts, check-pypi]
+    if: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.tag && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && needs.check-pypi.outputs.exists != 'true' }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: python-wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v8 # v8
+        with:
+          name: python-sdist
+          path: dist
+
+      - name: List packages to publish
+        run: |
+          echo "Packages in dist:"
+          ls -lh dist/ 2>/dev/null || echo "No packages found"
+        shell: bash
+
+      - name: Re-check PyPI before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: pypi
+          package: html-to-markdown
+          version: ${{ needs.prepare.outputs.version }}
+
+      - name: Publish to PyPI
+        if: ${{ steps.recheck.outputs.exists != 'true' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  publish-rubygems:
+    name: Publish Ruby gems
+    needs: [prepare, upload-release-artifacts, check-rubygems]
+    if: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.tag && needs.prepare.outputs.is_tag == 'true' && (needs.prepare.outputs.dry_run == 'true' || needs.check-rubygems.outputs.exists != 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Download Ruby gem artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: rubygems-*
+          path: dist
+          merge-multiple: true
+
+      - name: Re-check RubyGems before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: rubygems
+          package: html-to-markdown
+          version: ${{ needs.prepare.outputs.version }}
+
+      - name: Setup Ruby
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        uses: ruby/setup-ruby@v1 # v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: false
+
+      - name: Update RubyGems
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        run: gem update --system
+        shell: bash
+
+      - name: Configure trusted publishing credentials
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        uses: rubygems/configure-rubygems-credentials@v1.0.0 # v1.0.0
+
+      - name: Publish gems
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-rubygems@v1 # v1
+        with:
+          gems-dir: dist
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+
+      - name: RubyGems already published summary
+        if: ${{ steps.recheck.outputs.exists == 'true' }}
+        run: echo "Gem html-to-markdown@${{ needs.prepare.outputs.version }} already published on RubyGems — skipped." >> "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+  publish-hex:
+    name: Publish Hex package
+    needs: [prepare, elixir-package, check-hex]
+    if: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.tag && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && needs.check-hex.outputs.exists != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Download Hex artifact
+        uses: actions/download-artifact@v8 # v8
+        with:
+          name: elixir-hex-package
+          path: dist/elixir
+
+      - name: Upload Elixir package to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: scripts/publish/upload-elixir-package.sh
+        shell: bash
+
+      - name: Setup Elixir
+        uses: erlef/setup-beam@v1 # v1
+        with:
+          elixir-version: "1.19"
+          otp-version: "28.1"
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Install Hex/Rebar
+        run: scripts/publish/elixir/install-hex-rebar.sh
+        shell: bash
+
+      - name: Install dependencies
+        run: scripts/publish/elixir/install-deps.sh
+        shell: bash
+
+      - name: Stage Rust core and generate lockfile
+        shell: bash
+        run: |
+          scripts/publish/elixir/stage-rust-core.sh
+          pushd packages/elixir/native/html_to_markdown_elixir >/dev/null
+          cargo generate-lockfile
+          popd >/dev/null
+
+      - name: Re-check Hex.pm before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: hex
+          package: html_to_markdown
+          version: ${{ needs.prepare.outputs.version }}
+
+      - name: Publish to Hex.pm
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-hex@v1 # v1
+        with:
+          package-dir: packages/elixir
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+
+      - name: Hex.pm already published summary
+        if: ${{ steps.recheck.outputs.exists == 'true' }}
+        run: echo "Package html_to_markdown@${{ needs.prepare.outputs.version }} already published on Hex.pm — skipped." >> "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+  publish-nuget:
+    name: Publish NuGet package
+    needs: [prepare, csharp-package, check-nuget]
+    if: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.tag && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && needs.check-nuget.outputs.exists != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Download NuGet artifact
+        uses: actions/download-artifact@v8 # v8
+        with:
+          name: csharp-nuget
+          path: dist
+
+      - name: Re-check NuGet before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: nuget
+          package: KreuzbergDev.HtmlToMarkdown
+          version: ${{ needs.prepare.outputs.version }}
+
+      - name: Publish to NuGet
+        if: ${{ steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-nuget@v1 # v1
+        with:
+          packages-dir: dist
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+
+  publish-packagist:
+    name: Publish to Packagist
+    runs-on: ubuntu-latest
+    needs: [prepare, php-pie, check-packagist]
+    if: |
+      needs.prepare.result == 'success' &&
+      needs.prepare.outputs.is_tag == 'true' &&
+      needs.prepare.outputs.dry_run != 'true' &&
+      needs.check-packagist.outputs.exists != 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Re-check Packagist before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: packagist
+          package: kreuzberg-dev/html-to-markdown
+          version: ${{ needs.prepare.outputs.version }}
+
+      - name: Trigger Packagist Update
+        if: ${{ steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-packagist@v1 # v1
+        with:
+          packagist-username: kreuzberg-dev
+          package-name: kreuzberg/html-to-markdown
+          version: ${{ needs.prepare.outputs.version }}
+          repository-url: https://github.com/kreuzberg-dev/html-to-markdown
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+        env:
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+
+  java-ffi:
+    name: Build Java native FFI libraries
+    needs: [prepare, check-maven]
+    if: ${{ needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-maven.outputs.exists != 'true' || needs.prepare.outputs.force_republish_java == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - os: windows-latest
+            platform: windows-x86_64
+          - os: macos-latest
+            platform: osx-aarch64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        env:
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: scripts/publish/common/ensure-target-commit.sh
+        shell: bash
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Build FFI library
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: scripts/publish/java/build-ffi.sh "${PLATFORM}" dist/java-ffi
+        shell: bash
+
+      - name: Upload FFI artifact
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: java-ffi-${{ matrix.platform }}
+          path: dist/java-ffi
+          retention-days: 14
+
+  publish-maven:
+    name: Publish Maven package
+    needs: [prepare, check-maven, java-ffi]
+    if: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.tag && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-maven.outputs.exists != 'true' || needs.prepare.outputs.force_republish_java == 'true') }}
+    runs-on: ubuntu-latest
+    env:
+      MAVEN_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Download Java FFI artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: java-ffi-*
+          path: java-ffi-artifacts
+          merge-multiple: true
+
+      - name: Verify Central credentials
+        shell: bash
+        run: |
+          : "${MAVEN_USERNAME:?Set MAVEN_USERNAME to your Sonatype Central token user (namecode)}"
+          : "${MAVEN_PASSWORD:?Set MAVEN_PASSWORD to your Sonatype Central token password}"
+
+      - name: Install Maven (latest)
+        shell: bash
+        run: bash scripts/common/install-maven-latest.sh
+
+      - name: Patch legacy Maven GPG arguments
+        run: scripts/publish/maven/patch-legacy-gpg-args.sh
+        shell: bash
+
+      - name: Setup Java
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        uses: actions/setup-java@v5 # v5
+        with:
+          distribution: temurin
+          java-version: "25.0.2+10"
+          cache: maven
+          server-id: ossrh
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Configure GPG for non-interactive signing
+        shell: bash
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent || true
+
+          echo "::group::GPG debug info"
+          gpg --version
+          gpg --list-secret-keys
+          echo "Available pinentry programs:"
+          ls -la /usr/bin/pinentry* 2>/dev/null || echo "No pinentry in /usr/bin"
+          which pinentry 2>/dev/null || echo "pinentry not on PATH"
+          echo "Passphrase env var set: $([ -n "$MAVEN_GPG_PASSPHRASE" ] && echo 'YES' || echo 'NO')"
+          echo "gpg-agent.conf:"
+          cat ~/.gnupg/gpg-agent.conf
+          echo "gpg.conf (if exists):"
+          cat ~/.gnupg/gpg.conf 2>/dev/null || echo "(none)"
+          echo "::endgroup::"
+
+          echo "Testing GPG sign with loopback..."
+          echo "test" > /tmp/gpg-test.txt
+          echo "$MAVEN_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --armor --detach-sign /tmp/gpg-test.txt
+          echo "GPG test sign succeeded!"
+          rm -f /tmp/gpg-test.txt /tmp/gpg-test.txt.asc
+
+      - name: Setup Rust
+        uses: kreuzberg-dev/actions/setup-rust@v1 # v1
+
+      - name: Prefer gpg2 binary
+        run: scripts/publish/maven/prefer-gpg2.sh
+        shell: bash
+
+      - name: Copy native libraries into resources
+        shell: bash
+        run: |
+          if [[ -d "java-ffi-artifacts" ]]; then
+            echo "Copying native libraries from java-ffi-artifacts..."
+            scripts/publish/java/copy-native-libs.sh java-ffi-artifacts
+          else
+            echo "Warning: java-ffi-artifacts directory not found"
+          fi
+
+      - name: Re-check Maven Central before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: maven
+          package: "dev.kreuzberg:html-to-markdown"
+          version: ${{ needs.prepare.outputs.version }}
+
+      - name: Release Maven package
+        if: ${{ steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-maven@v1 # v1
+        with:
+          pom-file: packages/java/pom.xml
+          maven-profile: publish
+          extra-args: -DskipTests
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+        env:
+          MAVEN_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+  publish-node:
+    name: Publish Node packages
+    needs: [prepare, upload-release-artifacts, check-npm]
+    if: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.tag && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && needs.check-npm.outputs.node_exists != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Download Node artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: node-bindings-*
+          path: node-artifacts
+          merge-multiple: true
+
+      - name: Download TypeScript definitions
+        uses: actions/download-artifact@v8 # v8
+        with:
+          name: node-typescript-defs
+          path: typescript-defs
+
+      - name: Setup Node
+        uses: actions/setup-node@v6 # v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
+      - name: Update NPM
+        run: npm install -g npm@latest
+        shell: bash
+
+      - name: Enable corepack
+        run: scripts/common/enable-corepack.sh
+        shell: bash
+
+      - name: Prepare artifact directory
+        run: scripts/publish/node/prepare-artifact-directory.sh
+        shell: bash
+
+      - name: Install workspace dependencies
+        if: ${{ needs.prepare.outputs.dry_run != 'true' }}
+        run: scripts/publish/node/install-node-deps.sh
+        shell: bash
+
+      - name: Pack platform packages
+        run: scripts/publish/node/pack-platform-packages.sh
+        shell: bash
+
+      - name: Re-check npm before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: npm
+          package: "@kreuzberg/html-to-markdown-node"
+          version: ${{ needs.prepare.outputs.version }}
+          extra-packages: |
+            ts_exists=@kreuzberg/html-to-markdown
+
+      - name: Publish native binary packages
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-npm@v1 # v1
+        with:
+          packages-dir: crates/html-to-markdown-node/npm
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Wait for npm indexing (x64)
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/wait-for-package@v1 # v1
+        with:
+          registry: npm
+          package: "@kreuzberg/html-to-markdown-node-linux-x64-gnu"
+          version: ${{ needs.prepare.outputs.version }}
+          max-attempts: "25"
+
+      - name: Wait for npm indexing (arm64)
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/wait-for-package@v1 # v1
+        with:
+          registry: npm
+          package: "@kreuzberg/html-to-markdown-node-linux-arm64-gnu"
+          version: ${{ needs.prepare.outputs.version }}
+          max-attempts: "25"
+
+      - name: Publish main Node package
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-npm@v1 # v1
+        with:
+          package-dir: crates/html-to-markdown-node
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Wait for main Node package indexing
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.exists != 'true' && steps.recheck.outputs.ts_exists != 'true' }}
+        uses: kreuzberg-dev/actions/wait-for-package@v1 # v1
+        with:
+          registry: npm
+          package: "@kreuzberg/html-to-markdown-node"
+          version: ${{ needs.prepare.outputs.version }}
+          max-attempts: "25"
+
+      - name: Install TypeScript wrapper dependencies from npm
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.ts_exists != 'true' }}
+        working-directory: packages/typescript
+        run: pnpm install --no-frozen-lockfile
+        shell: bash
+
+      - name: Build TypeScript wrapper package
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.ts_exists != 'true' }}
+        run: scripts/publish/typescript/build-package.sh
+        shell: bash
+
+      - name: Publish TypeScript wrapper package
+        if: ${{ needs.prepare.outputs.dry_run != 'true' && steps.recheck.outputs.ts_exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-npm@v1 # v1
+        with:
+          package-dir: packages/typescript
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-wasm:
+    name: Publish WASM package
+    needs: [prepare, upload-release-artifacts, check-npm]
+    if: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.tag && needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-npm.outputs.wasm_exists != 'true' || needs.prepare.outputs.force_republish_wasm == 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Download WASM artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          name: wasm-bundles
+          path: wasm-artifacts
+
+      - name: Extract WASM artifacts
+        run: scripts/publish/wasm/extract-artifacts.sh
+        shell: bash
+
+      - name: Remove .gitignore files from dist directories
+        run: |
+          rm -f crates/html-to-markdown-wasm/dist/.gitignore
+          rm -f crates/html-to-markdown-wasm/dist-node/.gitignore
+          rm -f crates/html-to-markdown-wasm/dist-web/.gitignore
+        shell: bash
+
+      - name: Setup Node
+        uses: actions/setup-node@v6 # v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
+      - name: Update NPM
+        run: npm install -g npm@latest
+        shell: bash
+
+      - name: Re-check npm before publish
+        id: recheck
+        uses: kreuzberg-dev/actions/check-registry@v1 # v1
+        with:
+          registry: npm
+          package: "@kreuzberg/html-to-markdown-wasm"
+          version: ${{ needs.prepare.outputs.version }}
+
+      - name: Publish WASM package
+        if: ${{ steps.recheck.outputs.exists != 'true' }}
+        uses: kreuzberg-dev/actions/publish-npm@v1 # v1
+        with:
+          package-dir: crates/html-to-markdown-wasm
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  homebrew-bottles:
+    name: Build Homebrew bottles (${{ matrix.bottle_tag }})
+    needs: [prepare, check-homebrew]
+    if: |
+      needs.prepare.outputs.is_tag == 'true' &&
+      (needs.check-homebrew.outputs.exists != 'true')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            bottle_tag: arm64_sequoia
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Ensure target commit
+        if: ${{ needs.prepare.outputs.target_sha != '' }}
+        run: git checkout --progress --force ${{ needs.prepare.outputs.target_sha }}
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Homebrew
+        run: |
+          brew tap homebrew/core
+          brew update
+
+      - name: Extract version
+        id: version
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build CLI for bottle
+        run: |
+          cargo build --release \
+            -p html-to-markdown-cli
+
+      - name: Create Homebrew bottle
+        id: bottle
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          # Homebrew bottles require {formula}/{version}/ prefix in the tarball
+          bottle_root="/tmp/html-to-markdown-bottle"
+          bottle_dir="${bottle_root}/html-to-markdown/${VERSION}"
+          mkdir -p "${bottle_dir}/bin"
+
+          # Copy the built binary
+          cp target/release/html-to-markdown "${bottle_dir}/bin/"
+
+          # Create bottle tarball with correct prefix
+          cd "${bottle_root}"
+          bottle_filename="html-to-markdown-${VERSION}.${{ matrix.bottle_tag }}.bottle.tar.gz"
+          tar -czf "${bottle_filename}" html-to-markdown/
+
+          # Calculate SHA256
+          sha256=$(shasum -a 256 "${bottle_filename}" | cut -d' ' -f1)
+          echo "sha256=${sha256}" >> "$GITHUB_OUTPUT"
+          echo "filename=${bottle_filename}" >> "$GITHUB_OUTPUT"
+
+          # Copy to workspace for artifact upload
+          cp "${bottle_filename}" "${{ github.workspace }}/"
+          echo "Bottle created: ${bottle_filename}"
+          echo "SHA256: ${sha256}"
+
+      - name: Verify bottle file in workspace
+        run: |
+          cd "${{ github.workspace }}"
+          ls -lh html-to-markdown-*.bottle.tar.gz
+          echo "Files in workspace:"
+          ls -la
+        shell: bash
+
+      - name: Upload bottle artifact
+        uses: actions/upload-artifact@v7 # v7
+        with:
+          name: homebrew-bottle-${{ matrix.bottle_tag }}
+          path: html-to-markdown-${{ steps.version.outputs.version }}.${{ matrix.bottle_tag }}.bottle.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+  upload-homebrew-bottles:
+    name: Upload Homebrew bottles to GitHub Release
+    needs: [prepare, check-homebrew, homebrew-bottles]
+    if: |
+      always() &&
+      needs.prepare.outputs.dry_run != 'true' &&
+      needs.prepare.outputs.is_tag == 'true' &&
+      (needs.check-homebrew.outputs.exists != 'true') &&
+      needs.homebrew-bottles.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Ensure GitHub release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/publish/ensure-github-release-exists.sh "${{ needs.prepare.outputs.tag }}"
+
+      - name: Download bottle artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: homebrew-bottle-*
+          path: dist/homebrew
+          merge-multiple: true
+
+      - name: Verify downloaded artifacts
+        run: |
+          echo "Contents of dist/homebrew:"
+          ls -laR dist/homebrew || echo "dist/homebrew not found"
+          echo "All dist contents:"
+          ls -laR dist || echo "dist not found"
+        shell: bash
+
+      - name: Upload bottles (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/publish/upload-homebrew-bottles.sh "${{ needs.prepare.outputs.tag }}" dist/homebrew
+
+  publish-homebrew:
+    name: Update Homebrew formula
+    needs: [prepare, check-homebrew, upload-homebrew-bottles]
+    if: |
+      always() &&
+      needs.prepare.outputs.dry_run != 'true' &&
+      needs.prepare.outputs.is_tag == 'true' &&
+      (needs.check-homebrew.outputs.exists != 'true') &&
+      needs.upload-homebrew-bottles.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - name: Download bottle artifacts
+        uses: actions/download-artifact@v8 # v8
+        with:
+          pattern: homebrew-bottle-*
+          path: dist/homebrew
+          merge-multiple: true
+
+      - name: Setup Git credentials
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+        run: |
+          git config --global credential.helper store
+          echo "https://x-access-token:${GH_TOKEN}@github.com" > ~/.git-credentials
+          git config --global user.name "html-to-markdown-bot"
+          git config --global user.email "bot@kreuzberg.dev"
+
+      - name: Update Homebrew formula with bottles
+        uses: kreuzberg-dev/actions/publish-homebrew@v1 # v1
+        with:
+          bottles-dir: dist/homebrew
+          formula-name: html-to-markdown
+          tap-repo: kreuzberg-dev/homebrew-tap
+          tag: ${{ needs.prepare.outputs.tag }}
+          version: ${{ needs.prepare.outputs.version }}
+          github-repo: kreuzberg-dev/html-to-markdown
+          dry-run: ${{ needs.prepare.outputs.dry_run }}

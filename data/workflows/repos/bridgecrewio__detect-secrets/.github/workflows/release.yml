@@ -1,0 +1,132 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - '.github/**'
+      - '.pre-commit-config.yaml'
+      - 'requirements-dev.txt'
+
+permissions:
+  contents: read
+
+env:
+  MIN_PYTHON_VERSION: "3.8"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v3
+    - uses: actions/setup-python@65d7f2d534ac1bc67fcd62888c5f4f3d2cb2b236  # v3
+      with:
+        python-version: ${{ matrix.python }}
+        allow-prereleases: true
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements-dev.txt
+    - name: Run tests
+      run: pytest --strict-markers -W ignore::UserWarning tests
+
+  bump-version:
+    # Run tests before bumping
+    needs: tests
+    runs-on: [self-hosted, public, linux, x64]
+    environment: release
+    permissions:
+      contents: write
+      # IMPORTANT: this permission is mandatory for trusted publishing to pypi
+      id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v3
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+      - name: Set up Python
+        uses: actions/setup-python@65d7f2d534ac1bc67fcd62888c5f4f3d2cb2b236  # v3
+        with:
+          python-version: ${{ env.MIN_PYTHON_VERSION }}
+      - name: bump version
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git fetch --tags
+          latest_tag="$(git describe --tags "$(git rev-list --tags --max-count=1)")"
+          echo "latest tag: $latest_tag"
+          new_tag=$(echo "$latest_tag" | awk -F. -v a="$1" -v b="$2" -v c="$3" '{printf("%d.%d.%d", $1+a, $2+b , $3+1)}')
+          echo "new tag: $new_tag"
+
+          ## update package version
+          echo "VERSION = '$new_tag'" > 'detect_secrets/__version__.py'
+
+          git commit -m "publish version ${new_tag} [skip ci]" detect_secrets/__version__.py || echo "No changes to commit"
+          git push origin
+          git tag "$new_tag"
+          git push origin "$new_tag"
+
+          echo "version=$new_tag" >> "$GITHUB_OUTPUT"
+      - name: create python package
+        run: |
+          python -m pip install wheel
+          python setup.py sdist bdist_wheel
+      - name: rename dist files
+        run: |
+          shopt -s nullglob
+          for file in dist/bc-*.gz; do mv "$file" "${file//bc-detect-secrets/bc_detect_secrets}" ; done
+      - name: Publish a Python distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@b7f401de30cb6434a1e19f805ff006643653240e  # v1
+      - name: sleep and wait for package to refresh
+        run: |
+          sleep 2m
+
+  create-pr:
+    needs: bump-version
+    runs-on: [self-hosted, public, linux, x64]
+    environment: release
+    steps:
+      - name: Checkout checkov
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v3
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          repository: bridgecrewio/checkov
+      - uses: actions/setup-python@65d7f2d534ac1bc67fcd62888c5f4f3d2cb2b236  # v4
+        with:
+          python-version: ${{ env.MIN_PYTHON_VERSION }}
+      - name: Prepare PR
+        run: |
+          # install needed tools
+          python -m pip install --no-cache-dir --upgrade pipenv "pipenv-setup[black]" "vistir<0.7.0"
+
+          # update Pipfile
+          pipenv --python ${{ env.MIN_PYTHON_VERSION }}
+          pipenv install bc-detect-secrets==${{ needs.bump-version.outputs.version }}
+          pipenv lock
+
+          # update setup.py
+          pipenv-setup sync --pipfile
+      - name: Create PR
+        uses: peter-evans/create-pull-request@153407881ec5c347639a548ade7d8ad1d6740e38  # v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          branch: update-detect-secrets-dep
+          delete-branch: true
+          commit-message: update bc-detect-secrets version
+          title: "chore: update bc-detect-secrets version to ${{ needs.bump-version.outputs.version }}"
+          body: |
+            - Automatic update of bc-detect-secrets
+
+            powered by [create-pull-request](https://github.com/peter-evans/create-pull-request) GHA

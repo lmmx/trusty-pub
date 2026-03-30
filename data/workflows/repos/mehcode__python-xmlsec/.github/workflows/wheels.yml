@@ -1,0 +1,153 @@
+name: Wheel build
+
+on:
+  release:
+    types: [created]
+  schedule:
+  #        ┌───────────── minute (0 - 59)
+  #        │  ┌───────────── hour (0 - 23)
+  #        │  │ ┌───────────── day of the month (1 - 31)
+  #        │  │ │ ┌───────────── month (1 - 12 or JAN-DEC)
+  #        │  │ │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
+  #        │  │ │ │ │
+  - cron: "42 3 * * 4"
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'master' }}
+
+permissions: {}
+
+jobs:
+  cache_libs:
+    uses: ./.github/workflows/cache_libs.yml
+    secrets: inherit
+
+  sdist:
+    # Avoid Ubuntu 24.04 in sdist workflows, because it contains libxmlsec1-dev
+    # v1.2.39, which has a bug that causes tests/test_pkcs11.py to fail.
+    # (It thinks the softhsm engine has a public key instead of a private key.)
+    # libxmlsec1 <=1.2.33 or >=1.2.42 works. TODO: Try 26.04 when available.
+    runs-on: ubuntu-22.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.0.0
+        with:
+          python-version: '3.14'
+
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel setuptools_scm>=8 pkgconfig>=1.5.1
+
+      - name: Package source dist
+        run: python setup.py sdist
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q libxml2-dev libxslt1-dev libxmlsec1-dev libxmlsec1-openssl opensc softhsm2 libengine-pkcs11-openssl
+          pip install --upgrade -r requirements-test.txt --no-binary lxml
+          pip install dist/xmlsec-$(python setup.py --version).tar.gz
+
+      - name: Run tests
+        run: pytest -v --color=yes
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v5.0.0
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  generate_wheels_matrix:
+    # Create a matrix of all architectures & versions to build.
+    # This enables the next step to run cibuildwheel in parallel.
+    # From https://iscinumpy.dev/post/cibuildwheel-2-10-0/#only-210
+    name: Generate wheels matrix
+    runs-on: ubuntu-24.04
+
+    outputs:
+      include: ${{ steps.set-matrix.outputs.include }}
+
+    steps:
+      - uses: actions/checkout@v5.0.0
+
+      - name: Install cibuildwheel
+        # N.B. Keep cibuildwheel version pin consistent with "build_wheels" job below.
+        run: pipx install cibuildwheel==3.3
+
+      - id: set-matrix
+        run: |
+          MATRIX=$(
+            {
+              cibuildwheel --print-build-identifiers --platform linux \
+              | jq -nRc '{"only": inputs, "os": "ubuntu-22.04"}' \
+              | sed -e '/aarch64/s|ubuntu-22.04|ubuntu-22.04-arm|' \
+              && cibuildwheel --print-build-identifiers --platform macos \
+              | jq -nRc '{"only": inputs, "os": "macos-latest"}' \
+              && cibuildwheel --print-build-identifiers --platform windows \
+              | jq -nRc '{"only": inputs, "os": "windows-2022"}' \
+              && cibuildwheel --print-build-identifiers --platform windows --archs ARM64 \
+              | jq -nRc '{"only": inputs, "os": "windows-11-arm"}'
+            } | jq -sc
+          )
+          echo "include=$MATRIX"
+          echo "include=$MATRIX" >> $GITHUB_OUTPUT
+
+  build_wheels:
+    name: Build for ${{ matrix.only }}
+    needs: [cache_libs, generate_wheels_matrix]
+    runs-on: ${{ matrix.os }}
+
+    env:
+      LIBXML2_VERSION: ${{ contains(matrix.os, 'windows-') && needs.cache_libs.outputs.WIN_LIBXML2_VERSION || needs.cache_libs.outputs.LIBXML2_VERSION }}
+      LIBXSLT_VERSION: ${{ contains(matrix.os, 'windows-') && needs.cache_libs.outputs.WIN_LIBXSLT_VERSION || needs.cache_libs.outputs.LIBXSLT_VERSION }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate_wheels_matrix.outputs.include) }}
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Cache [libs]
+        uses: actions/cache/restore@v4.3.0
+        with:
+          path: |
+            libs/*.xz
+            libs/*.gz
+            libs/*.zip
+          key: libs-${{ runner.os }}-${{ runner.arch }}-${{ env.LIBXML2_VERSION }}-${{ env.LIBXSLT_VERSION }}
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3.7.0
+        with:
+          platforms: all
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.0
+        with:
+          only: ${{ matrix.only }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v5.0.0
+        with:
+          path: ./wheelhouse/*.whl
+          name: xmlsec-wheel-${{ matrix.only }}

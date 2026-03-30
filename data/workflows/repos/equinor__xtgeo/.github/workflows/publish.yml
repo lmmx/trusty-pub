@@ -1,0 +1,73 @@
+name: Build & Publish
+
+on:
+  pull_request:
+    branches: [main, "version-*"]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build:
+    name: ${{ matrix.os }}-${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
+        python: ["cp311", "cp312", "cp313", "cp314"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install cibuildwheel
+        run: |
+          uv venv
+          uv pip install -U pip cibuildwheel twine
+
+      - name: Build wheels
+        run: uv run cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: ${{ matrix.python }}-*
+
+      - name: Check metadata
+        run: uv run twine check wheelhouse/*
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+        with:
+          name: cibw-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.python }}
+          path: wheelhouse/*.whl
+
+  publish:
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    environment:
+      name: pypi
+      url: https://pypi.org/project/xtgeo
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cibw-*
+          path: wheelhouse
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+          packages-dir: wheelhouse
+          verbose: true

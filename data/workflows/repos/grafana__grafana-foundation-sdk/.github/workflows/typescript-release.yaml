@@ -1,0 +1,50 @@
+name: TypeScript Release
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  release:
+    name: Build and release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    environment:
+      name: typescript
+      url: https://www.npmjs.com/package/@grafana/grafana-foundation-sdk
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./typescript
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          scope: '@grafana'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Ensure npm latest version
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to NPM registry
+        run: npm publish --access public

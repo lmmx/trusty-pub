@@ -1,0 +1,52 @@
+name: Scheduled Integration Tests
+
+on:
+  schedule:
+    # Run every 5 minutes
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  call-integ-tests:
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    uses: ./.github/workflows/python-integ.yml
+    secrets: inherit
+
+  publish-metrics:
+    needs: call-integ-tests
+    if: always()  # Run even if integration tests fail
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment: Integ
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-east-1
+
+      - name: Publish CloudWatch Metrics
+        run: |
+          # Determine status value: 0 for success, 1 for failure
+          if [ "${{ needs.call-integ-tests.result }}" == "success" ]; then
+            STATUS_VALUE=0
+          else
+            STATUS_VALUE=1
+          fi
+
+          echo "Publishing metric with status: ${{ needs.call-integ-tests.result }} (value: $STATUS_VALUE)"
+
+          aws cloudwatch put-metric-data \
+            --namespace "GitHubActions/MCPProxy" \
+            --metric-name "IntegrationTestFailures" \
+            --dimensions WorkflowName=IntegrationCanary \
+            --value $STATUS_VALUE \
+            --unit Count \
+            --region us-east-1

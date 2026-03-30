@@ -1,0 +1,42 @@
+name: docs
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  test-ubuntu:
+    name: "docs on ${{ matrix.python-version }} on ${{ matrix.os }}"
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      matrix:
+        python-version: ['3.12']
+        os: [ubuntu-latest]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    - name: Install dependencies
+      run: |
+        sudo apt install -y pandoc
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt -r requirements-jax.txt -r requirements-flax.txt -r docs/requirements.txt
+        pip install .
+    - name: Print installed dependencies
+      run: |
+        pip freeze
+    - name: Test coverage
+      run: |
+        cd docs
+        make coverage_check
+    - name: Test docs to HTML
+      run: |
+        cd docs
+        make html

@@ -1,0 +1,251 @@
+#
+# Copyright 2018-2026 Elyra Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+name: Elyra Tests
+on:
+  push: # all branches
+  pull_request: # all branches
+  schedule:
+    # once a day at 3 am (PST) (10 am (UTC))
+    - cron: '0 10 * * *'
+
+env:
+  FORCE_COLOR: true
+  NODE_VERSION: 22
+  PYTHON_VERSION: 3.13
+  NODE_OPTIONS: '--max_old_space_size=4096'
+
+jobs:
+  prepare-yarn-cache:
+    name: Prepare Cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            */*/node_modules
+            /home/runner/.cache/Cypress
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+      - name: Install UI dependencies
+        uses: ./.github/actions/install-ui-dependencies
+  lint-server:
+    name: Lint Server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint
+        run: make lint-server
+
+  lint-ui:
+    name: Lint UI
+    needs: prepare-yarn-cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            */*/node_modules
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+      - name: Install UI dependencies
+        uses: ./.github/actions/install-ui-dependencies
+      - name: Lint
+        run: make eslint-check-ui
+      - name: Check format
+        run: make prettier-check-ui
+
+  test-server:
+    name: Test Server
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        # Note: Tests fail if we don't install `wheel` for some reason.
+        run: |
+          make install-server
+          make test-dependencies
+      - name: Version Snapshot
+        run: pip freeze
+      - name: Test
+        id: Test
+        run: make test-server
+      - name: Fetch packages metadata (if Test step failed)
+        # Note: checking for general failure() first is needed according to docs
+        if: ${{ failure() && steps.Test.conclusion == 'failure' }}
+        env:
+          days: 7 # check for newer package versions in past X days
+        run: |
+          python3 ./.github/workflows/scripts/fetch_packages_metadata.py $days
+      - name: Upload coverage reports to Codecov
+        if: ${{ matrix.python-version == env.PYTHON_VERSION }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+  test-ui:
+    name: Test UI
+    needs: prepare-yarn-cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            */*/node_modules
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+      - name: Install UI dependencies
+        uses: ./.github/actions/install-ui-dependencies
+      - name: Build
+        run: |
+          make build-dependencies
+          make yarn-install
+          make build-ui-prod
+      - name: Install
+        run: make install-server
+      - name: Test
+        run: make test-ui-unit
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  test-integration:
+    name: Run Integration Tests
+    needs: prepare-yarn-cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            */*/node_modules
+            /home/runner/.cache/Cypress
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+      - name: Install UI dependencies
+        uses: ./.github/actions/install-ui-dependencies
+      - name: Build
+        run: |
+          make build-dependencies
+          make yarn-install
+          make test-instrument
+          make build-ui-prod
+      - name: Install
+        run: |
+          make install-server
+          make install-examples
+      - name: Cypress
+        run: make test-integration
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/cobertura-coverage.xml
+      - name: Collect logs
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: elyra_test_artifacts
+          path: |
+            ${{ github.workspace }}/build/cypress/*.log
+            ${{ github.workspace }}/build/cypress/pipelines//**/*
+            ${{ github.workspace }}/build/cypress/screenshots//**/*
+            ${{ github.workspace }}/build/cypress/videos//**/*
+            /home/runner/.npm/_logs/*.log
+
+  test-documentation-build:
+    name: Test documentation build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make docs
+
+  validate-image-env:
+    name: Validate Image Environment
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate image environment
+        run: make PYTHON_VERSION=${{ matrix.python-version }} elyra-image-env
+
+  validate-images:
+    name: Validate Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate runtime images
+        run: make REMOVE_RUNTIME_IMAGE=1 validate-runtime-images
+
+  upload-artifacts:
+    name: Upload Artifacts
+    needs: prepare-yarn-cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            */*/node_modules
+            /home/runner/.cache/Cypress
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+      - name: Install UI dependencies
+        uses: ./.github/actions/install-ui-dependencies
+      - name: Build
+        run: |
+          make install-prod
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: elyra_build_artifacts
+          path: |
+            ${{ github.workspace }}/dist

@@ -1,0 +1,40 @@
+---
+
+name: "Publish latest default branch content to TestPyPI"
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  publish-to-stage:
+    runs-on: ubuntu-latest
+    environment:
+      name: stage-release
+      url: https://test.pypi.org/p/devpi-plumber
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+      - name: Build package
+        run:
+          # Published packages must not have a local version. As we know that we are pushing from the main
+          # branch, the difference from the last tag is already unique anyhow. Thus, we can just skip it.
+          export SETUPTOOLS_SCM_OVERRIDES_FOR_DEVPI_PLUMBER='{ local_scheme = "no-local-version" }'
+          
+          python -m build
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

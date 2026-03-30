@@ -1,0 +1,68 @@
+name: main
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: main-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+        python: ["3.10", "3.14"]
+        toxenv: ["py"]
+        exclude:
+          - os: ubuntu-24.04
+            python: "3.14"
+            toxenv: py
+        include:
+          - os: ubuntu-24.04
+            python: "3.14"
+            toxenv: cover
+          - os: ubuntu-24.04
+            python: "3.14"
+            toxenv: light
+          - os: ubuntu-24.04
+            python: "3.14"
+            toxenv: lint
+          - os: ubuntu-24.04
+            python: "3.14"
+            toxenv: mypy
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Configure Python ${{ matrix.python }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run tox
+        run: uvx --with tox-uv tox -e ${{ matrix.toxenv }}
+      - name: Upload test results
+        if: ${{ !cancelled() && matrix.toxenv != 'lint' && matrix.toxenv != 'mypy' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.toxenv }}
+          path: |
+            reports/*.xml
+      - name: Publish coverage
+        uses: coverallsapp/github-action@v2
+        if: ${{ !cancelled() && matrix.toxenv == 'cover' }}
+  event-file:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Upload
+        uses: actions/upload-artifact@v5
+        with:
+          name: event_file
+          path: ${{ github.event_path }}

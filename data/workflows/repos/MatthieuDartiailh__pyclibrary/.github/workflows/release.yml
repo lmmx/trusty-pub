@@ -1,0 +1,98 @@
+name: Build and upload wheels
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 3'
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Get history and tags for SCM versioning to work
+        run: |
+          git fetch --prune --unshallow
+          git fetch --depth=1 origin +refs/tags/*:refs/tags/*
+      - name: Setup Python
+        uses: actions/setup-python@v6
+      - name: Build sdist
+        run: |
+          pip install --upgrade pip
+          pip install wheel build
+          python -m build .
+      - name: Test sdist and wheel
+        run: |
+          pip install pytest
+          pip install dist/*.tar.gz
+          cd ..
+          python -m pytest pyclibrary/tests
+          pip uninstall pyclibrary --yes
+          pip install pyclibrary/dist/*.whl
+          python -m pytest pyclibrary/tests
+      - name: Store artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact
+          path: dist/*
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/kiwisolver
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4.1.7
+        with:
+          name: artifact
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: >-
+      Sign the Python 🐍 distribution 📦 with Sigstore
+      and create a GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+    - publish
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v4.1.7
+      with:
+        name: artifact
+        path: dist
+    - name: Sign the dists with Sigstore
+      uses: sigstore/gh-action-sigstore-python@v3.0.1
+      with:
+        inputs: >-
+          ./dist/*.tar.gz
+          ./dist/*.whl
+    - name: Create GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: >-
+        gh release create
+        '${{ github.ref_name }}'
+        --repo '${{ github.repository }}'
+        --generate-notes
+    - name: Upload artifact signatures to GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: >-
+        gh release upload
+        '${{ github.ref_name }}' dist/**
+        --repo '${{ github.repository }}'

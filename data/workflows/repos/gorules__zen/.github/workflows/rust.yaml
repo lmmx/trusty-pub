@@ -1,0 +1,140 @@
+name: Rust
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'bindings/**'
+      - 'examples/**'
+      - '.github/workflows/python.yaml'
+      - '.github/workflows/python-version-bump.yaml'
+      - '.github/workflows/node.yaml'
+      - '.github/workflows/node-version-bump.yaml'
+  push:
+    branches:
+      - master
+    tags-ignore:
+      - '**'
+    paths-ignore:
+      - 'bindings/**'
+      - 'examples/**'
+      - '.github/workflows/python.yaml'
+      - '.github/workflows/python-version-bump.yaml'
+      - '.github/workflows/node.yaml'
+      - '.github/workflows/node-version-bump.yaml'
+
+env:
+  RUST_BACKTRACE: 1
+  RUSTUP_MAX_RETRIES: 10
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: cargo test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        run: rustup install 1.80
+      - run: cargo test --workspace --all-features --exclude zen-ffi --exclude zen-nodejs --exclude zen-python
+      - run: cargo test --workspace --all-features --exclude zen-ffi --exclude zen-nodejs --exclude zen-python --release
+      - name: Test without arbitrary_precision
+        run: cargo test --workspace --exclude zen-ffi --exclude zen-nodejs --exclude zen-python
+      - name: Test without arbitrary_precision (release)
+        run: cargo test --workspace --exclude zen-ffi --exclude zen-nodejs --exclude zen-python --release
+
+  build:
+    name: cargo +${{ matrix.rust }} build
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        run: rustup update ${{ matrix.rust }} && rustup default ${{ matrix.rust }}
+      - run: cargo build --tests
+
+  bench:
+    name: cargo bench
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        run: rustup update stable
+      - run: cargo bench --workspace
+
+  miri:
+    name: cargo miri test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        run: rustup toolchain install nightly-2025-05-08 --component miri && rustup default nightly-2025-05-08
+      - run: cargo miri test --workspace --all-features
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-disable-isolation
+          RUSTFLAGS: ${{ env.RUSTFLAGS }} -Z randomize-layout
+
+  fmt:
+    name: Cargo FMT
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        run: rustup update stable
+      - run: cargo fmt --all -- --check
+
+  release:
+    name: Cargo Release
+    runs-on: ubuntu-latest
+    if: "startsWith(github.event.head_commit.message, 'chore(release): publish core')"
+    needs:
+      - test
+      - build
+      - bench
+      - miri
+      - fmt
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        run: rustup update stable
+
+      - name: Login to Crates.IO
+        run: cargo login ${{ secrets.CRATES_TOKEN }}
+
+      - name: Publish Macros
+        run: cd core/macros && cargo publish
+
+      - name: Publish Types
+        run: cd core/types && cargo publish
+
+      - name: Publish Expression
+        run: cd core/expression && cargo publish
+
+      - name: Publish Template
+        run: cd core/template && cargo publish
+
+      - name: Publish Engine
+        run: cd core/engine && cargo publish

@@ -1,0 +1,70 @@
+name: tests
+
+on:
+  push:
+    paths:
+      - '**.py' # only run workflow when source files changed
+  pull_request:
+    branches:
+      - master
+    paths:
+      - '**.py'
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10"]
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv pip install .[test] --system
+
+      - name: Test_general
+        run: pytest tests/test_all.py
+
+      - name: Test_crystal
+        run: pytest tests/test_crystal.py
+
+      - name: Test_lattice
+        run: pytest tests/test_lattice.py
+
+      - name: Test_molecule
+        run: pytest tests/test_molecule.py
+
+      - name: Test_wyckoff
+        run: pytest tests/test_wyckoff.py
+
+      - name: Test_symmetry
+        run: pytest tests/test_symmetry.py
+
+      - name: Test_group
+        run: pytest tests/test_group.py
+
+      - name: Test_lego
+        run: pytest tests/test_lego.py 
+
+      - name: Test_supergroup
+        run: pytest tests/test_supergroup.py
+
+      - name: Test_so3
+        run: pytest tests/test_SO3.py
+
+      #- name: Test_xrd
+      #  run: pytest tests/test_xrd.py
+
+
+
+

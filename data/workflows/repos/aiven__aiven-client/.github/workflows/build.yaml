@@ -1,0 +1,110 @@
+name: Build Aiven Client
+
+permissions: read-all
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '**'
+  pull_request:
+
+jobs:
+
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # only use one version for the lint step
+        python-version: ['3.10']
+
+    steps:
+
+      - id: checkout-code
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+
+      - id: prepare-python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - id: dependencies
+        run: make install-py
+
+      - id: validate-style
+        run: make validate-style
+
+      - id: ruff
+        run: make ruff
+
+      - id: flake8
+        run: make flake8
+
+      - id: mypy
+        run: make mypy
+
+  test:
+    runs-on: ${{ matrix.os }}
+    needs: lint
+    strategy:
+      matrix:
+        python-version:
+          - '3.10'
+          - '3.11'
+          - '3.12'
+          - '3.13'
+          - '3.14'
+        os: [macos-latest, ubuntu-latest, windows-latest]
+
+    steps:
+      - id: checkout-code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: prepare-python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - id: build-and-test
+        name: Build and test
+        run: |
+          pip install pytest
+          pip install -e .
+          pytest -vv tests/
+
+  test-fedora:
+    runs-on: ubuntu-latest
+    container: 'fedora:42'
+    needs: lint
+    steps:
+      - id: dependencies
+        run: sudo dnf install -y git-core make
+
+      - id: checkout-code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # See: https://github.com/actions/runner-images/issues/6775#issuecomment-1377299658
+      - id: chown-container-working-directory
+        name: Change Owner of Container Working Directory
+        run: chown root:root .
+
+      - id: build-and-test
+        name: Build and test
+        run: |
+          make build-dep-fedora
+          make rpm
+
+      - id: install
+        name: Install
+        run: sudo dnf install -y rpms/noarch/*.rpm
+
+      # test step is not needed (tests run on a build)

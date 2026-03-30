@@ -1,0 +1,100 @@
+---
+name: "Build for PyPI (optionally: upload)"
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: tag to build
+        required: true
+        type: string
+      testpypi:
+        description: upload to Test PyPI
+        type: boolean
+        default: false
+      pypi:
+        description: upload to PyPI
+        type: boolean
+        default: false
+  push:
+    branches:
+      - master
+      - main
+      - v*.x
+  pull_request:
+    branches:
+      - master
+      - main
+      - v*.x
+
+jobs:
+  pypi-build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: "Update pip"
+        run: python -m pip install --upgrade pip setuptools wheel
+      - name: "Install 'build' and 'twine'"
+        run: python -m pip install --upgrade build twine
+      - name: "Run 'build'"
+        run: "python -m build"
+      - name: "Run twine check"
+        run: "python -m twine check dist/*"
+      - name: Store artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: defusedxml
+          path: dist/
+
+  publish-to-pypi:
+    name: Publish to PyPI
+    if: inputs.pypi || false
+    needs:
+      - pypi-build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/defusedxml
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution
+        uses: actions/download-artifact@v3
+        with:
+          name: defusedxml
+          path: dist/
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-to-test-pypi:
+    name: Publish to Test PyPI
+    if: inputs.testpypi || false
+    needs:
+      - pypi-build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/defusedxml
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution
+        uses: actions/download-artifact@v3
+        with:
+          name: defusedxml
+          path: dist/
+      - name: Publish distribution to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

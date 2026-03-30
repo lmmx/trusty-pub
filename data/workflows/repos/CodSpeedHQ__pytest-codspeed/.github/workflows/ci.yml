@@ -1,0 +1,85 @@
+name: CI
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --all-files
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - headless
+          - pytest-benchmark-4
+          - pytest-benchmark-5
+          - valgrind
+        python-version:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+        pytest-version:
+          - ">=8.1.1"
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: astral-sh/setup-uv@v7
+      - name: "Set up Python ${{ matrix.python-version }}"
+        uses: actions/setup-python@v6
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - if: matrix.config == 'valgrind' || matrix.config == 'pytest-benchmark'
+        name: Install valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install valgrind -y
+      - name: Install dependencies with pytest${{ matrix.pytest-version }}
+        run: |
+          if [ "${{ matrix.config }}" == "valgrind" ]; then
+            export PYTEST_CODSPEED_FORCE_EXTENSION_BUILD=1
+          fi
+          uv sync --all-extras --dev --locked --verbose
+          uv pip install "pytest${{ matrix.pytest-version }}"
+          uv pip uninstall pytest-benchmark
+      - if: matrix.config == 'pytest-benchmark-4'
+        name: Install pytest-benchmark 4.0.0
+        run: uv pip install pytest-benchmark~=4.0.0
+      - if: matrix.config == 'pytest-benchmark-5'
+        name: Install pytest-benchmark 5.0.0
+        run: uv pip install pytest-benchmark~=5.0.0
+      - name: Run tests
+        run: uv run --no-sync pytest -vs
+
+  all-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All CI checks passed."
+    needs:
+      - static-analysis
+      - tests

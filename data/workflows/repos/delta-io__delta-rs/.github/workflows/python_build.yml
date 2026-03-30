@@ -1,0 +1,216 @@
+name: python_build
+
+on:
+  merge_group:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, next, next/*]
+
+defaults:
+  run:
+    working-directory: ./python
+
+env:
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+
+jobs:
+  test-minimal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup-env
+        with:
+          python-version: '3.10'
+
+      - name: Check Python
+        run: |
+          uv sync --no-install-project
+          make check-python
+
+      - name: Build and install deltalake
+        run: |
+          # Install minimum PyArrow version
+          make develop
+          uv pip install pyarrow==16.0.0
+
+      - name: Run tests
+        run: make unit-test
+
+  test:
+    name: Python Build (Python 3.10 PyArrow latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup-env
+
+      - name: Start emulated services
+        run: docker compose up -d
+
+      - name: Build and install deltalake
+        run: make develop
+
+      - name: Run tests
+        run: uv run --no-sync pytest -n auto -m '((s3 or azure) and integration) or not integration and not benchmark and not no_pyarrow' --doctest-modules
+
+      - name: Test without pandas
+        run: |
+          uv pip uninstall pandas
+          uv run --no-sync pytest -n auto -m "not pandas and not integration and not benchmark and not no_pyarrow"
+
+      - name: Test without pyarrow and without pandas
+        run: |
+          uv pip uninstall pyarrow
+          uv run --no-sync pytest -n auto -m "not pyarrow and not pandas and not datafusion and not integration and not benchmark"
+
+  test-datafusion:
+    name: Python Build (Python 3.10 DataFusion integration)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup-env
+        with:
+          python-version: '3.10'
+
+      - name: Build and install deltalake
+        run: make develop
+
+      - name: Assert DataFusion major version
+        run: uv run --no-sync python -c "from importlib.metadata import version; v=version('datafusion'); assert v.split('.')[0]=='52', f'Expected 52.x, got {v}'"
+
+      - name: Run DataFusion integration test
+        run: DELTALAKE_RUN_DATAFUSION_TESTS=1 uv run --no-sync pytest -v tests/test_datafusion.py -m datafusion
+
+  test-lakefs:
+    name: Python Build (Python 3.10 LakeFS Integration tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup-env
+
+      - name: Start emulated services
+        run: docker compose -f ../docker-compose-lakefs.yml up -d
+
+      - name: Build and install deltalake
+        run: make develop
+
+      - name: Run tests
+        run: uv run --no-sync pytest -m '(lakefs and integration)' --doctest-modules
+
+  test-unitycatalog-databricks:
+    name: Python Build (Python 3.10 Unity Catalog Integration tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup-env
+
+      - name: Run Mockoon CLI
+        uses: mockoon/cli-action@v2
+        with:
+          version: "latest"
+          data-file: ".github/mockoon_data_files/unitycatalog_databricks.json"
+          port: 8080
+
+      - name: Build and install deltalake
+        run: make develop
+
+      - name: Run tests
+        run: ../../delta-rs/.github/scripts/retry_integration_test.sh unitycatalog_databricks 5 10
+
+  test-unitycatalog-oss:
+    name: Python Build (Python 3.10 Unity Catalog Integration tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup-env
+
+      - name: Run Mockoon CLI
+        uses: mockoon/cli-action@v2
+        with:
+          version: "latest"
+          data-file: ".github/mockoon_data_files/unitycatalog_oss.json"
+          port: 8080
+
+      - name: Build and install deltalake
+        run: make develop
+
+      - name: Run tests
+        run: ../../delta-rs/.github/scripts/retry_integration_test.sh unitycatalog_oss 5 10
+
+  test-pyspark:
+    name: PySpark Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup-env
+
+      - uses: actions/setup-java@v2
+        with:
+          distribution: "zulu"
+          java-version: "21"
+
+      - name: Build and install deltalake
+        run: make develop-pyspark
+
+      - name: Run tests
+        run: make test-pyspark
+
+  multi-python-running:
+    name: Running with Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup-env
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build and install deltalake
+        run: |
+          make develop
+
+      - name: Run deltalake
+        run: |
+          uv run --no-sync python -c 'import deltalake'
+
+      - name: Run deltalake without pyarrow
+        run: |
+          uv pip uninstall pyarrow
+          uv run --no-sync python -c 'import deltalake'
+
+      - name: Run deltalake without pyarrow pandas
+        run: |
+          uv pip uninstall pyarrow pandas
+          uv run --no-sync python -c 'import deltalake'
+
+      - name: Run deltalake without pandas
+        run: |
+          uv pip install pyarrow
+          uv run --no-sync python -c 'import deltalake'

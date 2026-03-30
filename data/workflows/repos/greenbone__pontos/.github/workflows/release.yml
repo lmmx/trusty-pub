@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Pontos
+    # If the event is a workflow_dispatch or the label 'make release' is set and PR is closed because of a merge
+    if: (github.event_name == 'workflow_dispatch') || (contains( github.event.pull_request.labels.*.name, 'make release') && github.event.pull_request.merged == true)
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Setting the Reference
+        id: release
+        run: |
+          if [[ "${{ github.event_name }}" = "workflow_dispatch" ]]; then
+            echo "ref=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
+          fi
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ steps.release.outputs.ref }}
+      - name: Set git name, mail and origin
+        run: |
+          git config --global user.name "${{ secrets.GREENBONE_BOT }}"
+          git config --global user.email "${{ secrets.GREENBONE_BOT_MAIL }}"
+          git remote set-url origin https://${{ secrets.GREENBONE_BOT_TOKEN }}@github.com/${{ github.repository }}
+      - uses: greenbone/actions/poetry@v3
+      - name: Allow admin users bypassing protection on ${{ steps.release.outputs.ref }} branch
+        run: |
+          poetry run pontos-github-script pontos.github.scripts.enforce-admins ${{ github.repository }} ${{ steps.release.outputs.ref }} --allow
+        env:
+          GITHUB_USER: ${{ secrets.GREENBONE_BOT }}
+          GITHUB_TOKEN: ${{ secrets.GREENBONE_BOT_TOKEN }}
+      - name: Create release
+        run: |
+          poetry run pontos-release create --repository ${{ github.repository }} --release-type calendar
+        env:
+          GITHUB_USER: ${{ secrets.GREENBONE_BOT }}
+          GITHUB_TOKEN: ${{ secrets.GREENBONE_BOT_TOKEN }}
+      - name: Disable bypassing protection on ${{ steps.release.outputs.ref }} branch for admin users
+        run: |
+          poetry run pontos-github-script pontos.github.scripts.enforce-admins ${{ github.repository }} ${{ steps.release.outputs.ref }} --no-allow
+        env:
+          GITHUB_USER: ${{ secrets.GREENBONE_BOT }}
+          GITHUB_TOKEN: ${{ secrets.GREENBONE_BOT_TOKEN }}
+      - name: Import gpg key from secrets
+        run: |
+          echo -e "${{ secrets.GPG_KEY }}" >> tmp.file
+          gpg --pinentry-mode loopback --passphrase ${{ secrets.GPG_PASSPHRASE }} --import tmp.file
+          rm tmp.file
+      - name: Sign assets for released version
+        run: |
+          poetry run pontos-release sign --repository ${{ github.repository }} --signing-key ${{ secrets.GPG_FINGERPRINT }} --passphrase ${{ secrets.GPG_PASSPHRASE }}
+        env:
+          GITHUB_USER: ${{ secrets.GREENBONE_BOT }}
+          GITHUB_TOKEN: ${{ secrets.GREENBONE_BOT_TOKEN }}

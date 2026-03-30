@@ -1,0 +1,80 @@
+name: Docker - publish experimental image
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        required: true
+        description: The suffix of the published docker image.
+      target:
+        default: 'lakefs'
+        type: choice
+        options:
+          - lakefs
+          - lakectl
+
+# These permissions are needed to interact with GitHub's OIDC Token endpoint.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and push Docker image
+    runs-on: ubuntu-24.04-16-cores
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # This is used to fetch all the history in order to get the latest tag (for step "Extract Version")
+          fetch-depth: 0
+
+      - name: Set up NodeJS
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.17.x"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+        id: go
+
+      - uses: bufbuild/buf-setup-action@v1.50.0
+        with:
+          github_token: ${{ github.token }}
+          version: 1.54.0
+
+      - name: Extract version
+        shell: bash
+        run: echo "tag=$(echo $(git describe --abbrev=1 --tags)-$(echo ${{ inputs.name }}))" >> $GITHUB_OUTPUT
+        id: version
+
+      - name: Generate code
+        run: make gen VERSION=${{ steps.version.outputs.tag }}
+
+      - name: Checks validator
+        run: make checks-validator
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push lakefs
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ${{ inputs.target }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ steps.version.outputs.tag }}
+          tags: |
+            treeverse/experimental-lakefs:${{ steps.version.outputs.tag }}

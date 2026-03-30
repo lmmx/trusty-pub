@@ -1,0 +1,37 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Fetch all branches
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Set up rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: install uv
+        uses: astral-sh/setup-uv@v7
+      - run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+          # Sync
+          git checkout gh-pages
+          git merge -m 'Merge main' main
+
+          # Install dependencies and build docs
+          make install
+          make doc
+
+          git add -f docs
+          git commit -m "Re-generated documentation" --allow-empty
+          git push origin gh-pages

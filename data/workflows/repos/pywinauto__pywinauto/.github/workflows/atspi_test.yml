@@ -1,0 +1,91 @@
+name: atspi CI
+on:
+  push:
+    branches: [ "atspi", "master" ]
+  pull_request:
+    branches: [ "atspi", "master" ]
+jobs:
+  Linux:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os : [ubuntu-22.04, ubuntu-24.04]
+        python: [ '3.10', '3.11', '3.12', '3.13' ]
+        exclude:
+          - os: ubuntu-24.04
+            python: '3.10'
+          - os: ubuntu-24.04
+            python: '3.11'
+          - os: ubuntu-24.04
+            python: '3.12'
+          - os: ubuntu-22.04
+            python: '3.13'
+    env:
+      DISPLAY: ':0'
+    steps:
+    - name: get repo
+      uses: actions/checkout@v1
+    - name: Set up Python
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        sudo apt update -y
+        sudo apt upgrade -y
+        sudo apt install -y --no-install-recommends python3-setuptools tk-dev python3-tk
+        sudo apt install -y --no-install-recommends python3 python3-pip
+        sudo apt install -y --no-install-recommends xsel
+        pip3 install coverage codecov
+        pip3 install python-xlib --upgrade
+        pip3 install mock --upgrade
+        pip3 install pytest --upgrade
+        sudo apt install -y build-essential libssl-dev
+        sudo apt install -y qtbase5-dev qt5-qmake
+        sudo apt install -y libxkbcommon-x11-0
+        sudo apt install -y python3-gi gobject-introspection gir1.2-gtk-3.0
+        sudo apt install -y libgtk-3-dev
+        sudo apt install -y at-spi2-core
+        sudo apt install -y python3-pyatspi
+        sudo apt install -y xvfb x11-utils \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 xdotool
+        pip3 install cmake --upgrade
+
+    - name: Install test apps
+      run: |
+        git init apps
+        cd apps
+        git remote add -f origin https://github.com/pywinauto/PywinautoTestapps/
+        git config core.sparseCheckout true
+        echo "MouseTester/source" >> .git/info/sparse-checkout
+        echo "SendKeysTester/source" >> .git/info/sparse-checkout
+        git pull origin master
+        cd MouseTester/source
+        qmake
+        make
+        chmod a+x mousebuttons
+        cp mousebuttons ../
+        cd ../..
+        cd SendKeysTester/source
+        qmake
+        make
+        chmod a+x send_keys_test_app
+        cp send_keys_test_app ../
+        export XDG_RUNTIME_DIR=/tmp/runtime-runner
+    - name: Remote display start
+      run: |
+        sudo /usr/bin/Xvfb $DISPLAY -screen 0 1280x1024x24 &
+        sleep 5
+        set +eE
+        sudo apt install -y gdm3
+        sudo service gdm start
+        sleep 5
+    - name: Run tests
+      run: |
+        coverage run -m pytest pywinauto/unittests/test_atspi_element_info.py pywinauto/unittests/test_atspi_wrapper.py pywinauto/unittests/test_atspi_controls.py pywinauto/unittests/test_clipboard_linux.py pywinauto/unittests/test_keyboard.py pywinauto/unittests/test_application_linux.py -v
+    - name: Upload Coverage to Codecov
+      uses: codecov/codecov-action@v3

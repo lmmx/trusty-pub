@@ -1,0 +1,24 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - pyproject.toml
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+  packages: read
+
+jobs:
+  release:
+    name: release
+    if: ${{ startsWith(github.event.head_commit.message, 'release(versioning)') }}
+    uses: benbenbang/types-confluent-kafka/.github/workflows/semantic-release.yml@workflows
+    secrets: inherit
+    with:
+      dry_run: false

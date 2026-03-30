@@ -1,0 +1,26 @@
+---
+name: Validate new news entries
+
+on:
+  workflow_dispatch:  # Allow workflow to be manually triggered
+  pull_request:  # Trigger on PRs opened against develop branch
+    branches:
+      - develop
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.x
+
+      - name: Validate new news items
+        run: python scripts/verify-news-fragments.py
+
+      - name: Install towncrier
+        run: pip install -q -U towncrier
+
+      - name: Run towncrier
+        run: towncrier --draft

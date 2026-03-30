@@ -1,0 +1,97 @@
+on:
+  workflow_call:
+  # Permissions inherited from caller workflow
+
+permissions: {}
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Run tests once on each supported Python
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: [ubuntu-latest]
+        toxenv: [py]
+        include:
+          # Run macOS tests on 3.10 (current OS X python) and latest,
+          # Run Windows and "special" tests on latest Python version only
+          # Run linter on oldest supported Python
+          - python-version: "3.10"
+            os: macos-latest
+            toxenv: py
+          - python-version: "3.13"
+            os: macos-latest
+            toxenv: py
+          - python-version: "3.13"
+            os: windows-latest
+            toxenv: py
+          - python-version: "3.13"
+            os: ubuntu-latest
+            toxenv: purepy
+          - python-version: "3.13"
+            os: ubuntu-latest
+            toxenv: py-no-gpg
+          - python-version: "3.13"
+            os: ubuntu-latest
+            toxenv: py-test-gpg-fails
+          - python-version: "3.10"
+            os: ubuntu-latest
+            toxenv: lint
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout securesystemslib
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: "requirements*.txt"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade tox
+
+      - name:  Install system dependencies
+        shell: bash
+        run: |
+          # NOTE: HSM tests are skipped silently, if PYKCS11LIB is unset.
+
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get install -y softhsm2
+            echo "PYKCS11LIB=/usr/lib/softhsm/libsofthsm2.so" >> $GITHUB_ENV
+
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            ## disabled due to https://github.com/secure-systems-lab/securesystemslib/issues/1015
+            unset PYKCS11LIB
+            echo "Skipping HSM tests on MacOS"
+            # brew install softhsm
+            # echo "PYKCS11LIB=$(brew --prefix softhsm)/lib/softhsm/libsofthsm2.so" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            echo "Skipping HSM tests on Windows"
+            # see https://github.com/secure-systems-lab/securesystemslib/issues/520
+
+
+          else
+              echo "$RUNNER_OS not supported"
+              exit 1
+          fi
+
+      - name: Run tox
+        env:
+          TOXENV: ${{ matrix.toxenv }}
+        run: tox
+
+  summary:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: All tests completed
+        run: echo "All matrix jobs have completed successfully."

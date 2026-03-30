@@ -1,0 +1,66 @@
+name: check setup.py
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  detect-code-changes:
+    name: Detect Code Changes
+    runs-on: ubuntu-22.04
+    outputs:
+      run-tests: ${{ steps.filter.outputs.run-tests }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          list-files: shell
+          filters: |
+            run-tests:
+              - '!docs/**'
+
+  test:
+    name: Test setup.py
+    needs: detect-code-changes
+    if: needs.detect-code-changes.outputs.run-tests == 'true'
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Hack to get setup-python to work on nektos/act
+        run: |
+          if [ ! -f "/etc/lsb-release" ] ; then
+            echo "DISTRIB_RELEASE=18.04" > /etc/lsb-release
+          fi
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.7
+      - name: Set Up Environment
+        run: |
+          make install-uv reset-venv
+          source .venv/bin/activate
+          make install-pinned
+      - name: Test CLI
+        run: |
+          source .venv/bin/activate
+          LIGHTLY_SERVER_LOCATION="localhost:-1"
+          lightly-crop --help
+          lightly-ssl-train --help
+          lightly-embed --help
+          lightly-magic --help
+          lightly-download --help
+          lightly-version
+      - name: Test CLI on Dataset
+        run: |
+          source .venv/bin/activate
+          LIGHTLY_SERVER_LOCATION="localhost:-1"
+          git clone https://github.com/alexeygrigorev/clothing-dataset-small clothing_dataset_small
+          INPUT_DIR_1="clothing_dataset_small/test/dress"
+          lightly-ssl-train input_dir=$INPUT_DIR_1 trainer.max_epochs=1 loader.num_workers=6
+          lightly-embed input_dir=$INPUT_DIR_1

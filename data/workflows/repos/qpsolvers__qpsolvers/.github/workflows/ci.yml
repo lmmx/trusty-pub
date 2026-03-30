@@ -1,0 +1,145 @@
+name: CI
+
+on:
+    push:
+        branches: [ main ]
+    pull_request:
+        branches: [ main ]
+    workflow_dispatch:
+
+jobs:
+    check-secrets:
+        name: "Check availability of GitHub secrets"
+        runs-on: ubuntu-latest
+        outputs:
+            has-secrets: ${{ steps.secret-check.outputs.available }}
+        steps:
+          - name: Check whether GitHub secrets are available
+            id: secret-check
+            shell: bash
+            run: |
+                if [ '${{ secrets.MSK_LICENSE }}' != '' ]; then
+                    echo "available=true" >> ${GITHUB_OUTPUT};
+                else
+                    echo "available=false" >> ${GITHUB_OUTPUT};
+                fi
+
+    coverage:
+        name: "Coverage"
+        runs-on: ubuntu-latest
+        needs: [check-secrets]
+        if: needs.check-secrets.outputs.has-secrets == 'true'
+
+        steps:
+            - name: "Checkout sources"
+              uses: actions/checkout@v4
+
+            - name: "Setup Pixi"
+              uses: prefix-dev/setup-pixi@v0.8.8
+              with:
+                  pixi-version: v0.59.0
+                  cache: true
+
+            - name: "Prepare license files"
+              env:
+                  MSK_LICENSE: ${{ secrets.MSK_LICENSE }}
+              run: |
+                  echo "${MSK_LICENSE}" > ${{ github.workspace }}/mosek.lic
+
+            - name: "Check code coverage"
+              env:
+                  MOSEKLM_LICENSE_FILE: ${{ github.workspace }}/mosek.lic
+              run: |
+                  pixi run coverage
+
+            - name: "Upload coverage results"
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  pixi run coveralls
+
+    licensed:
+        name: "Test licensed solvers on ${{ matrix.os }}"
+        runs-on: ${{ matrix.os }}
+        needs: [check-secrets]
+        if: needs.check-secrets.outputs.has-secrets == 'true'
+
+        strategy:
+            matrix:
+                os: [ubuntu-latest, macos-latest]
+
+        steps:
+            - name: "Checkout sources"
+              uses: actions/checkout@v4
+
+            - name: "Setup Pixi"
+              uses: prefix-dev/setup-pixi@v0.8.8
+              with:
+                  pixi-version: v0.59.0
+                  environments: licensed
+                  cache: true
+
+            - name: "Prepare license files"
+              env:
+                  MSK_LICENSE: ${{ secrets.MSK_LICENSE }}
+              run: |
+                  echo "${MSK_LICENSE}" > ${{ github.workspace }}/mosek.lic
+
+            - name: "Test licensed solvers"
+              env:
+                  MOSEKLM_LICENSE_FILE: ${{ github.workspace }}/mosek.lic
+              run: |
+                  pixi run -e licensed licensed
+
+    lint:
+        name: "Code style"
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: "Checkout sources"
+              uses: actions/checkout@v4
+
+            - name: "Setup Pixi"
+              uses: prefix-dev/setup-pixi@v0.8.8
+              with:
+                  pixi-version: v0.59.0
+                  environments: lint
+                  cache: true
+
+            - name: "Lint qpsolvers"
+              run: |
+                  pixi run lint
+
+    test:
+        name: "Test ${{ matrix.os }} with ${{ matrix.pyenv }}"
+        runs-on: ${{ matrix.os }}
+
+        strategy:
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+                pyenv: [py310, py311, py312]
+
+        env:
+            PIXI_ENV: test-${{ matrix.pyenv }}-${{ matrix.os == 'ubuntu-latest' && 'linux' || matrix.os == 'macos-latest' && 'macos' || 'windows' }}
+
+        steps:
+            - name: "Checkout sources"
+              uses: actions/checkout@v4
+
+            - name: "Setup Pixi"
+              uses: prefix-dev/setup-pixi@v0.8.8
+              with:
+                  pixi-version: v0.59.0
+                  environments: ${{ env.PIXI_ENV }}
+                  cache: true
+
+            - name: "Run unit tests"
+              run: |
+                  pixi run --environment ${{ env.PIXI_ENV }} test
+
+    ci_success:
+        name: "CI success"
+        runs-on: ubuntu-latest
+        needs: [coverage, licensed, lint, test]
+        steps:
+            - run: echo "CI workflow completed successfully"

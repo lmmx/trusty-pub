@@ -1,0 +1,299 @@
+name: Main Deployment Workflow
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint Extension
+
+    runs-on: "${{ matrix.os }}"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version:
+          - "3.12"
+        os:
+          - ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Clone repository
+
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade .[dev]
+          pip install pylint
+
+      - name: Lint with Pylint
+        run: pylint PyFunceble
+
+  sec_check:
+    name: Check the safety of the codebase with Bandit
+
+    runs-on: "${{ matrix.os }}"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version:
+          - "3.12"
+        os:
+          - ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Clone repository
+
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install .[test,dev]
+
+      - name: Check the safety of the codebase with Bandit
+        run: bandit --ini=setup.cfg -r PyFunceble
+
+  test:
+    needs: [lint, sec_check]
+    name: "[${{ matrix.os }}-py${{ matrix.python_version }}] Test Extension"
+
+    runs-on: "${{ matrix.os }}"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Clone repository
+
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade .[test]
+          pip install tox coveralls
+
+      - name: Test as defined by tox.ini
+        run: |
+          tox -c tox.ini
+
+  example-test:
+    needs: [lint]
+    name: "[${{ matrix.os }}-py${{ matrix.python_version }}] Integration Test"
+
+    runs-on: "${{ matrix.os }}"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Clone repository
+
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade .
+
+      - name: Run example
+        run: |
+          python examples/data_filter.py
+
+  deploy_to_pypi:
+    needs: [test, example-test]
+    name: "Deploy 📦 to the PyPi"
+
+    environment: release
+    permissions:
+      id-token: write
+      attestations: write
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    runs-on: "${{ matrix.os }}"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version:
+          - "3.12"
+        os:
+          - ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Clone repository
+
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install twine wheel setuptools
+
+      - name: Build 📦
+        run: |
+          python setup.py sdist bdist_wheel
+
+      - name: Check 📦
+        run: |
+          twine check dist/*
+
+      - name: Attest 📦
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: "dist/*"
+
+      - name: Publish 📦 to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  deploy_to_aur:
+    needs: deploy_to_pypi
+    name: "Deploy 📦 to the AUR"
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    runs-on: "${{ matrix.os }}"
+
+    environment: release
+    permissions:
+      id-token: write
+      attestations: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+
+    container:
+      image: archlinux
+
+    steps:
+      - name: Get time for cache
+        id: cache_time
+        run: echo "time=$(date +%F-%T)" >> ${GITHUB_OUTPUT}
+
+      - name: Set up cache
+        uses: actions/cache@master
+        with:
+          path: /var/cache/pacman/pkg
+          key: pacman-cache-x86_64-${{ steps.cache_time.outputs.time }}
+          restore-keys: pacman-cache-x86_64-
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --needed --noconfirm && \
+          pacman -S --needed --noconfirm git binutils pacman-contrib openssh rsync python python-setuptools jq
+
+      - name: Store the SSH key
+        run: |
+          echo "${{ secrets.AUR_SSH_KEY }}" | install -Dm600 /dev/stdin ~/.ssh/id_ed25519
+
+      - uses: actions/checkout@v6
+        name: Clone repository
+
+      - name: Publish 📦 to the AUR - if necessary
+        env:
+          GIT_SSH_COMMAND: "ssh -i ~/.ssh/id_ed25519 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+        run: |
+          aurRepoDir=/tmp/pyfunceble-process-manager
+          githubRepoDir="${PWD}"
+          buildDir="/tmp/build"
+
+          latest=$(python3 setup.py --version)
+
+          licenseURL="https://raw.githubusercontent.com/pyfunceble/process-manager/refs/heads/master/LICENSE"
+          newURL=$(curl -s https://pypi.org/pypi/pyfunceble-process-manager/json | jq -r ".releases.\"${latest}\"[] | select(.filename | strings | test(\".tar\")).url")
+          genericURL='https://files.pythonhosted.org/packages/source/${upstreamName::1}/${upstreamName}/${upstreamName}-$pkgver.tar.gz'
+
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory ${aurRepoDir}
+          git config --global --add safe.directory ${githubRepoDir}
+          git config --global user.name ${{ github.actor }}
+          git config --global user.email ${{ secrets.GIT_EMAIL }}
+          git clone ssh://aur@aur.archlinux.org/pyfunceble-process-manager.git ${aurRepoDir}
+
+          rsync --progress --delete -r --exclude={'*.gz','*.xz','.github','pkg','src','.git','LICENSE'} ${aurRepoDir}/ ${buildDir}/
+
+          cd ${buildDir}
+
+          current=$(grep -P "^pkgver" PKGBUILD | cut -d= -f2)
+
+          echo "Previous version: ${current}"
+          echo "New version: ${latest}"
+
+          useradd makepkg
+          chown makepkg:root . -R
+
+          sed "/^pkgver=/s/.*/pkgver=${latest}/" -i PKGBUILD
+          sed "/^pkgrel=/s/.*/pkgrel=1/" -i PKGBUILD
+          sed "s,^source=(.*),source=(\"${genericURL}\" '${licenseURL}')," -i PKGBUILD
+
+          su makepkg -c "updpkgsums"
+          su makepkg -c "makepkg --printsrcinfo" > .SRCINFO
+
+          rsync --progress --delete -r --exclude={'*.gz','*.xz','.github','pkg','src','.git','LICENSE'} ${buildDir}/ ${aurRepoDir}/
+
+          cd ${aurRepoDir}
+
+          git add .
+          git diff --quiet --exit-code --cached || git commit -m "Update pyfunceble-process-manager to v${latest}"
+          git push origin master

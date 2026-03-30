@@ -1,0 +1,35 @@
+name: Cyclic Imports
+on:
+  workflow_call:
+  workflow_dispatch:  # to trigger manually
+
+permissions:
+  contents: read
+
+jobs:
+  cyclic-import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup python environment
+        uses: durandtibo/setup-venv-uv-action@v0.0.3
+
+      - name: check batchtensor
+        run: |
+          python -c "import batchtensor"
+
+      - name: check batchtensor.nested
+        run: |
+          python -c "from batchtensor import nested"
+
+      - name: check batchtensor.tensor
+        run: |
+          python -c "from batchtensor import tensor"
+
+      - name: check batchtensor.utils
+        run: |
+          python -c "from batchtensor import utils"

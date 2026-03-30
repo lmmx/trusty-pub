@@ -1,0 +1,58 @@
+name: Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - crosshair/**
+      - setup.py
+      - .pre-commit-config.yaml
+
+  pull_request:
+    paths:
+      - crosshair/**
+      - setup.py
+      - .pre-commit-config.yaml
+
+jobs:
+  Execute:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04]
+        python-version: [
+          # "3.8",  (our current version of mypy doesn't support 3.8)
+          "3.9",
+          "3.10",
+          "3.11",
+          "3.12",
+          "3.13",
+          "3.14.0-rc.3",
+        ]
+        # Windows doesn't pass the test suite at the moment :(
+        # include:
+        #   - os: windows-2016
+        #     python_version: "3.8.9"
+
+    steps:
+      - uses: actions/checkout@main
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@main
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip setuptools
+          # Vanilla install and smoke test, just to make sure we do
+          # not accidentally add an import for a [dev] dependency:
+            pip3 install -e .
+          crosshair -h
+          # Now add the dev dependencies, so we can use them for testing.
+          pip3 install -e .[dev]
+
+      - name: Run checks
+        run: |
+          pre-commit run --all-files --hook-stage manual --show-diff-on-failure

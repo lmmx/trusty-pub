@@ -1,0 +1,64 @@
+name: Slash Command Action
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  changelog:
+    if: |
+      github.event.issue.pull_request
+      && contains(github.event.comment.body, '/changelog create')
+      && (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'COLLABORATOR')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Parse changelog command
+        id: parse_command
+        run: |
+          # Extract the full command body
+          command_body="${{ github.event.comment.body }}"
+
+          # Remove the command prefix to get the arguments
+          # Handles both -t and --type flag formats
+          parsed_body=$(echo "$command_body" | sed -E 's/\/changelog create (-t|--type) ([a-z]+) (.*)$/\2|\3/')
+
+          # The parsed output will be 'type|message'
+          changelog_type=$(echo "$parsed_body" | cut -d'|' -f1)
+          message=$(echo "$parsed_body" | cut -d'|' -f2)
+
+          # Set outputs for use in later steps
+          echo "changelog_type=$changelog_type" >> $GITHUB_OUTPUT
+          echo "message=$message" >> $GITHUB_OUTPUT
+
+      # check out our repo and install our requirements
+      - uses: actions/checkout@v4
+        with:
+          # issue_comment event runs on main, we need to checkout the PR
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 0
+      - name: Setup python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.13
+          architecture: x64
+      - name: Install dependencies
+        run: ./script/bootstrap
+
+      # add the changelog entry
+      - name: Changelog Create
+        id: changelog
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Get the branch name from the PR using GitHub API
+          branch=$(curl -s -H "Authorization: token ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" | \
+            jq -r .head.ref)
+          echo "Branch: $branch"
+
+          ./script/changelog create -c -t "${{ steps.parse_command.outputs.changelog_type }}" "${{ steps.parse_command.outputs.message }}"
+
+          git push origin HEAD:"$branch"

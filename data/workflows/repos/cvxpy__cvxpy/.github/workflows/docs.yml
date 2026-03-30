@@ -1,0 +1,64 @@
+name: doc_deploy
+
+on:
+    workflow_dispatch:
+
+jobs:
+  doc_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Get deployed versions from gh-pages
+        uses: actions/checkout@v5
+        with:
+          ref: gh-pages
+      - name: Set already deployed versions
+        run: |
+          python -m pip install packaging
+          echo LATEST_DEPLOYED_VERSION=$(python -c "
+          import os
+          from packaging import version
+          versions = [version.parse(v) for v in os.listdir('version')]
+          print(sorted(versions)[-1])
+          ") >> $GITHUB_ENV
+
+      - name: Checkout current branch
+        uses: actions/checkout@v5
+
+      - name: Build docs
+        run: |
+          python -m pip install -e .
+          python -m pip install -r doc/requirements.txt
+          cd doc
+          make html
+
+      - name: Set current version
+        run: |
+          CURRENT_VERSION=$(python -c "
+          import cvxpy
+          print('.'.join(cvxpy.__version__.split('.')[:2]))
+          ")
+          echo CURRENT_VERSION=$CURRENT_VERSION >> $GITHUB_ENV
+          echo VERSION_PATH=/version/$CURRENT_VERSION >> $GITHUB_ENV
+          DEPLOY_LATEST=$(python continuous_integration/doc_is_latest.py \
+            --c "$CURRENT_VERSION" --l "$LATEST_DEPLOYED_VERSION")
+          echo DEPLOY_LATEST=$DEPLOY_LATEST >> $GITHUB_ENV
+
+      - name: Deploy this version
+        uses: JamesIves/github-pages-deploy-action@v4.8.0
+        with:
+          branch: gh-pages
+          folder: doc/build/html
+          target-folder: ${{ env.VERSION_PATH }}
+
+      - name: Deploy to root if latest version
+        if: ${{ env.DEPLOY_LATEST == 'True' }}
+        uses: JamesIves/github-pages-deploy-action@v4.8.0
+        with:
+          branch: gh-pages
+          folder: doc/build/html
+          clean-exclude: |
+            version/

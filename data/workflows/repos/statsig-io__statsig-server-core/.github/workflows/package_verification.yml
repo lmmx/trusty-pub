@@ -1,0 +1,289 @@
+name: Package Verification
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_COLOR: true
+  STATSIG_SERVER_SDK_KEY: ${{ secrets.KONG_SERVER_SDK_KEY }}
+  KONG_OPS_SDK_KEY: ${{ secrets.BENCH_CLUSTER_SDK_KEY }}
+
+jobs:
+  docker-based-verification:
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - package: java
+            tag: amazoncorretto_21_alpine_jdk
+
+          - package: java
+            tag: amazoncorretto_21
+
+          - package: java
+            tag: azul_zulu_openjdk_21_jdk
+          
+          - package: java
+            tag: azul_zulu_openjdk_21_alpine_jdk
+
+          - package: java
+            tag: eclipse_temurin_21_jdk_alpine
+
+          - package: java
+            tag: eclipse_temurin_21_jdk
+
+          - package: java
+            tag: amazonlinux_2023
+
+          - package: java
+            tag: amazonlinux_2
+
+          - package: python
+            tag: ubuntu_noble
+
+          - package: python
+            tag: py_3_10_slim
+
+          - package: python
+            tag: py_3_10_alpine
+          
+          - package: python
+            tag: py_3_7_slim
+
+          - package: python
+            tag: py_3_7_alpine
+
+          - package: python
+            tag: py_3_8_manglinux_x86_64
+
+          - package: python
+            tag: py_3_7_buster
+
+          - package: node
+            tag: node_20_slim
+
+          - package: node
+            tag: node_20_alpine
+
+          - package: node
+            tag: node_20_amazonliunx_2023
+
+          - package: node
+            tag: node_20_bookworm
+
+          - package: node
+            tag: node_20_bullseye
+
+          - package: node
+            tag: node_22_bookworm
+
+          - package: node
+            tag: node_22_alpine
+
+          - package: php
+            tag: php_7_cli
+
+          # todo: PHP musl support
+          # - package: php
+          #   tag: php_7_alpine
+
+          - package: php
+            tag: debian_11_slim
+
+          - package: go
+            tag: golang_1_24
+
+          - package: go
+            tag: golang_1_24_alpine
+
+          - package: rust
+            tag: rust_alpine_3_20
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 7.32.4
+
+      - name: Install NPM Dependencies
+        run: pnpm install --dir cli
+
+      - name: Run Verification
+        id: verification
+        run: ./tore verify-package --package ${{ matrix.config.package }} --image-tag ${{ matrix.config.tag }} 
+
+      - uses: ./.github/actions/log-package-verification-to-statsig
+        if: always()
+        with:
+          sdk_key: ${{ env.KONG_OPS_SDK_KEY }}
+          package: ${{ matrix.config.package }}
+          os_tag: ${{ matrix.config.tag }}
+          conclusion: ${{ steps.verification.conclusion }}
+
+
+  node-package-verification:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - windows-latest
+          - ubuntu-latest
+        tag:
+          - beta
+          - latest # prod
+
+    timeout-minutes: 10
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 7.32.4
+
+      - name: Run Verification
+        working-directory: examples/node/verify-package
+        id: verification
+        run: |
+          pnpm init
+          pnpm install @statsig/statsig-node-core@${{ matrix.tag }} typescript tsx @types/node
+          pnpm exec tsx verify.ts
+
+      - uses: ./.github/actions/log-package-verification-to-statsig
+        if: always()
+        with:
+          sdk_key: ${{ env.KONG_OPS_SDK_KEY }}
+          package: node-${{ matrix.tag }}
+          os_tag: ${{ matrix.runner }}
+          conclusion: ${{ steps.verification.conclusion }}
+
+  python-package-verification:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - windows-latest
+          - ubuntu-latest
+        tag:
+          - beta
+          - prod
+
+    timeout-minutes: 10
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Verification
+        working-directory: examples/python/verify-package
+        id: verification
+        run: |
+          pip3 install ${{ matrix.tag == 'beta' && '--pre' || '' }} --upgrade statsig_python_core
+          pip3 install mypy types-requests
+          mypy --package statsig_python_core
+          python3 verify.py
+
+      - uses: ./.github/actions/log-package-verification-to-statsig
+        if: always()
+        with:
+          sdk_key: ${{ env.KONG_OPS_SDK_KEY }}
+          package: python-${{ matrix.tag }}
+          os_tag: ${{ matrix.runner }}
+          conclusion: ${{ steps.verification.conclusion }}
+
+  php-package-verification:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          # - windows-latest # Uncomment when windows is supported by PHP
+          - ubuntu-latest
+        tag:
+          - beta
+          - prod
+
+    timeout-minutes: 10
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: 7.4
+          extensions: ffi
+          ini-values: ffi.enable=1
+
+      - name: Run Verification
+        working-directory: examples/php/verify-package
+        id: verification
+        run: |
+          output=$(composer require statsig/statsig-php-core:${{ matrix.tag == 'beta' && 'dev-main' || '@stable' }} 2>&1)
+          echo "$output"
+          # Check for the verification success string
+          if ! echo "$output" | grep -q "FFI binary verification is successful"; then
+            echo "❌ php binary verification failed"
+            exit 1
+          fi
+          php verify.php
+
+      - uses: ./.github/actions/log-package-verification-to-statsig
+        if: always()
+        with:
+          sdk_key: ${{ env.KONG_OPS_SDK_KEY }}
+          package: php-${{ matrix.tag }}
+          os_tag: ${{ matrix.runner }}
+          conclusion: ${{ steps.verification.conclusion }}
+
+  dotnet-package-verification:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - windows-latest
+          - ubuntu-latest
+        tag:
+          - beta
+          - prod
+
+    timeout-minutes: 10
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Pin Statsig package version
+        working-directory: examples/dotnet/verify-package
+        shell: bash
+        run: |
+          if [[ "${{ matrix.tag }}" == "beta" ]]; then
+            dotnet add package Statsig.Dotnet --prerelease
+          else
+            dotnet add package Statsig.Dotnet            # prod = latest stable
+          fi
+
+      - name: Run example
+        working-directory: examples/dotnet/verify-package
+        shell: bash
+        id: verification
+        run: |
+          dotnet restore dotnet.csproj --no-cache
+          dotnet run --configuration Release 
+
+      - uses: ./.github/actions/log-package-verification-to-statsig
+        if: always()
+        with:
+          sdk_key: ${{ env.KONG_OPS_SDK_KEY }}
+          package: dotnet-${{ matrix.tag }}
+          os_tag: ${{ matrix.runner }}
+          conclusion: ${{ steps.verification.conclusion }}

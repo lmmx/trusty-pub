@@ -1,0 +1,58 @@
+name: Runs the tests nightly
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+jobs:
+  python-versions:
+    uses: ./.github/workflows/get-python-versions.yml
+
+  run-tests:
+    needs: python-versions
+    runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
+    name: Run tests with Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(needs.python-versions.outputs.python-versions) }}
+        os: [ ubuntu-latest, windows-latest ]
+      fail-fast: false
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Checkout to code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-test.txt
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_HAZELCAST_OIDC_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: 'us-east-1'
+      - name: Get Secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            HAZELCAST_ENTERPRISE_KEY,CN/HZ_LICENSE_KEY
+      - name: Run tests
+        env:
+          HZ_SNAPSHOT_INTERNAL_USERNAME: ${{ secrets.HZ_SNAPSHOT_INTERNAL_USERNAME }}
+          HZ_SNAPSHOT_INTERNAL_PASSWORD: ${{ secrets.HZ_SNAPSHOT_INTERNAL_PASSWORD }}
+        run: python run_tests.py
+      - name: Upload remote controller logs on test failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: rc-logs-${{ matrix.python-version }}-${{ matrix.os }}
+          path: |
+            rc_stderr.log
+            rc_stdout.log

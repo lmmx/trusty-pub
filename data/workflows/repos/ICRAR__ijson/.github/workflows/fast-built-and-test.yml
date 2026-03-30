@@ -1,0 +1,50 @@
+name: Build and test ijson
+
+# Build on every branch push, tag push, and pull request change:
+on:
+  push:
+  pull_request:
+  schedule:
+  # 00:00 UTC every Saturday, don't bother anyone
+  - cron: '0 0 * * 6'
+
+jobs:
+
+  fast_tests:
+    name: Build ijson and run unit tests (${{ matrix.os }}, ${{ matrix.python_version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-2025, macos-14]
+        python_version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: ubuntu-latest
+            python_version: "pypy3.10"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install Yajl
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: sudo apt install libyajl-dev
+
+      - name: Build ijson
+        env:
+          IJSON_EMBED_YAJL: ${{ matrix.os != 'ubuntu-latest' && '1' || '0' }}
+        run: pip install .
+
+      - name: Install test dependencies
+        run: pip install -r test-requirements.txt
+
+      - name: Run unittests
+        run: pytest -vv
+
+      - name: Run doctests
+        run: pytest --doctest-modules --doctest-ignore-import-errors src

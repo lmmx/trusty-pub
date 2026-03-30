@@ -1,0 +1,24 @@
+# This workflow is to run tests on regular pushes and pull requests - it is
+# separate from the tests that get run during an auto-update, which can be
+# found in update_and_publish.yml
+
+name: Run tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@99401c364fa51c9c507d3cd6d272049278ac0b2c  # v2.4.0
+    with:
+      envs: |
+        - linux: py310-test
+        - linux: py311-test
+        - linux: py312-test
+        - linux: py313-test
+        - linux: py314-test-astropydev
+        - macos: py310-test
+        - macos: py314-test
+        - windows: py310-test
+        - windows: py314-test

@@ -1,0 +1,22 @@
+name: Test Release Pipelines
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/pull_release.yml
+      - .github/workflows/_build_test_upload.yml
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build_test_upload:
+    if: github.repository == 'meta-pytorch/data'
+    uses: ./.github/workflows/_build_test_upload.yml
+    with:
+      branch: ""
+      pre_dev_release: true
+      pytorch_version: ""
+      do-upload: false

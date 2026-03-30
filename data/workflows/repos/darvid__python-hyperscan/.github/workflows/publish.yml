@@ -1,0 +1,218 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build source distribution and wheels
+    uses: ./.github/workflows/build.yml
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'push' &&
+        github.repository == 'darvid/python-hyperscan' &&
+        startsWith(github.event.head_commit.message, 'Release ')
+      )
+    permissions:
+      contents: read
+      actions: write
+    with:
+      force_build: true
+
+  publish:
+    name: Publish to GitHub Releases and PyPI
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency: publish
+    needs: [build]
+    if: needs.build.outputs.valid_event == 'true'
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if release is needed
+        id: release_check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [[ "${REPOSITORY}" != "darvid/python-hyperscan" ]]; then
+            echo "Repository ${REPOSITORY} is not eligible for release automation"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "workflow_dispatch triggered - skipping commit message check"
+          else
+            # For push events, the build job already gates on 'Release ' prefix,
+            # but double-check here for safety
+            HEAD_MSG=$(git log -1 --format=%s)
+            if ! [[ "${HEAD_MSG}" =~ ^Release\  ]]; then
+              echo "HEAD commit '${HEAD_MSG}' is not a release commit, skipping"
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # Get the version we're about to release
+          CURRENT_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          TAG_NAME="v${CURRENT_VERSION}"
+
+          # Check if this exact version has already been published to PyPI
+          # This is the real check - if PyPI has it, we don't need to publish again
+          if curl -s --head "https://pypi.org/pypi/hyperscan/${CURRENT_VERSION}/json" | head -n 1 | grep -q "200"; then
+            echo "Version ${CURRENT_VERSION} already published to PyPI, skipping release"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check if there are commits since last release (excluding the current release commit pattern)
+          LATEST_TAG=$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || echo "")
+          if [[ -n "$LATEST_TAG" && "$LATEST_TAG" == "$TAG_NAME" ]]; then
+            # Tag exists but PyPI doesn't have it - this is the case where we need to publish
+            echo "Tag ${TAG_NAME} exists but not yet on PyPI, proceeding with release"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$LATEST_TAG" ]]; then
+            COMMITS_COUNT=$(git rev-list "${LATEST_TAG}"..HEAD --count 2>/dev/null || echo "1")
+            if [[ "$COMMITS_COUNT" -eq 0 ]]; then
+              echo "No commits since last release ${LATEST_TAG}, no new content to release"
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "Found ${COMMITS_COUNT} commits since ${LATEST_TAG}, proceeding with release"
+              echo "should_release=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "No previous release found, proceeding with initial release"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Move release tag to merge commit
+        if: steps.release_check.outputs.should_release == 'true'
+        run: |
+          set -euo pipefail
+
+          # Get current version from pyproject.toml
+          CURRENT_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          TAG_NAME="v${CURRENT_VERSION}"
+
+          echo "Looking for tag: ${TAG_NAME}"
+
+          # Check if tag exists
+          if git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
+            CURRENT_TAG_COMMIT=$(git rev-parse "${TAG_NAME}^{commit}")
+            HEAD_COMMIT=$(git rev-parse HEAD)
+
+            echo "Tag ${TAG_NAME} currently points to: ${CURRENT_TAG_COMMIT}"
+            echo "HEAD (merge commit) is at: ${HEAD_COMMIT}"
+
+            if [[ "${CURRENT_TAG_COMMIT}" != "${HEAD_COMMIT}" ]]; then
+              echo "Moving tag ${TAG_NAME} to HEAD (merge commit)"
+
+              # Delete old tag locally and remotely
+              git tag -d "${TAG_NAME}"
+              git push origin ":refs/tags/${TAG_NAME}" || true
+
+              # Configure git identity for creating annotated tags
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+
+              # Create new tag at HEAD
+              git tag -a "${TAG_NAME}" -m "${TAG_NAME}"
+              git push --force origin "${TAG_NAME}"
+
+              echo "Tag ${TAG_NAME} successfully moved to merge commit ${HEAD_COMMIT}"
+            else
+              echo "Tag ${TAG_NAME} already points to HEAD, no retagging needed"
+            fi
+          else
+            echo "Warning: Tag ${TAG_NAME} not found, skipping retag step"
+          fi
+
+      - name: Download artifacts
+        if: steps.release_check.outputs.should_release == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        if: steps.release_check.outputs.should_release == 'true'
+        run: ls -R dist/
+
+      - name: Install git-cliff
+        if: steps.release_check.outputs.should_release == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: Collect release metadata
+        if: steps.release_check.outputs.should_release == 'true'
+        id: release_meta
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c "import pathlib; import tomllib; print(tomllib.load(pathlib.Path('pyproject.toml').open('rb'))['project']['version'])")
+          CURRENT_RELEASE=$(git rev-list HEAD --grep '^Release ' --max-count=1 || true)
+          if [[ -z "${CURRENT_RELEASE}" ]]; then
+            echo "Unable to locate the current release commit (matching '^Release ')" >&2
+            exit 1
+          fi
+          PREVIOUS_RELEASE=$(git rev-list HEAD --grep '^Release ' --max-count=1 --skip=1 || true)
+          if [[ -z "${PREVIOUS_RELEASE}" ]]; then
+            ROOT=$(git rev-list --max-parents=0 HEAD | tail -n 1)
+            RANGE="${ROOT}..${CURRENT_RELEASE}"
+          else
+            RANGE="${PREVIOUS_RELEASE}..${CURRENT_RELEASE}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "range=${RANGE}" >> "$GITHUB_OUTPUT"
+          echo "Current release commit: ${CURRENT_RELEASE}"
+          echo "Previous release commit: ${PREVIOUS_RELEASE:-${RANGE%%..*}}"
+
+      - name: Generate release notes
+        if: steps.release_check.outputs.should_release == 'true'
+        env:
+          RANGE: ${{ steps.release_meta.outputs.range }}
+          RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RANGE}" ]]; then
+            echo "Commit range for release notes is empty" >&2
+            exit 1
+          fi
+          git cliff "${RANGE}" --config cliff.toml --tag "v${RELEASE_VERSION}" --output release-notes.md
+          if ! grep -q '^- ' release-notes.md; then
+            : > release-notes.md
+            echo "No user-facing changes detected; publishing empty release notes."
+          fi
+          echo "Release notes preview:"
+          cat release-notes.md
+
+      - name: Publish to GitHub Releases
+        if: steps.release_check.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.release_meta.outputs.version }}
+          name: v${{ steps.release_meta.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            dist/*
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to PyPI
+        if: steps.release_check.outputs.should_release == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+          verbose: true

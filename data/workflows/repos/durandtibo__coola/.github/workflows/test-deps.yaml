@@ -1,0 +1,81 @@
+# Dependency compatibility testing workflow.
+# Tests the package with different versions of optional dependencies.
+# Ensures compatibility across supported dependency version ranges.
+
+name: Test - Dependencies
+on:
+  workflow_call:
+  workflow_dispatch:  # to trigger manually
+
+permissions:
+  contents: read
+
+jobs:
+  # Get dependency version information from config file
+  get-versions:
+    uses: ./.github/workflows/get-versions.yaml
+
+  ########################
+  #     Dependencies     #
+  ########################
+
+
+  #################################
+  #     Optional dependencies     #
+  #################################
+
+  jax:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: jax
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).jax) }}
+
+  numpy:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: numpy
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).numpy) }}
+
+  packaging:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: packaging
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).packaging) }}
+
+  pandas:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: pandas
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).pandas) }}
+
+  polars:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: polars
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).polars) }}
+
+  pyarrow:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: pyarrow
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).pyarrow) }}
+
+  torch:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: torch
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).torch) }}
+
+  xarray:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: xarray
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).xarray) }}

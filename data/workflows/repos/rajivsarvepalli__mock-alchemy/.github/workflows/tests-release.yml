@@ -1,0 +1,29 @@
+name: Python2-Branch-Tests
+on:
+  push:
+    branches: [0.1.x]
+  pull_request:
+    branches: [0.1.x]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 5
+      matrix:
+        python-version: [2.7, 3.6, 3.7]
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4.6.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          pip install pip==20.2.4
+          pip install virtualenv==15.2
+          pip install tox==3.12.1 tox-gh-actions
+          pip install poetry==1.1.4
+      - name: Test with tox
+        run: tox

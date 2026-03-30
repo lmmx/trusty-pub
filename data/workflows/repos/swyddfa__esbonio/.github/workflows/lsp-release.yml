@@ -1,0 +1,227 @@
+name: 'Release'
+on:
+  push:
+    branches:
+    - release
+    paths:
+    - 'code/**'
+    - 'lib/esbonio/**'
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      lsp: ${{steps.check-lsp.outputs.build}}
+      code: ${{steps.check-code.outputs.build}}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - run: |
+        if [ -z "${BASE_REF}" ]; then
+          echo "BASE=HEAD^" >> $GITHUB_ENV
+        else
+          echo "BASE=origin/${BASE_REF}" >> $GITHUB_ENV
+        fi
+      name: Determine base
+      env:
+        BASE_REF: ${{ github.base_ref }}
+
+    - id: check-code
+      run: |
+        set -e
+        echo ${BASE}
+
+        ./scripts/should-build.sh vscode
+      name: "Build VSCode?"
+
+    - id: check-lsp
+      run: |
+        set -e
+        echo ${BASE}
+
+        ./scripts/should-build.sh lsp
+      name: "Build LSP?"
+
+  lsp-release:
+    needs: trigger
+    if: needs.trigger.outputs.lsp
+    name: esbonio release
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/esbonio
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.10"
+
+    - run: |
+        python --version
+        python -m pip install --upgrade pip
+        python -m pip install --upgrade hatch towncrier docutils
+      name: Setup Environment
+
+    - run: |
+        set -e
+
+        ./scripts/make_release.py lsp
+      name: Set Version
+      id: info
+
+    - name: Package
+      run: |
+        cd lib/esbonio
+        hatch build
+
+    - name: 'Upload Artifact'
+      uses: actions/upload-artifact@v7
+      with:
+        name: 'dist'
+        path: lib/esbonio/dist
+
+    - name: Publish
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: lib/esbonio/dist/
+
+    - name: Create Release
+      run: |
+        gh release create "${RELEASE_TAG}" \
+          --title "Esbonio Language Server v${VERSION} - ${RELEASE_DATE}" \
+          -F lib/esbonio/.changes.html \
+          ./lib/esbonio/dist/*
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  build-vsix:
+    needs: [trigger, lsp-release]
+    if: |
+      always() &&
+      needs.trigger.outputs.code &&
+      (needs.lsp-release.result == 'success' || needs.lsp-release.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+    - uses: 'actions/checkout@v6'
+
+    - uses: 'actions/setup-node@v6'
+      with:
+        node-version: 22.x
+        cache: 'npm'
+        cache-dependency-path: 'code/package-lock.json'
+
+    - uses: 'actions/setup-python@v6'
+      with:
+        # This must be the minimum Python version we support
+        python-version: "3.10"
+
+    - name: pip cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-vscode-pip-deps-${{ hashFiles('code/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-vscode-pip-deps
+
+    - run: |
+        python --version
+        python -m pip install --upgrade pip
+        python -m pip install --upgrade hatch towncrier docutils
+      name: Install Build Tools
+
+    - run: |
+        set -e
+        ./scripts/make_release.py vscode
+      name: Set Version
+
+    - run: |
+        set -e
+        cd code
+
+        # Use version of esbonio on PyPi for release builds
+        ESBONIO_WHL="esbonio" make dist
+      name: Package Extension
+
+    - name: 'Upload Artifact'
+      uses: actions/upload-artifact@v7
+      with:
+        name: 'vsix'
+        path: code/*.vsix
+        if-no-files-found: error
+
+    - name: Create Release
+      run: |
+        gh release create "${RELEASE_TAG}" \
+          --title "Esbonio VSCode Extension v${VERSION} - ${RELEASE_DATE}" \
+          -F code/.changes.html \
+          ./code/*.vsix
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  marketplace-release:
+    name: vscode release
+    needs: build-vsix
+    if: always() && needs.build-vsix.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: vscode-marketplace
+    steps:
+    - uses: 'actions/checkout@v6'
+
+    - uses: 'actions/setup-node@v6'
+      with:
+        node-version: 22.x
+        cache: 'npm'
+        cache-dependency-path: 'code/package-lock.json'
+
+    - uses: actions/download-artifact@v8
+      name: 'Download Extension'
+      with:
+        name: 'vsix'
+        path: code
+
+    - name: 'Publish Extension'
+      run: |
+        cd code
+        npm ci --prefer-offline
+        npm run deploy-vsce
+      env:
+        VSCE_PAT: ${{ secrets.VSCODE_PAT }}
+
+  open-vsx-release:
+    name: open vsx release
+    needs: build-vsix
+    if: always() && needs.build-vsix.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: open-vsx
+    steps:
+    - uses: 'actions/checkout@v6'
+
+    - uses: 'actions/setup-node@v6'
+      with:
+        node-version: 22.x
+        cache: 'npm'
+        cache-dependency-path: 'code/package-lock.json'
+
+    - uses: actions/download-artifact@v8
+      name: 'Download Extension'
+      with:
+        name: 'vsix'
+        path: code
+
+    - name: 'Publish Extension'
+      run: |
+        cd code
+        npm ci --prefer-offline
+        npm run deploy-ovsx
+      env:
+        OVSX_PAT: ${{ secrets.OVSX_PAT }}

@@ -1,0 +1,59 @@
+name: Linux build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+#    if: false
+
+    runs-on: ubuntu-latest
+    env:
+      SUITESPARSE_VERSION: 7.11.0
+      SUITESPARSE_SHA256: 93ed4c4e546a49fc75884c3a8b807d5af4a91e39d191fbbc60a07380b12a35d1
+      CVXOPT_BUILD_DSDP: 1
+      CVXOPT_BUILD_FFTW: 1
+      CVXOPT_BUILD_GLPK: 1
+      CVXOPT_BUILD_GSL: 1
+
+    strategy:
+      matrix:
+        python-version: ['3.14']
+        suitesparse: [src, lib]
+        #suitesparse: [lib]
+
+    steps:
+    - name: Checkout source    
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get install libopenblas-dev libsuitesparse-dev libdsdp-dev libfftw3-dev libglpk-dev libgsl0-dev
+        python -m pip install --upgrade pip
+        pip install setuptools setuptools_scm build wheel pytest pytest-cov coveralls 
+
+    - name: Get SuiteSparse source
+      if: ${{ matrix.suitesparse == 'src' }}
+      run: |
+        wget https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/v${SUITESPARSE_VERSION}.tar.gz
+        echo "${SUITESPARSE_SHA256}  v${SUITESPARSE_VERSION}.tar.gz" > SuiteSparse.sha256
+        sha256sum -c SuiteSparse.sha256
+        tar -xf v${SUITESPARSE_VERSION}.tar.gz
+        echo "CVXOPT_SUITESPARSE_SRC_DIR=SuiteSparse-${SUITESPARSE_VERSION}" >> $GITHUB_ENV
+
+    - name: Build/install CVXOPT
+      run: |
+        python -m build --wheel
+        pip install --no-index --find-links=${{github.workspace}}/dist cvxopt
+
+    - name: Test with pytest
+      run: |
+        python -c "from cvxopt import blas,lapack,amd,cholmod,umfpack,glpk,dsdp,gsl,fftw"
+        pytest --cov=cvxopt tests

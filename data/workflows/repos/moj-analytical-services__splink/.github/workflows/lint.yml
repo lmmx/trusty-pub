@@ -1,0 +1,50 @@
+name: Lint
+
+on:
+  pull_request:
+    branches:
+      - master
+      - "**dev"
+    paths:
+      - "**/*.py"
+      - "pyproject.toml"
+
+permissions: {}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup uv (with cache)
+        id: setup_uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install Python 3.12
+        id: install_python312
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        id: install_dependencies
+        run: uv sync --python 3.12
+
+      - name: Run Ruff lint
+        id: ruff_lint
+        run: uv run ruff check . --output-format=full
+
+      - name: Run Ruff format
+        id: ruff_format
+        run: uv run ruff format --check .

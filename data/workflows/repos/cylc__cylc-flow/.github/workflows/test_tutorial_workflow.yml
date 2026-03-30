@@ -1,0 +1,64 @@
+name: test-tutorial-workflow
+
+on:
+  push:
+    branches:
+      - master
+      - '8.*.x'
+  pull_request:
+    paths-ignore:
+      - '.github/workflows/*.ya?ml'
+      - '!.github/workflows/test_tutorial_workflow.yml'
+      - 'tests/**'
+      - '**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  FORCE_COLOR: 2
+  PIP_PROGRESS_BAR: off
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: 'ubuntu-latest'
+            python-version: '3'
+          - os: 'ubuntu-22.04'
+            python-version: '3.12'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: configure python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: Install docs/tutorial dependencies
+        uses: cylc/cylc-doc/.github/actions/install-dependencies@master
+
+      - name: install cylc-flow
+        run: pip install .[all]
+
+      - name: run tutorial workflow
+        timeout-minutes: 6
+        run: |
+          mkdir -p "${HOME}/cylc-run"
+          etc/bin/run-validate-tutorials
+
+      - name: debug
+        if: failure()
+        run: |
+          find ~/cylc-run -name job.err -exec cat {} +  # cylc error files

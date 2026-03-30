@@ -1,0 +1,35 @@
+# This workflow publishes the python package to PyPI.
+#
+# Triggers:
+# - release: published - When user clicks "Publish" on a draft release (downloads pre-built assets)
+#
+# Authentication: This workflow expects GitHub OIDC for passwordless PyPI publishing.
+# For more info: https://docs.pypi.org/trusted-publishers/
+
+name: Publish Package
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish_to_pypi:
+    name: Publish Package to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: PyPI
+      url: https://pypi.org/p/fastmcp-extensions/
+    steps:
+      - name: Download release assets
+        uses: robinraju/release-downloader@v1.12
+        with:
+          tag: ${{ github.event.release.tag_name }}
+          fileName: "*"
+          out-file-path: dist
+
+      # Uses GitHub OIDC for passwordless authentication (see header comment)
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.13.0

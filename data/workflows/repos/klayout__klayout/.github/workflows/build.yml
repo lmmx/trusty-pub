@@ -1,0 +1,150 @@
+---
+name: Build Python Wheels
+# https://docs.github.com/en/free-pro-team@latest/actions/guides/building-and-testing-python
+
+on:
+  pull_request:
+  # Running on PRs and main branch only
+  # pull requests should be able to access cache from main branch
+  push:
+    branches:
+      - master
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        include:
+          - os: "macos-15-intel"  # intel runner
+            cibuild: "*macosx*"
+            cibw_arch: "macos_x86_64"
+            macos-arch: "x86_64"
+          - os: "macos-14"  # M1 runner
+            cibuild: "*macosx*"
+            cibw_arch: "macos_arm64"
+            macos-arch: "arm64"
+          - os: "ubuntu-latest"
+            cibuild: "*manylinux*"
+            cibw_arch: "manylinux"
+          - os: "ubuntu-latest"
+            cibuild: "*musllinux*"
+            cibw_arch: "musllinux"
+          - os: "ubuntu-24.04-arm"  # aarch64 manylinux on ARM runner
+            cibuild: "*manylinux*"
+            cibw_arch: "aarch64"
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+      - uses: hmarr/debug-action@v3
+      - name: Cancel Workflow Action
+        uses: styfle/cancel-workflow-action@0.13.0
+      - uses: actions/checkout@v6
+      - name: ccache
+        if: matrix.os != 'ubuntu-24.04-arm'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}-${{ matrix.os }}-${{ matrix.cibuild }}  # Make cache specific to OS
+          max-size: "5G"
+      - name: Install dependencies
+        if: matrix.os != 'ubuntu-24.04-arm'
+        run: |
+          env
+          export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+          echo "/usr/lib/ccache:/usr/local/opt/ccache/libexec" >> $GITHUB_PATH
+          HOST_CCACHE_DIR="$(ccache -k cache_dir)"
+          mkdir -p $HOST_CCACHE_DIR
+      - name: Build wheels (ARM)
+        if: matrix.os == 'ubuntu-24.04-arm'
+        uses: pypa/cibuildwheel@v3.3.1
+        env:
+          # override the default CentOS “yum install … ccache” and drop ccache
+          CIBW_BEFORE_ALL_LINUX: |
+            yum install -y \
+              zlib-devel \
+              curl-devel \
+              expat-devel \
+              libpng-devel
+          CIBW_BEFORE_BUILD_LINUX: "true"
+          CIBW_BUILD: ${{ matrix.cibuild }}
+          CIBW_ARCHS_LINUX: ${{ matrix.cibw_arch }}
+
+      - name: Build wheels (all other platforms)
+        if: matrix.os != 'ubuntu-24.04-arm'
+        uses: pypa/cibuildwheel@v3.3.1
+        env:
+          CIBW_BUILD: ${{ matrix.cibuild }}
+          CIBW_ARCHS_MACOS: ${{ matrix.macos-arch }}
+          CIBW_DEPENDENCY_VERSIONS_MACOS: cibw_constraints.txt
+
+      - name: Download Cache from Docker (linux only)
+        if: runner.os == 'Linux' && matrix.os != 'ubuntu-24.04-arm'
+        # hack until https://github.com/pypa/cibuildwheel/issues/1030 is fixed
+        run: |
+          env
+          ccache -s
+          HOST_CCACHE_DIR="$(ccache -k cache_dir)"
+          rm -rf $HOST_CCACHE_DIR
+          mv ./wheelhouse/.ccache $HOST_CCACHE_DIR
+          ls -la $HOST_CCACHE_DIR
+          ccache -s
+      - uses: actions/upload-artifact@v7
+        with:
+          name: artifact-${{ matrix.os }}-${{ matrix.cibw_arch }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  # The following was taken from https://cibuildwheel.readthedocs.io/en/stable/deliver-to-pypi/
+  make_sdist:
+    name: Make SDist
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Build SDist
+      run: pipx run build --sdist
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: artifact-sdist
+        path: dist/*.tar.gz
+
+  upload_to_test_pypy:
+    needs: [build, make_sdist]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        merge-multiple: true
+        path: dist
+
+    - uses: pypa/gh-action-pypi-publish@v1.13.0
+      continue-on-error: true   # might fail if we don't bump the version
+      with:
+        user: __token__
+        password: ${{ secrets.test_pypi_password }}
+        repository-url: https://test.pypi.org/legacy/
+
+  upload_to_pypi:
+    needs: [build, make_sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        merge-multiple: true
+        path: dist
+
+    - uses: pypa/gh-action-pypi-publish@v1.13.0
+      with:
+        user: __token__
+        password: ${{ secrets.pypi_password }}

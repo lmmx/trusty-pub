@@ -1,0 +1,29 @@
+name: "Issue Manager"
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  issue_comment:
+    types:
+      - "created"
+  issues:
+    types:
+      - "labeled"
+  pull_request_target:
+    types:
+      - "labeled"
+
+jobs:
+  issue-manager:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: "tiangolo/issue-manager@0.6.0"
+        with:
+          token: "${{ secrets.GITHUB_TOKEN }}"
+          config: >
+            {
+              "feedback requested": {
+                "delay": 864000,
+                "message": "Closing after 10 days of waiting for feedback. If you feel this was in error, please re-open, `@` a maintainer, or create new issues."
+              }
+            }

@@ -1,0 +1,195 @@
+name: Main
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  project-name: application_properties
+  default-python-version: 3.13
+  default-pipenv-version: 2025.0.3
+  default-platform: windows-latest
+
+jobs:
+
+  matrix-prep:
+
+    name: Prepare Test Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+    - name: Check out code
+      uses: actions/checkout@v6
+
+    - name: Calculate test matrix
+      id: set-matrix
+      run: |
+        branchName=$(echo '${{ github.ref }}' | sed 's,refs/heads/,,g')
+        echo "Branch Name: $branchName"
+        matrix=$(jq --arg branchName "$branchName" 'map(. | select((.runOn==$branchName) or (.runOn=="always")) )' .github/workflows/matrix_includes.json)
+        echo "Matrix: $matrix"
+        echo "matrix={\"include\":$(echo $matrix)}" >> $GITHUB_OUTPUT
+
+  scenario-tests:
+
+    name: Scenario Tests
+    needs: [ matrix-prep, lint ]
+    strategy:
+      matrix: ${{fromJson(needs.matrix-prep.outputs.matrix)}}
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: ${{ matrix.timeout }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install PipEnv
+        run: |
+          export PYTHONIOENCODING=utf-8
+          pip install pipenv==${{ env.default-pipenv-version }}
+
+      - name: Sync With Repository
+        run: |
+          export PYTHONIOENCODING=utf-8
+          grep -v '^sourcery' Pipfile > temp
+          mv temp Pipfile
+          cat Pipfile
+          pipenv lock --clear --python ${{ matrix.python }}
+          pipenv sync -d
+          pipenv graph
+
+      - name: Execute Tests
+        run: pipenv run pytest --cov-fail-under=80 --cov --cov-branch --cov-report xml:report/coverage.xml --cov-report html:report/coverage
+
+      - name: Archive coverage artifacts
+        uses: actions/upload-artifact@v6
+        if: ${{ matrix.python == env.default-python-version && matrix.platform == env.default-platform }}
+        with:
+          name: ${{ matrix.platform }} Coverage
+          path: |
+            ./report/coverage.xml
+            ./report/coverage
+
+      - name: Report Coverage
+        uses: codecov/codecov-action@v5
+        if: ${{ matrix.python == env.default-python-version && matrix.platform == env.default-platform }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          file: ./report/coverage.xml
+          name: ${{ matrix.python }} - ${{ matrix.platform }}
+          fail_ci_if_error: true
+
+  lint:
+
+    name: Project Quality Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python ${{ env.default-python-version }}
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ env.default-python-version }}
+
+      - name: Install PipEnv
+        run: |
+          export PYTHONIOENCODING=utf-8
+          pip install pipenv==${{ env.default-pipenv-version }}
+
+      - name: Sync With Repository
+        run: |
+          export PYTHONIOENCODING=utf-8
+          grep -v '^sourcery' Pipfile > temp
+          mv temp Pipfile
+          cat Pipfile
+          pipenv lock --clear --python ${{ env.default-python-version }}
+          pipenv sync -d
+          pipenv graph
+
+      - name: Execute Pre-Commit
+        run: |
+          export PYTHONIOENCODING=utf-8
+          pipenv run pre-commit run --all
+
+  packaging:
+
+    name: Package Library
+    needs: [ lint, scenario-tests ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python ${{ env.default-python-version }}
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ env.default-python-version }}
+
+      - name: Install PipEnv
+        run: |
+          export PYTHONIOENCODING=utf-8
+          pip install pipenv==${{ env.default-pipenv-version }}
+
+      - name: Sync With Repository
+        run: |
+          export PYTHONIOENCODING=utf-8
+          grep -v '^sourcery' Pipfile > temp
+          mv temp Pipfile
+          cat Pipfile
+          pipenv lock --clear --python ${{ env.default-python-version }}
+          pipenv sync -d
+          pipenv graph
+
+      - name: Pyroma
+        run: |
+          export PYTHONIOENCODING=utf-8
+          pipenv run pyroma -n 10 .
+
+      - name: Setup
+        run: |
+          export PYTHONIOENCODING=utf-8
+          pipenv run python setup.py sdist bdist_wheel
+
+      - name: Twine
+        run: |
+          export PYTHONIOENCODING=utf-8
+          pipenv run twine check dist/*    
+
+      - name: Upload Package
+        uses: actions/upload-artifact@v6
+        with:
+          name: packaged-library
+          path: ${{github.workspace}}/dist/

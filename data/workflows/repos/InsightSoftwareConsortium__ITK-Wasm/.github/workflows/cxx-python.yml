@@ -1,0 +1,29 @@
+name: C++,Native Python
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  ITKMeshToPolyData-git-tag: "4545405"
+
+jobs:
+  cxx-build-workflow:
+    uses: thewtex/ITKRemoteModuleBuildTestPackageAction/.github/workflows/build-test-cxx.yml@disable-intel-mac
+    with:
+      itk-module-deps: 'MeshToPolyData@v0.11.1'
+      ctest-options: '-E itkPipelineTest'
+      itk-cmake-options: '-DCMAKE_CXX_STANDARD:STRING=20'
+
+  #python-build-workflow:
+    ## itk-wasm branch
+    #uses: thewtex/ITKRemoteModuleBuildTestPackageAction/.github/workflows/build-test-package-python.yml@v5.4.4
+    #with:
+      #itk-module-deps: 'InsightSoftwareConsortium/ITKMeshToPolyData@v0.11.0'
+      #manylinux-platforms: '["_2_28-x64","_2_28-aarch64"]'
+    #secrets:
+      #pypi_password: ${{ secrets.pypi_password }}

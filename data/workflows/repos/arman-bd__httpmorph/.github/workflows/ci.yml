@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  # ============================================================
+  # Load Configuration
+  # ============================================================
+  load-config:
+    name: Load Configuration
+    uses: ./.github/workflows/_config.yml
+
+  # ============================================================
+  # Test Job
+  # ============================================================
+  test:
+    name: Test
+    needs: load-config
+    if: needs.load-config.outputs.enable-tests == 'true'
+    uses: ./.github/workflows/_test.yml
+    with:
+      os-matrix: ${{ needs.load-config.outputs.os-matrix }}
+      python-matrix: ${{ needs.load-config.outputs.python-matrix }}
+      primary-os: ${{ needs.load-config.outputs.primary-os }}
+      primary-python: ${{ needs.load-config.outputs.primary-python }}
+    secrets:
+      TEST_PROXY_URL: ${{ secrets.TEST_PROXY_URL }}
+      TEST_HTTPBIN_HOST: ${{ secrets.TEST_HTTPBIN_HOST }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # ============================================================
+  # Build Test Jobs
+  # ============================================================
+  build-test-linux-x86_64:
+    name: Build Test (Linux x86_64)
+    needs: load-config
+    uses: ./.github/workflows/_build_linux_x86_64.yml
+
+  build-test-linux-aarch64:
+    name: Build Test (Linux aarch64)
+    needs: load-config
+    uses: ./.github/workflows/_build_linux_aarch64.yml
+
+  build-test-macos:
+    name: Build Test (macOS)
+    needs: load-config
+    uses: ./.github/workflows/_build_macos.yml
+
+  build-test-windows:
+    name: Build Test (Windows)
+    needs: load-config
+    uses: ./.github/workflows/_build_windows.yml
+
+  # ============================================================
+  # Summary
+  # ============================================================
+  summary:
+    name: CI Summary
+    needs: [load-config, test, build-test-linux-x86_64, build-test-linux-aarch64, build-test-macos, build-test-windows]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check results
+      run: |
+        echo "==================================="
+        echo "CI Pipeline Summary"
+        echo "==================================="
+        echo ""
+
+        # Tests
+        if [ "${{ needs.load-config.outputs.enable-tests }}" == "true" ]; then
+          if [ "${{ needs.test.result }}" == "success" ]; then
+            echo "✅ Tests: PASSED"
+          else
+            echo "❌ Tests: FAILED"
+            EXIT_CODE=1
+          fi
+        else
+          echo "⊘ Tests: DISABLED"
+        fi
+
+        # Build Tests
+        echo ""
+        echo "Build Tests:"
+
+        # Linux x86_64
+        if [ "${{ needs.build-test-linux-x86_64.result }}" == "success" ]; then
+          echo "  ✅ Linux x86_64: PASSED"
+        elif [ "${{ needs.build-test-linux-x86_64.result }}" == "skipped" ]; then
+          echo "  ⊘ Linux x86_64: SKIPPED"
+        else
+          echo "  ❌ Linux x86_64: FAILED"
+          EXIT_CODE=1
+        fi
+
+        # Linux aarch64
+        if [ "${{ needs.build-test-linux-aarch64.result }}" == "success" ]; then
+          echo "  ✅ Linux aarch64: PASSED"
+        elif [ "${{ needs.build-test-linux-aarch64.result }}" == "skipped" ]; then
+          echo "  ⊘ Linux aarch64: SKIPPED"
+        else
+          echo "  ❌ Linux aarch64: FAILED"
+          EXIT_CODE=1
+        fi
+
+        # macOS
+        if [ "${{ needs.build-test-macos.result }}" == "success" ]; then
+          echo "  ✅ macOS: PASSED"
+        elif [ "${{ needs.build-test-macos.result }}" == "skipped" ]; then
+          echo "  ⊘ macOS: SKIPPED"
+        else
+          echo "  ❌ macOS: FAILED"
+          EXIT_CODE=1
+        fi
+
+        # Windows
+        if [ "${{ needs.build-test-windows.result }}" == "success" ]; then
+          echo "  ✅ Windows: PASSED"
+        elif [ "${{ needs.build-test-windows.result }}" == "skipped" ]; then
+          echo "  ⊘ Windows: SKIPPED"
+        else
+          echo "  ❌ Windows: FAILED"
+          EXIT_CODE=1
+        fi
+
+        echo ""
+        if [ "${EXIT_CODE:-0}" == "1" ]; then
+          echo "❌ CI Pipeline FAILED"
+          exit 1
+        else
+          echo "✅ CI Pipeline PASSED"
+        fi

@@ -1,0 +1,40 @@
+name: Scenario Runner
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Daily at 12:00 AM
+  workflow_dispatch:
+  # push:
+
+jobs:
+  main:
+    name: Deploy Scenario Runner
+    if: github.event.repository.private
+    timeout-minutes: 20
+    runs-on: laptop-at-daniels-desk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Scenario Runner
+        env:
+          EVAL_PROJ_SDK_KEY: ${{ secrets.EVAL_PROJ_SDK_KEY }}
+          BENCH_CLUSTER_SDK_KEY: ${{ secrets.BENCH_CLUSTER_SDK_KEY }}
+          LOG_BENCHMARKS_TO_STATSIG: true
+        run: |
+          cd examples/scenario-runner
+          docker-compose up --build --detach \
+            scrapi docker-stats dashboard \
+            node-core node-legacy \
+            java-core java-legacy \
+            python-core python-legacy \
+            go-core go-legacy
+
+      - name: Run Smoke Test
+        run: |
+          cd examples/scenario-runner
+          ./smoketest.sh localhost
+
+      - name: Print IP Address
+        run: |
+          echo "IP Address: $(ifconfig | grep "inet " | grep -v 127.0.0.1 | grep -v ::1 | awk '{print $2}' | head -n 1)"

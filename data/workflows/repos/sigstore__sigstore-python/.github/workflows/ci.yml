@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - series/*
+  pull_request:
+  schedule:
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    # Avoid scheduled runs in forks
+    if: github.event_name != 'schedule' || github.repository == 'sigstore/sigstore-python'
+    permissions:
+      # Needed to access the workflow's OIDC identity.
+      id-token: write
+    strategy:
+      matrix:
+        conf:
+          - { py: "3.10", os: "ubuntu-latest" }
+          - { py: "3.11", os: "ubuntu-latest" }
+          - { py: "3.12", os: "ubuntu-latest" }
+          - { py: "3.13", os: "ubuntu-latest" }
+          - { py: "3.14", os: "ubuntu-latest" }
+          # NOTE: We only test Windows and macOS on the latest Python;
+          # these primarily exist to ensure that we don't accidentally
+          # introduce Linux-isms into the development tooling.
+          - { py: "3.14", os: "windows-latest" }
+          - { py: "3.14", os: "macos-latest" }
+    runs-on: ${{ matrix.conf.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.conf.py }}
+          allow-prereleases: true
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+
+      - name: deps
+        run: make dev SIGSTORE_EXTRA=test
+
+      - name: test (offline)
+        if: matrix.conf.os == 'ubuntu-latest'
+        run: |
+          # Look at me. I am the captain now.
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+          # We use `unshare` to "un-share" the default networking namespace,
+          # in effect running the tests as if the host is offline.
+          # This in turn effectively exercises the correctness of our
+          # "online-only" test markers, since any test that's online
+          # but not marked as such will fail.
+          # We also explicitly exclude the integration tests, since these are
+          # always online.
+          unshare --map-root-user --net make test T="test/unit" TEST_ARGS="--skip-online -vv --showlocals"
+
+      - name: test
+        run: make test TEST_ARGS="-vv --showlocals"
+
+      # TODO: Refactor this or remove it entirely once there's
+      # a suitable staging TSA instance.
+      - name: test (timestamp-authority)
+        if: ${{ matrix.conf.os == 'ubuntu-latest' }}
+        run: |
+          # Fetch the latest sigstore/timestamp-authority build
+          SIGSTORE_TIMESTAMP_VERSION=$(gh api /repos/sigstore/timestamp-authority/releases --jq '.[0].tag_name')
+          wget https://github.com/sigstore/timestamp-authority/releases/download/${SIGSTORE_TIMESTAMP_VERSION}/timestamp-server-linux-amd64 -O /tmp/timestamp-server
+          chmod +x /tmp/timestamp-server
+
+          # Run the TSA in background
+          /tmp/timestamp-server serve --port 3000 --disable-ntp-monitoring &
+          export TEST_SIGSTORE_TIMESTAMP_AUTHORITY_URL="http://localhost:3000/api/v1/timestamp"
+
+          # Ensure Timestamp Authority tests are not skipped by
+          # having pytest show skipped tests and verifying ours are running
+          set -o pipefail
+          make test TEST_ARGS="-m timestamp_authority -rs" | tee output
+          ! grep -q "skipping test that requires a Timestamp Authority" output || (echo "ERROR: Found skip message" && exit 1)
+        env:
+          # Needed for `gh api` above.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: test (interactive)
+        if: (github.event_name != 'pull_request') || !github.event.pull_request.head.repo.fork
+        run: make test-interactive TEST_ARGS="-vv --showlocals"
+
+      - uses: ./.github/actions/upload-coverage
+        # only aggregate test coverage over linux-based tests to avoid any OS-specific filesystem information stored in
+        # coverage metadata.
+        if: ${{ matrix.conf.os == 'ubuntu-latest' }}
+
+  all-tests-pass:
+    if: always() && (github.event_name != 'schedule' || github.repository == 'sigstore/sigstore-python')
+
+    needs:
+      - test
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: check test jobs
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+
+  coverage:
+    needs:
+      - test
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.x"
+
+      - run: pip install coverage[toml]
+
+      - name: download coverage data
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: all-artifacts/
+
+      - name: combine coverage data
+        id: combinecoverage
+        run: |
+          set +e
+          python -m coverage combine all-artifacts/coverage-data-*
+          echo "## python coverage" >> $GITHUB_STEP_SUMMARY
+          python -m coverage report -m --format=markdown >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,21 @@
+name: 🚀 Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    name: 🚀 Release
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/fmf
+    permissions:
+      id-token: write  # For pypi-publish
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build package
+        run: pipx run hatch build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

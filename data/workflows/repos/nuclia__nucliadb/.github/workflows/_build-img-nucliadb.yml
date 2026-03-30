@@ -1,0 +1,98 @@
+# This is a reusable workflow.
+name: Build a container image
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: "Image tags."
+        type: string
+        required: false
+        default: ""
+      image-version:
+        description: "Image version."
+        type: string
+        required: true
+        default: ""
+      context:
+        description: "Docker build context (default: .)"
+        type: string
+        required: false
+        default: "."
+      file:
+        description: "Path to dockerfile."
+        type: string
+        required: false
+        default: ""
+    outputs:
+      imageid:
+        value: ${{ jobs.build-img.outputs.imageid }}
+      digest:
+        value: ${{ jobs.build-img.outputs.digest }}
+      metadata:
+        value: ${{ jobs.build-img.outputs.metadata }}
+
+permissions:
+  id-token: write   # This is required for requesting the JWT
+  contents: read    # This is required for actions/checkout
+  actions: read     # This is required for provenance
+
+env:
+  GCP_WORKLOAD_IDENTITY_PROVIDER: "projects/224545243904/locations/global/workloadIdentityPools/gh-nuclia/providers/gh-nuclia-provider"
+  GCP_SERVICE_ACCOUNT: "github-actions@nuclia-internal.iam.gserviceaccount.com"
+
+jobs:
+  build-img:
+    name: Build image
+    runs-on: nuclia-base
+    outputs:
+      imageid: ${{ steps.build-image.outputs.imageid }}
+      digest: ${{ steps.build-image.outputs.digest }}
+      metadata: ${{ steps.build-image.outputs.metadata }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Generate a token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.GHAPP_ID_NUCLIABOT }}
+          private-key: ${{ secrets.PK_GHAPP_NUCLIABOT }}
+          owner: nuclia
+
+      - name: Checkout tooling repository
+        uses: actions/checkout@v6
+        with:
+          repository: nuclia/tooling
+          ref: main
+          path: tooling
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Authenticate to Google Cloud
+        id: gcp-auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: "${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ env.GCP_SERVICE_ACCOUNT }}"
+          token_format: access_token
+
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@v4
+        with:
+          registry: europe-west4-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcp-auth.outputs.access_token }}
+
+      - name: Build and Push image to registries
+        uses: ./tooling/.github/actions/build-img-regcache
+        with:
+          file: ${{ inputs.file }}
+          image-name: ${{ inputs.image-name }}
+          image-version: ${{ inputs.image-version }}
+          aws-ecr-role: ${{ secrets.AWS_ECR_ROLE }}
+          tag-latest: ${{ github.ref == 'refs/heads/main' && 'latest' || 'dev-latest' }}
+          push: true
+          ghapp-nuclia-service-bot-id: ${{ secrets.GHAPP_ID_NUCLIABOT }}
+          ghapp-nuclia-service-bot-pk: ${{ secrets.PK_GHAPP_NUCLIABOT }}

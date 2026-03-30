@@ -1,0 +1,49 @@
+name: Changelog
+on:
+  push:
+    branches:
+      - main
+      - mq-working-branch-*
+  merge_group:
+  pull_request:
+    # Important that we run on `labeled` and `unlabeled` to pick up `changelog/no-changelog` being added/removed
+    # DEV: [opened, reopened, synchronize] is the default
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+jobs:
+  validate:
+    name: Validate changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        # Include all history and tags
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Ensure a new reno release note was added in this PR.
+      # Use `reno new <slug>` to add a new note to `releasenotes/notes`,
+      #   or add `changelog/no-changelog` label if no release note is needed.
+      - name: Ensure release note added
+        # Only run this on pull requests
+        if: github.event_name == 'pull_request'
+        run: scripts/check-releasenotes
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          python-version: '3.13'
+
+      - name: Lint changelog notes
+        run: reno lint
+
+      - name: Generate changelog
+        run: |
+          reno report | tee CHANGELOG.rst
+          rst2html CHANGELOG.rst CHANGELOG.html
+
+      - name: Upload CHANGELOG.rst
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: changelog
+          path: |
+            CHANGELOG.rst
+            CHANGELOG.html

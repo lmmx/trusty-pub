@@ -1,0 +1,66 @@
+name: benchmark
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  do-benchmark:
+    if: github.event.pull_request.merged == false && github.event.pull_request.head.repo.fork == false
+    name: Benchmark runner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout folder to get test files
+        uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+
+      - name: Rename checked out topojson package
+        run: mv topojson do_later_topojson
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: |
+          python -m pip install geopandas numpy fire altair vl-convert-python
+
+      - name: Install latest topojson version from pypi
+        run: python -m pip install topojson
+      - name: Benchmark last released version!
+        run: python tests/benchmark_compute.py --version=last-released
+
+      - name: Install main repo topojson from git
+        run: python -m pip install git+https://github.com/mattijn/topojson.git --upgrade
+      - name: Benchmark version in github main!
+        run: python tests/benchmark_compute.py --version=main
+
+      - name: Rename moved topojson package
+        run: mv do_later_topojson topojson
+      - name: Benchmark this PR!
+        run: python tests/benchmark_compute.py --version=PR
+
+      - name: Create visz from benchmark results!
+        run: python tests/benchmark_visz.py
+
+      - uses: iterative/setup-cml@v2
+      - name: Include benchmark-image as comment to PR
+        env:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat <<EOF > benchmark.md
+          #### Benchmark result
+          ![benchmark](./tests/benchmark_chart.svg)  
+          These PR changes are benchmarked against three files, compared with PyPi's latest release and the repository's main branch.
+          EOF
+          cml comment create --publish --pr=false benchmark.md

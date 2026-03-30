@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+      - uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --hook-stage manual --all-files
+
+  checks:
+    name: Check Python ${{ matrix.python-version }}, ${{ matrix.arch }} on ${{ matrix.runs-on }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.14"]
+        runs-on: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
+        arch: [auto64]
+        exclude:
+          - runs-on: windows-11-arm
+            python-version: "3.9"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - if: matrix.runs-on == 'windows-11-arm'
+        name: Install rustup on Windows ARM
+        shell: sh
+        run: |
+          curl -LOs https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe
+          ./rustup-init.exe -y --default-toolchain none --no-modify-path
+          echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install extra deps on windows
+        if: runner.os == 'windows'
+        run: |
+          Invoke-Webrequest -Uri https://archives.boost.io/release/1.88.0/source/boost_1_88_0.zip -OutFile boost_1_88_0.zip
+          Invoke-Webrequest -Uri https://github.com/CGAL/cgal/releases/download/v6.0.1/CGAL-6.0.1.zip -OutFile CGAL-6.0.1.zip
+          Expand-Archive boost_1_88_0.zip .\boost_1_88_0
+          Expand-Archive CGAL-6.0.1.zip .\CGAL-6.0.1
+
+      - name: Install extra deps on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install --ignore-dependencies swig boost cgal
+
+      - name: Install extra deps on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libboost-dev swig libcgal-dev
+
+      - name: Install package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+          export PATH="/opt/homebrew/opt/make/libexec/gnubin:/opt/homebrew/opt/libtool/libexec/gnubin:$PATH"
+          python -m pip install '.[test]' -v -C"cmake.define.FASTJET_ENABLE_CGAL"="ON"
+
+      - name: Install package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo $PATH
+          python -m pip install '.[test]' -v -C"cmake.define.FASTJET_ENABLE_CGAL"="ON"
+
+      - name: Install package (windows x64)
+        if: matrix.runs-on == 'windows-latest'
+        run: |
+          $Env:Path
+          python -m pip install '.[test]' -v -C"cmake.define.Boost_INCLUDE_DIR"="${{ github.workspace }}\boost_1_88_0\boost_1_88_0" -C"cmake.define.CGAL_DIR"="${{ github.workspace }}\CGAL-6.0.1\CGAL-6.0.1" -C"cmake.define.FASTJET_ENABLE_CGAL"="ON"
+
+      - name: Install package (windows arm64)
+        if: matrix.runs-on == 'windows-11-arm'
+        run: |
+          $Env:Path
+          python -m pip install . -v -C"cmake.define.Boost_INCLUDE_DIR"="${{ github.workspace }}\boost_1_88_0\boost_1_88_0" -C"cmake.define.CGAL_DIR"="${{ github.workspace }}\CGAL-6.0.1\CGAL-6.0.1" -C"cmake.define.FASTJET_ENABLE_CGAL"="ON"
+
+      - name: List installed Python packages
+        run: python -m pip list
+
+      - name: Test package
+        if: matrix.runs-on != 'windows-11-arm'
+        run: python -m pytest -vv -rs -Wd
+
+  test_wheels:
+    name: "Wheel: ${{ matrix.python }}, ${{ matrix.arch }} on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
+        python: [314]
+        arch: [auto64, universal2]
+        exclude:
+          - os: ubuntu-latest
+            arch: universal2
+          - os: ubuntu-24.04-arm
+            arch: universal2
+          - os: macos-latest
+            arch: auto64
+          - os: windows-latest
+            arch: universal2
+          - os: windows-11-arm
+            arch: universal2
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install extra deps on macOS
+        if: runner.os == 'macOS'
+        run: |
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          brew install --ignore-dependencies swig boost cgal
+          echo "PATH=/opt/homebrew/opt/make/libexec/gnubin:/opt/homebrew/opt/libtool/libexec/gnubin:$PATH" >> "$GITHUB_ENV"
+
+      - if: matrix.os == 'windows-11-arm'
+        name: Install rustup on Windows ARM
+        shell: sh
+        run: |
+          curl -LOs https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe
+          ./rustup-init.exe -y --default-toolchain none --no-modify-path
+          echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install extra deps on windows
+        if: runner.os == 'windows'
+        run: |
+          Invoke-Webrequest -Uri https://archives.boost.io/release/1.88.0/source/boost_1_88_0.zip -OutFile boost_1_88_0.zip
+          Invoke-Webrequest -Uri https://github.com/CGAL/cgal/releases/download/v6.0.1/CGAL-6.0.1.zip -OutFile CGAL-6.0.1.zip
+          Expand-Archive -Path boost_1_88_0.zip -DestinationPath .\boost_1_88_0
+          Expand-Archive -Path CGAL-6.0.1.zip -DestinationPath .\CGAL-6.0.1
+
+      - name: Install extra deps on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libboost-dev swig libcgal-dev
+
+      - uses: pypa/cibuildwheel@v3.3
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_BUILD: cp${{ matrix.python }}-*
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_CONFIG_SETTINGS: >
+            "cmake.define.FASTJET_ENABLE_CGAL"="ON"
+          CIBW_CONFIG_SETTINGS_WINDOWS: >
+            "cmake.define.Boost_INCLUDE_DIR"="${{ github.workspace }}\boost_1_88_0\boost_1_88_0"
+            "cmake.define.CGAL_DIR"="${{ github.workspace }}\CGAL-6.0.1\CGAL-6.0.1"
+            "cmake.define.FASTJET_ENABLE_CGAL"="ON"
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ matrix.python }}-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+
+  pass:
+    needs: [pre-commit, checks, test_wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All jobs passed"

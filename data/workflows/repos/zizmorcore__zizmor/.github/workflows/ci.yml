@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Format
+        run: cargo fmt --check
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Lint
+        run: cargo clippy -- --deny warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Test dependencies
+        run: |
+          # Don't waste time on man-db updates
+          sudo apt-get remove --purge man-db
+          # Needed for tty-tests
+          sudo apt install -y expect
+
+      - name: Test
+        run: cargo test --features crater-tests,tty-tests,schema
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test snippets
+        run: |
+          make snippets
+          git diff --exit-code
+
+  test-site:
+    name: Test site build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Test site
+        run: make site
+
+  test-schema:
+    name: Test schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Verify schema covers all audits
+        run: |
+          REGISTRY_COUNT=$(grep -c "register_audit!" crates/zizmor/src/registry.rs)
+          SCHEMA_COUNT=$(jq '.definitions.RulesConfig.properties | length' support/zizmor.schema.json)
+          if [ "$REGISTRY_COUNT" -ne "$SCHEMA_COUNT" ]; then
+            echo "Error: registry.rs has $REGISTRY_COUNT audits but schema has $SCHEMA_COUNT"
+            echo "Update config/schema.rs and regenerate the schema:"
+            echo "  make generate-schema"
+            exit 1
+          fi
+          echo "Schema covers all $REGISTRY_COUNT audits"
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Verify committed schema is up-to-date
+        run: |
+          make generate-schema
+          git diff --exit-code
+
+  all-tests-pass:
+    name: All tests pass
+    if: always()
+    needs: [lint, test, test-site, test-schema]
+    runs-on: ubuntu-slim
+
+    steps:
+      - name: check test jobs
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}

@@ -1,0 +1,24 @@
+name: 🚀 Release Drafter
+
+on:
+  push:
+    branches: [master]
+  # Required for the autolabeler to work on new PRs
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update_release_draft:
+    runs-on: ubuntu-latest
+
+    if: github.repository == 'neuropsychology/NeuroKit'
+    steps:
+      - uses: release-drafter/release-drafter@v6
+        with:
+          config-name: release-drafter-config.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

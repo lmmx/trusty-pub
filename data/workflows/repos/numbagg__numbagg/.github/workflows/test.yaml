@@ -1,0 +1,98 @@
+name: Test
+
+on:
+  pull_request:
+    branches: ["*"]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies and project
+        run: uv sync --python ${{ matrix.python-version }}
+
+      - name: Run tests
+        run: uv run --python ${{ matrix.python-version }} pytest --durations=20 -W error
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies and project
+        run: uv sync --python 3.11
+
+      - name: Run ty check
+        run: uv run --python 3.11 ty check
+
+      - name: Run pre-commit
+        run: uv run --python 3.11 pre-commit run --all-files
+
+      - name: Run stubtest
+        # TODO: replace CLI options with pyproject.toml config when stubtest supports it
+        run: |
+          uv run --python 3.11 python -m mypy.stubtest \
+            numbagg.funcs numbagg.moving numbagg.moving_exp \
+            --allowlist stubtest_allowlist.txt \
+            --ignore-unused-allowlist \
+            --mypy-config-file pyproject.toml
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies and project
+        run: uv sync --python 3.13
+
+      - name: Run benchmarks
+        run: uv run --python 3.13 python numbagg/test/run_benchmarks.py
+
+  nightly:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies and project
+        run: uv sync --python 3.13
+
+      - name: Run nightly benchmarks
+        run: uv run --python 3.13 pytest --durations=20 -W error --run-nightly --benchmark-enable

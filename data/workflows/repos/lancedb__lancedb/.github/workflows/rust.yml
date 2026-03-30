@@ -1,0 +1,222 @@
+name: Rust
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - rust/**
+      - .github/workflows/rust.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # This env var is used by Swatinem/rust-cache@v2 for the cache
+  # key, so we set it to make sure it is always consistent.
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  lint:
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Need up-to-date compilers for kernels
+      CC: clang-18
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler libssl-dev
+      - name: Run format
+        run: cargo fmt --all -- --check
+      - name: Run clippy
+        run: cargo clippy --profile ci --workspace --tests --all-features -- -D warnings
+      - name: Run clippy (without remote feature)
+        run: cargo clippy --profile ci --workspace --tests -- -D warnings
+
+  build-no-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Need up-to-date compilers for kernels
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+      # Building without a lock file often requires the latest Rust version since downstream
+      # dependencies may have updated their minimum Rust version.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "stable"
+      # Remove cargo.lock to force a fresh build
+      - name: Remove Cargo.lock
+        run: rm -f Cargo.lock
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler libssl-dev
+      - name: Build all
+        run: |
+          cargo build --profile ci --benches --all-features --tests
+
+  linux:
+    timeout-minutes: 30
+    # To build all features, we need more disk space than is available
+    # on the free OSS github runner. This is mostly due to the the
+    # sentence-transformers feature.
+    runs-on: ubuntu-2404-4x-x64
+    defaults:
+      run:
+        shell: bash
+        working-directory: rust
+    env:
+      # Need up-to-date compilers for kernels
+      CC: clang-18
+      CXX: clang++-18
+      GH_TOKEN: ${{ secrets.SOPHON_READ_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler libssl-dev
+      - uses: rui314/setup-mold@v1
+      - name: Make Swap
+        run: |
+          sudo fallocate -l 16G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+      - name: Build
+        run: cargo build --profile ci --all-features --tests --locked --examples
+      - name: Run feature tests
+        run: CARGO_ARGS="--profile ci" make -C ./lancedb feature-tests
+      - name: Run examples
+        run: cargo run  --profile ci --example simple --locked
+      - name: Run remote tests
+        # Running this requires access to secrets, so skip if this is
+        # a PR from a fork.
+        if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+        run: CARGO_ARGS="--profile ci" make -C ./lancedb remote-tests
+
+  macos:
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        mac-runner: ["macos-14", "macos-15"]
+    runs-on: "${{ matrix.mac-runner }}"
+    defaults:
+      run:
+        shell: bash
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+      - name: CPU features
+        run: sysctl -a | grep cpu
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: brew install protobuf
+      - name: Run tests
+        run: |
+          # Don't run the s3 integration tests since docker isn't available
+          # on this image.
+          ALL_FEATURES=`cargo metadata --format-version=1 --no-deps \
+            | jq -r '.packages[] | .features | keys | .[]' \
+            | grep -v s3-test | sort | uniq | paste -s -d "," -`
+          cargo test --profile ci --features $ALL_FEATURES --locked
+
+  windows:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+          - aarch64-pc-windows-msvc
+    defaults:
+      run:
+        working-directory: rust/lancedb
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set target
+        run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Protoc v21.12
+        run: choco install --no-progress protoc
+      - name: Build
+        run: |
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          cargo build --profile ci --features aws,remote --tests --locked --target ${{ matrix.target }}
+      - name: Run tests
+        # Can only run tests when target matches host
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' }}
+        run: |
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          cargo test --profile ci --features aws,remote --locked
+
+  msrv:
+    # Check the minimum supported Rust version
+    name: MSRV Check - Rust v${{ matrix.msrv }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        msrv: ["1.91.0"] # This should match up with rust-version in Cargo.toml
+    env:
+      # Need up-to-date compilers for kernels
+      CC: clang-18
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler libssl-dev
+      - name: Install ${{ matrix.msrv }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.msrv }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Downgrade  dependencies
+        # These packages have newer requirements for MSRV
+        run: |
+          cargo update -p aws-sdk-bedrockruntime --precise 1.77.0
+          cargo update -p aws-sdk-dynamodb --precise 1.68.0
+          cargo update -p aws-config --precise 1.6.0
+          cargo update -p aws-sdk-kms --precise 1.63.0
+          cargo update -p aws-sdk-s3 --precise 1.79.0
+          cargo update -p aws-sdk-sso --precise 1.62.0
+          cargo update -p aws-sdk-ssooidc --precise 1.63.0
+          cargo update -p aws-sdk-sts --precise 1.63.0
+          cargo update -p home --precise 0.5.9
+      - name: cargo +${{ matrix.msrv }} check
+        env:
+          RUSTUP_TOOLCHAIN: ${{ matrix.msrv }}
+        run: cargo check --profile ci --workspace --tests --benches --all-features

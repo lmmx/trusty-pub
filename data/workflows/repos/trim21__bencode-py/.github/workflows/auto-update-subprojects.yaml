@@ -1,0 +1,41 @@
+name: meson wraps auto update
+
+on:
+  push:
+    branches:
+      - master
+
+  schedule:
+    - cron: '19 20 * * 4'
+
+jobs:
+  auto-update:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 'master'
+          submodules: 'true'
+
+      - run: rm subprojects/*.wrap -rf
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          activate-environment: 'true'
+
+      - run: uv sync --dev --no-install-project
+
+      - run: meson wrap install nanobind
+      - run: meson wrap install robin-map
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: ci/meson-auto-update
+          title: 'build: update meson wraps'
+          token: '${{ secrets.PAT }}'
+          base: 'master'

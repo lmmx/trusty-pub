@@ -1,0 +1,57 @@
+name: Update Playwright Snapshots
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-snapshots:
+    runs-on: ${{ matrix.os }}
+    concurrency: ci-${{ github.ref }}
+
+    # Only run on issue comments
+    if: github.event.issue.pull_request && contains(github.event.comment.body, 'please update snapshots')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+
+    steps:
+      - uses: jupyterlab/maintainer-tools/.github/actions/update-snapshots-checkout@main
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+        with:
+          python_version: '3.11'
+
+      - name: Install dependencies
+        run: python -m pip install -U "jupyterlab>=4.0.0,<5"
+
+      - name: Install extension
+        run: |
+          python -m pip install .
+
+      - name: Build extension
+        run: |
+          npm run build
+
+      - uses: jupyterlab/maintainer-tools/.github/actions/update-snapshots@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Playwright knows how to start JupyterLab server
+          start_server_script: 'null'
+          test_folder: ui-tests
+          npm_client: npm
+
+      - name: Comment back on the PR
+        run: |
+          gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments --raw-field 'body=Playwright ${{ matrix.os }} snapshots updated.'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

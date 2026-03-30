@@ -1,0 +1,58 @@
+# Docs:
+#  - https://docs.github.com/en/actions/guides/about-service-containers
+name: CI
+on: [push, pull_request]
+jobs:
+  Lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.13"]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: "format --check --diff"
+      - run: ruff check
+  Typecheck:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Set up env
+        run: |
+          python -m pip install -q poetry
+          poetry install
+      - name: Run ty
+        run: poetry run ty check
+  Test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Set up env
+        run: |
+          python -m pip install -q poetry
+          poetry install
+      - name: Run tests
+        run: |
+          poetry run tox

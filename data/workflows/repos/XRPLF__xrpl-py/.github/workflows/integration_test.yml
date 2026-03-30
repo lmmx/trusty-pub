@@ -1,0 +1,73 @@
+name: Integration test
+
+env:
+  POETRY_VERSION: 2.1.1
+  RIPPLED_DOCKER_IMAGE: rippleci/rippled:develop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      git_ref:
+        description: "Git ref (branch, tag, or SHA) to test"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  integration-test:
+    name: Integration test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref != '' && inputs.git_ref || github.ref }}
+
+      - name: Load cached .local
+        id: cache-poetry
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.local
+          key: dotlocal-${{ env.POETRY_VERSION }}
+
+      - name: Run docker in background
+        run: |
+          docker run --detach --rm -p 5005:5005 -p 6006:6006 --volume "${{ github.workspace }}/.ci-config/":"/etc/opt/ripple/" --name rippled-service --health-cmd="rippled server_info || exit 1" --health-interval=5s --health-retries=10 --health-timeout=2s --env GITHUB_ACTIONS=true --env CI=true --entrypoint bash ${{ env.RIPPLED_DOCKER_IMAGE }} -c "mkdir -p /var/lib/rippled/db/ && rippled -a"
+
+      - name: Install poetry
+        if: steps.cache-poetry.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL https://install.python-poetry.org/ | python - --version ${{ env.POETRY_VERSION }}
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install Python + Retrieve Poetry dependencies from cache
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "poetry"
+
+      - name: Display Python version
+        run: |
+          python -c "import sys; print(sys.version)"
+
+      - name: Install poetry dependencies
+        run: poetry install
+
+      - name: Integration test
+        run: |
+          poetry run poe test_integration
+          poetry run coverage report --fail-under=70
+
+      - name: Stop docker container
+        if: always()
+        run: docker stop rippled-service

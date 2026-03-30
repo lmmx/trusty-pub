@@ -1,0 +1,34 @@
+name: Setup, Examples, Notebooks
+
+on: [push, pull_request]
+
+jobs:
+  install-examples:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the python-control sources
+      uses: actions/checkout@v3
+    - name: Set up conda using the preinstalled GHA Miniconda
+      run: echo $CONDA/bin >> $GITHUB_PATH
+    - name: Install Python dependencies from conda-forge
+      run: |
+        conda create \
+           --name control-examples-env \
+           --channel conda-forge \
+           --strict-channel-priority \
+           --quiet --yes \
+           python=3.12 pip \
+           numpy matplotlib scipy \
+           slycot pmw jupyter \
+           ipython!=9.0
+
+    - name: Install from source
+      run: |
+        conda run -n control-examples-env pip install .
+
+    - name: Run examples
+      run: |
+        cd examples
+        conda run -n control-examples-env ./run_examples.sh
+        conda run -n control-examples-env ./run_notebooks.sh

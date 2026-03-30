@@ -1,0 +1,52 @@
+name: CI / Docs
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  docs_build:
+    name: "Build"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: Set up poetry
+        uses: Gr1N/setup-poetry@v9
+        with:
+          poetry-version: "2.2.1"
+
+      - name: Configure poetry
+        run: poetry config virtualenvs.in-project true
+
+      - name: Set up cache
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: .venv
+          key: venv-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Ensure cache is healthy
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: timeout 10s poetry run pip --version || rm -rf .venv
+
+      - name: Install dependencies
+        run: poetry install --with docs
+
+      - name: Build documentation
+        run: |
+          poetry run python -m sphinx -T -b html -d docs/_build/doctrees -D language=en docs docs/_build/html -n -W
+
+      - uses: actions/upload-artifact@v4
+        name: Upload docs as artifact
+        with:
+          name: docs-html
+          path: './docs/_build/html'
+          if-no-files-found: error

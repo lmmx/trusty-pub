@@ -1,0 +1,15 @@
+name: CI
+
+on:
+  push:
+  pull_request: ~
+
+jobs:
+  shared-ci:
+    uses: zigpy/workflows/.github/workflows/ci.yml@main
+    with:
+      CODE_FOLDER: zigpy
+      CACHE_VERSION: 3
+      MINIMUM_COVERAGE_PERCENTAGE: 99
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

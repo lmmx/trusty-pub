@@ -1,0 +1,51 @@
+name: nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '45 4 * * *'
+
+permissions:
+  id-token: write
+  issues: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: single-acceptance-job-per-repo
+
+env:
+  HATCH_VERBOSE: "2"
+  HATCH_VERSION: "1.16.5"
+
+jobs:
+  integration:
+    environment: runtime
+    runs-on: larger
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          cache: 'pip'
+          cache-dependency-path: '**/pyproject.toml'
+          python-version: '3.14'
+
+      - name: Install hatch
+        run: pip install "hatch==${HATCH_VERSION}"
+
+      - name: Run nightly tests
+        uses: databrickslabs/sandbox/acceptance@acceptance/v0.4.2
+        with:
+          vault_uri: ${{ secrets.VAULT_URI }}
+          timeout: 2h
+          create_issues: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          TEST_NIGHTLY: true

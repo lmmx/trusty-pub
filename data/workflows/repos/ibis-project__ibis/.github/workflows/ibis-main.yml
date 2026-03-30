@@ -1,0 +1,144 @@
+name: Ibis
+
+on:
+  push:
+    # Skip the test suite if all changes are in the docs directory
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "**/*.qmd"
+      - ".envrc"
+    branches:
+      - main
+      - "*.x.x"
+  pull_request:
+    # Skip the test suite if all changes are in the docs directory
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "**/*.qmd"
+      - ".envrc"
+    branches:
+      - main
+      - "*.x.x"
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+  SQLALCHEMY_WARN_20: "1"
+  HYPOTHESIS_PROFILE: "ci"
+
+jobs:
+  test_core:
+    name: Test ${{ matrix.os }} python-${{ matrix.python-version }} pyarrow-${{ matrix.pyarrow }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.10"
+          - "3.14"
+        pyarrow:
+          - true
+          - false
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: install python
+        uses: actions/setup-python@v6
+        id: install_python
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v7.3.0
+
+      - name: install ${{ matrix.os }} system dependencies
+        if: matrix.os != 'windows-latest'
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -q build-essential graphviz
+
+      - name: install ${{ matrix.os }} system dependencies
+        if: matrix.os == 'windows-latest'
+        run: choco install graphviz
+
+      - name: install numpy/pandas/pyarrow
+        if: matrix.pyarrow
+        run: pip install numpy pandas pyarrow pyarrow-hotfix
+
+      - uses: extractions/setup-just@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: run all core tests and run benchmarks once parallel
+        if: matrix.os != 'windows-latest'
+        run: just ci-check "--extra visualization --extra decompiler" -m "'core or benchmark'" --numprocesses auto -rfEs
+
+      - name: run all core tests and run benchmarks once serial
+        if: matrix.os == 'windows-latest'
+        run: just ci-check "--extra visualization --extra decompiler" -m "'core or benchmark'" -rfEs
+
+      - name: upload code coverage
+        if: success()
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        with:
+          flags: core,${{ runner.os }},python-${{ steps.install_python.outputs.python-version }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  test_doctests:
+    name: Doctests
+    runs-on: ubuntu-latest
+    steps:
+      - name: install system dependencies
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q build-essential graphviz libgeos-dev freetds-dev unixodbc-dev
+
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: install python
+        uses: actions/setup-python@v6
+        id: install_python
+        with:
+          # 3.14 + pyspark + cloudpickle causes a stack overflow, so keep this
+          # at 3.13 for now
+          python-version: "3.13"
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v7.3.0
+
+      - uses: extractions/setup-just@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: run doctests
+        run: just doctest --cov=ibis --cov-report=xml:coverage.xml
+
+      - name: check for dead fixtures
+        run: uv run --all-extras --group tests pytest --dead-fixtures -m 'not flink'
+
+      - name: upload code coverage
+        if: success()
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        with:
+          flags: core,doctests,${{ runner.os }},python-${{ steps.install_python.outputs.python-version }}
+          token: ${{ secrets.CODECOV_TOKEN }}

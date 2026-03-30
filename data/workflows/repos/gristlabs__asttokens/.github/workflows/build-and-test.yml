@@ -1,0 +1,95 @@
+name: Build and test
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - 3.8
+          - 3.9
+          - '3.10'
+          - 3.11
+          - 3.12
+          - 3.13
+          # As per https://github.com/actions/virtual-environments/blob/main/images/linux/Ubuntu2004-Readme.md#pypy list of versions
+          - pypy-3.9
+          - pypy-3.10
+        astroid-version:
+          - ''
+        include:
+          # Test recent Python on Astroid v2 and v3 too (the above natural tests will
+          # pick up the latest Astroid version for these Python versions)
+          - python-version: '3.8'
+            astroid-version: '<3'
+          - python-version: '3.9'
+            astroid-version: '<3'
+          - python-version: '3.10'
+            astroid-version: '<3'
+          - python-version: '3.11'
+            astroid-version: '<3'
+          - python-version: '3.12'
+            astroid-version: '<3'
+          - python-version: '3.13'
+            astroid-version: '<3'
+          - python-version: 'pypy-3.10'
+            astroid-version: '<3'
+          - python-version: '3.10'
+            astroid-version: '<4'
+          - python-version: '3.12'
+            astroid-version: '<4'
+          - python-version: '3.14'
+
+    env:
+      COVERALLS_PARALLEL: true
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade coveralls "pytest<9.0" setuptools setuptools_scm pep517
+          pip install .[test] 'astroid${{ matrix.astroid-version }}'
+
+      - name: Mypy testing
+        run: |
+          # Not an exact mypy version, as we need 0.942 for pypy-3.8 support, but it's not available on 3.5
+          pip install "mypy>=1.10"
+          python -m mypy asttokens tests/*.py
+
+      - name: Fast tests with coverage
+        run: |
+          pytest --cov -n auto -m "not slow"
+          coverage report -m
+
+      - name: Slow tests without coverage
+        run: |
+          pytest -n auto -m slow
+
+      - name: Collect coverage results
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip3 install --upgrade coveralls
+          python3 -m coveralls --service=github
+
+  finish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Coveralls Finished
+        uses: AndreMiras/coveralls-python-action@v20201129
+        with:
+          parallel-finished: true

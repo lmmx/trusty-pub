@@ -1,0 +1,77 @@
+name: CodeCov tests
+
+on: [push, pull_request]
+
+jobs:
+  unit-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        django-version: ['3.2', '4.2', '5.0', '5.1', '5.2']
+        os: [
+          ubuntu-latest
+        ]
+        exclude:
+          - django-version: '5.0'
+            python-version: '3.9'
+          - django-version: '5.1'
+            python-version: '3.9'
+          - django-version: '5.2'
+            python-version: '3.9'
+          - django-version: '3.2'
+            python-version: '3.13'
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install django~=${{ matrix.django-version }} coverage
+        pip install -r tests/requirements/base.txt
+        pip install .
+
+    - name: Run coverage
+      run: coverage run tests/settings.py
+
+    - name: Upload Coverage to Codecov
+      uses: codecov/codecov-action@v1
+
+  unit-tests-future-versions:
+    # Runs for all Django/Python versions which are not yet supported
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+        django-version: [
+          'https://github.com/django/django/archive/main.tar.gz'
+        ]
+        os: [
+          ubuntu-latest,
+        ]
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ${{ matrix.django-version }} coverage
+          pip install -r tests/requirements/base.txt
+          pip install .
+
+      - name: Run coverage
+        run: coverage run tests/settings.py
+        continue-on-error: true
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v3

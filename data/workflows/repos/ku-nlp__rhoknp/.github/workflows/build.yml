@@ -1,0 +1,59 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Build the project
+    runs-on: ${{ matrix.os }}
+    strategy:
+      max-parallel: 21
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version:
+          ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        id: setup-python
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build package
+        run: uv build -o dist
+      - name: Install virtualenv and create virtual environment
+        run: |
+          uv tool install virtualenv
+          virtualenv -p ${{ matrix.python-version }} .venv
+      - name: Install rhoknp from wheel (non-Windows)
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: |
+          source .venv/bin/activate
+          wheelFile=$(ls dist/*.whl)
+          pip install "${wheelFile}[cli]"
+      - name: Install rhoknp from wheel (Windows)
+        if: ${{ matrix.os == 'windows-latest' }}
+        run: |
+          .\.venv\Scripts\Activate
+          $wheelFile = (Get-ChildItem -Path dist -Filter *.whl).FullName
+          pip install "${wheelFile}[cli]"
+        shell: pwsh
+      - name: Run rhoknp (non-Windows)
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: |
+          source .venv/bin/activate
+          rhoknp --version
+          rhoknp --help
+      - name: Run rhoknp (Windows)
+        if: ${{ matrix.os == 'windows-latest' }}
+        run: |
+          .\.venv\Scripts\Activate
+          rhoknp --version
+          rhoknp --help
+        shell: pwsh

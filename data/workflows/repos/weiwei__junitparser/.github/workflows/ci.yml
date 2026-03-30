@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: ["master"]
+    tags:
+    - "*"
+  pull_request:
+    branches: ["master"]
+  workflow_dispatch:
+
+jobs:
+  event_file:
+    name: "Event File"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: Event File
+        path: ${{ github.event_path }}
+
+  test-linux:
+    name: "Test Ubuntu"
+    uses: "./.github/workflows/test-os.yml"
+    with:
+      os: '["ubuntu-24.04"]'
+      python-version: '["3.10", "3.11", "3.12", "3.13"]'
+
+  test-win:
+    name: "Test Windows"
+    uses: "./.github/workflows/test-os.yml"
+    with:
+      os: '["windows-2025"]'
+      python-version: '["3.10", "3.11", "3.12", "3.13"]'
+
+  test-mac:
+    name: "Test macOS"
+    uses: "./.github/workflows/test-os.yml"
+    with:
+      os: '["macos-15"]'
+      python-version: '["3.10", "3.11", "3.12", "3.13"]'
+
+  coverage-lint:
+    name: "Coverage & Lint"
+    needs: ["test-linux", "test-win", "test-mac"]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.x
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.x
+    - name: Setup locales
+      run: |
+        sudo locale-gen en_US.UTF-8
+        sudo locale-gen de_DE.UTF-8
+        sudo update-locale
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install lxml flake8 pytest coverage
+    - name: Lint with flake8
+      run: |
+        # The GitHub editor is 127 chars wide
+        flake8 . --count --max-complexity=10 --max-line-length=127 --show-source --statistics
+    - name: Test and coverage
+      run: |
+        coverage run -m pytest
+        bash <(curl -s https://codecov.io/bash)
+
+  package-build:
+    name: "Build Package"
+    needs: coverage-lint
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.x
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.x
+    - name: Build packages
+      run: |
+        # Build packages
+        echo "::group::build"
+        pip install build
+        python -m build
+        echo "::endgroup::"
+
+        echo "::group::dist/"
+        ls -lah dist/
+        echo "::endgroup::"
+
+        echo "::group::tar.gz"
+        tar -tzvf dist/junitparser-*.tar.gz
+        echo "::endgroup::"
+
+        echo "::group::wheel"
+        unzip -l dist/junitparser-*.whl
+        echo "::endgroup::"
+
+        echo "::group::wheel metadata"
+        unzip -p dist/junitparser-*.whl junitparser-*.dist-info/METADATA
+        echo "::endgroup::"
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: Binaries
+        path: dist/*
+
+  test-whl:
+    name: "Test whl"
+    needs: package-build
+    uses: "./.github/workflows/test-whl.yml"
+    with:
+      os: '["ubuntu-24.04"]'
+      python-version: '["3.10", "3.11", "3.12", "3.13"]'
+
+  package-publish:
+    name: "Publish Package"
+    needs: test-whl
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Download Binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: Binaries
+        path: dist/
+    - name: Inspect binaries
+      run: |
+        ls -lah dist/
+    - name: Publish to pypi
+      if: startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.pypi_password }}

@@ -1,0 +1,282 @@
+# SPDX-FileCopyrightText: 2023 James R. Barlow
+# SPDX-License-Identifier: MPL-2.0
+
+name: Build and upload to PyPI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request: {}
+
+# For musllinux support, see note in pyproject.toml
+
+jobs:
+  wheels_linux:
+    name: ${{ matrix.platform }}
+    runs-on: ubuntu-24.04
+    env:
+      CIBW_BUILD: "*-${{ matrix.platform }}"
+    strategy:
+      matrix:
+        platform: [manylinux_x86_64, musllinux_x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+
+      - name: Upload built wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+
+  wheels_linux_prerelease_python:
+    name: test pre-release (${{ matrix.platform }})
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    env:
+      CIBW_BUILD: "cp315-${{ matrix.platform }}"
+      CIBW_ENABLE: "cpython-prerelease"
+    strategy:
+      matrix:
+        platform: [manylinux_x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test wheels (without upload)
+        uses: pypa/cibuildwheel@v3.3.1
+
+  wheels_linux_freethreading:
+    name: test freethreading (${{ matrix.platform }})
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    env:
+      CIBW_BUILD: "cp314t-${{ matrix.platform }}"
+      CIBW_SKIP: ""
+      CIBW_ENABLE: "cpython-freethreading"
+    strategy:
+      matrix:
+        platform: [manylinux_x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test wheels (without upload)
+        uses: pypa/cibuildwheel@v3.3.1
+
+  wheels_linux_arm:
+    name: ${{ matrix.platform }}
+    runs-on: ubuntu-24.04-arm
+    env:
+      CIBW_BUILD: "*-${{ matrix.platform }}"
+    strategy:
+      matrix:
+        platform: [manylinux_aarch64, musllinux_aarch64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+
+      - name: Upload built wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+
+  wheels_macos:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    env:
+      CIBW_BUILD: "*"
+    strategy:
+      matrix:
+        # macos-14 is Apple silicon and we configure it to build only arm64 wheels.
+        # See notes in build.rst.
+        include:
+          - os: macos-15-intel
+            os_arch: macos-x86_64
+          - os: macos-14
+            os_arch: macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install UV for cibuildwheel
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os_arch }}
+          path: ./wheelhouse/*.whl
+
+  wheels_windows:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    env:
+      CIBW_BUILD: "*-${{ matrix.platform }}"
+      CIBW_ENVIRONMENT: >-
+        INCLUDE="$INCLUDE;d:\\qpdf\\include"
+        LIB="$LIB;d:\\qpdf\\lib"
+        LIBPATH="$LIBPATH;d:\\qpdf\\lib"
+    strategy:
+      matrix:
+        os: [windows-2022]
+        platform: [win_amd64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: "3.10"
+
+      - name: Install tomli and read environment from pyproject.toml
+        run: |
+          python -m pip install tomli
+          python build-scripts/environ-from-pyproject.py >> $env:GITHUB_ENV
+          dir env:
+
+      - name: Download QPDF
+        run: |
+          build-scripts/win-download-qpdf.ps1 $env:QPDF_VERSION ${{ matrix.platform }}
+
+      - name: Install UV for cibuildwheel
+        run: |
+          powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: ./wheelhouse/*.whl
+
+  sdist:
+    name: source distribution
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: "3.10"
+
+      - name: Install apt packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake jbig2dec lcov libexempi8 poppler-utils
+
+      - name: Install tomli and read environment from pyproject.toml
+        run: |
+          python -m pip install tomli
+          python build-scripts/environ-from-pyproject.py >> $GITHUB_ENV
+
+      - name: Download QPDF
+        run: build-scripts/posix-download-qpdf.bash $QPDF_MIN_VERSION
+
+      - name: Add /usr/local/lib to dynamic linker path
+        run: echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/local-lib.conf
+
+      - name: Build QPDF
+        run: build-scripts/posix-build-sdist-deps.bash
+
+      - name: Build sdist
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade setuptools wheel build
+          python -m build --sdist
+
+      - name: Install and test sdist (isolated)
+        run: |
+          python -m venv v
+          source v/bin/activate
+          SDIST=dist/*.tar.gz
+          SDIST_EXPANDED=$(echo -n $SDIST)
+          python -m pip install ${SDIST_EXPANDED}[test]  # yes this works
+          python -m pytest -nauto
+          deactivate
+
+      - name: Install local project as editable
+        run: |
+          # pip install with --coverage is broken so we have to do it this horrible hacky way
+          # https://github.com/pypa/setuptools/issues/3025
+          # Install it with pip, or else dependencies won't be resolved (*sigh*)
+          python -m pip install -e .[test]
+          # Nuke the C++ extension but leave the Python install intact
+          rm -rf build/ src/pikepdf/_core*.so
+          # Rebuild the extension inplace with coverage
+          env CFLAGS="--coverage" CXXFLAGS="--coverage" python setup.py build_ext --inplace
+          python -m pytest -nauto --cov-report xml --cov=src
+
+      - name: Generate C++ coverage reports
+        run: |
+          lcov --no-external --capture --directory . --output-file cpp_coverage_all.info
+          lcov --remove cpp_coverage_all.info '*/pybind11/*' -o cpp_coverage.info
+          rm cpp_coverage_all.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          files: ./coverage.xml,./cpp_coverage.info
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  stage_artifacts:
+    name: Stage artifacts to draft release
+    needs: [wheels_linux, wheels_macos, wheels_windows, wheels_linux_arm, sdist]
+    runs-on: ubuntu-latest
+    # Only stage on pushes to main branch (not PRs or tags)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Read version from source
+        id: version
+        run: |
+          VERSION=$(python3 -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('src/pikepdf/_version.py').read()).group(1))")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create or update draft release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+
+          # Delete existing draft release if it exists (ignore errors)
+          gh release delete "$TAG" --yes 2>/dev/null || true
+
+          # Create new draft release with all artifacts
+          gh release create "$TAG" \
+            --draft \
+            --title "$TAG" \
+            --notes "Draft release - will be updated when tag is pushed" \
+            dist/*

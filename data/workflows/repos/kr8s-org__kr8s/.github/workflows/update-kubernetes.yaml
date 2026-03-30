@@ -1,0 +1,86 @@
+name: "Update Kubernetes"
+on:
+  schedule:
+    - cron:  '30 2 * * *'
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - .github/workflows/update-kubernetes.yaml
+      - ci/update-kubernetes.py
+
+jobs:
+  update-kubernetes:
+    if: github.repository == 'kr8s-org/kr8s'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Update Kubernetes
+        env:
+          # Set optional secrets for Docker Hub authentication
+          # If not set, the script will not attempt to authenticate with Docker Hub
+          # but may run into rate limiting errors from Docker Hub.
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || '' }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || '' }}
+        run: uv run ./ci/update-kubernetes.py
+      - name: Show diff
+        id: diff
+        run: |
+          echo 'diff<<END_OF_DIFF' >> $GITHUB_OUTPUT
+          git diff --unified=0 | tee -a $GITHUB_OUTPUT
+          echo 'END_OF_DIFF' >> $GITHUB_OUTPUT
+
+          if [ -z "$(git diff --unified=0)" ]; then
+            echo "No changes to commit"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes to commit"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+      - name: Show diff for debugging
+        run: |
+          echo "${{ steps.diff.outputs.diff }}"
+      - name: Generate PR title
+        uses: ai-action/ollama-action@v1.1.1
+        if: steps.diff.outputs.has_changes == 'true'
+        id: title-llm
+        with:
+          model: llama3.2:3b
+          prompt: |
+            You are a helpful assistant that generates PR titles for Kubernetes version updates by summarising a git diff.
+            The title should be concise and to the point.
+            The title should be in the present tense.
+            Your response must be no more than 50 characters.
+            Do not use quotes in your response.
+            Do not use markdown formatting in your response.
+
+            ```diff
+            ${{ steps.diff.outputs.diff }}
+            ```
+
+            Please summarize the changes in the diff with particular attention to the Kubernetes version that is being updated.
+            Don't include the Python version information in the title or which files are being edited. Focus only on the Kubernetes version.
+
+      - name: Show PR title
+        if: steps.diff.outputs.has_changes == 'true'
+        run: |
+          echo "The action would generate the following PR title: ${{ steps.title-llm.outputs.response }}"
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        if: steps.diff.outputs.has_changes == 'true' && github.repository == 'kr8s-org/kr8s' && github.ref == 'refs/heads/main'
+        with:
+          base: main
+          commit-message: ${{ steps.title-llm.outputs.response }}
+          title: ${{ steps.title-llm.outputs.response }}
+          reviewers: "jacobtomlinson"
+          token: "${{ secrets.BOT_TOKEN }}"
+          labels: |
+            automerge
+            ci
+          branch: "upgrade-k8s-version"
+          body: |
+            A new Kubernetes version has been detected.
+
+            Updated CI and README badges.

@@ -1,0 +1,51 @@
+name: HYPERSHIFT-ASSISTED-CI
+on:
+  workflow_dispatch:
+    inputs:
+      CLUSTER:
+        description: 'Cluster'
+        required: true
+        default: ci-hypershift-assisted
+      PARAMFILE:
+        description: 'paramfile'
+        required: false
+        default: openshift-ci-paramfiles/hypershift_assisted.yml
+      EXTRAPARAMS:
+        description: 'Extra params'
+        default: ''
+      PULLSECRET:
+        description: 'Pull Secret'
+        required: false
+        default: /root/openshift_pull.json
+
+env:
+ HOME: /root
+ PYTHONUNBUFFERED: true
+ KUBECONFIG: /root/.kcli/clusters/ci-sno/auth/kubeconfig
+ CLUSTER: ${{github.event.inputs.CLUSTER}}
+ INPUTFILE: ${{github.event.inputs.INPUTFILE}}
+ PARAMFILE: ${{github.event.inputs.PARAMFILE}}
+ EXTRAPARAMS: ${{github.event.inputs.EXTRAPARAMS}}
+ PULLSECRET: ${{github.event.inputs.PULLSECRET}}
+
+jobs:
+    requirements:
+      runs-on: u08
+      steps:
+       - uses: actions/checkout@v2
+       - run: git pull origin ${GITHUB_REF##*/}
+       - name: Install kcli
+         run: |
+           curl https://raw.githubusercontent.com/karmab/kcli/main/install.sh | bash
+           kcli create sushy-service
+       - name: Delete old install
+         run: |
+           kcli delete cluster --yes $CLUSTER || true
+
+    deploy-hypershift:
+      needs: requirements
+      runs-on: u08
+      steps:
+      - name: Deploy HYPERSHIFT ASSISTED
+        run: |
+          kcli create cluster hypershift --paramfile $PARAMFILE -P pull_secret=$PULLSECRET $EXTRAPARAMS $CLUSTER

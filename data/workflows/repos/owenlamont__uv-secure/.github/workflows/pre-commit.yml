@@ -1,0 +1,37 @@
+name: Pre-commit checks
+on:
+  pull_request:
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
+        with:
+          enable-cache: true
+      - name: Cache virtualenv
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: venv-${{ runner.os }}-
+      - name: Cache prek
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
+        with:
+          path: ~/.cache/prek
+          key: prek-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: prek-${{ runner.os }}-
+      - name: Install the project
+        run: uv sync
+      - name: Install prek globally
+        run: uv tool install prek
+      - name: Install ty globally
+        run: uv tool install ty
+      - name: Run pre-commit hooks
+        env:
+          SKIP: no-commit-to-branch  # Skip the main branch protection hook in CI
+        run: prek run --all-files

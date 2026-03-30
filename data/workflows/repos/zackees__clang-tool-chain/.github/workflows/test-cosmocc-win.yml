@@ -1,0 +1,108 @@
+name: cosmocc-win
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-cosmocc-win:
+    name: Cosmocc (Windows x86_64)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        irm https://astral.sh/uv/install.ps1 | iex
+      shell: pwsh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+      shell: bash
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Windows x86_64"
+        python --version
+      shell: bash
+
+    - name: Download and install cosmocc toolchain
+      run: |
+        uv run clang-tool-chain install cosmocc
+      shell: bash
+      timeout-minutes: 20
+
+    - name: Test cosmocc version
+      run: |
+        uv run clang-tool-chain-cosmocc --version
+      shell: bash
+
+    - name: Test cosmoc++ version
+      run: |
+        uv run clang-tool-chain-cosmocpp --version
+      shell: bash
+
+    - name: Test C compilation with cosmocc
+      run: |
+        cat > hello.c << 'EOF'
+        #include <stdio.h>
+        int main() {
+            printf("Hello from Cosmopolitan on Windows x86_64!\n");
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-cosmocc hello.c -o hello.com
+        ./hello.com
+      shell: bash
+
+    - name: Test C++ compilation with cosmoc++
+      run: |
+        cat > hello.cpp << 'EOF'
+        #include <iostream>
+        int main() {
+            std::cout << "Hello C++ from Cosmopolitan!" << std::endl;
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-cosmocpp hello.cpp -o hello_cpp.com
+        ./hello_cpp.com
+      shell: bash
+      timeout-minutes: 10
+
+    - name: Test multi-file compilation
+      run: |
+        cat > mylib.c << 'EOF'
+        int add(int a, int b) { return a + b; }
+        int multiply(int a, int b) { return a * b; }
+        EOF
+        cat > main.c << 'EOF'
+        #include <stdio.h>
+        extern int add(int a, int b);
+        extern int multiply(int a, int b);
+        int main() {
+            printf("add(3, 4) = %d\n", add(3, 4));
+            printf("multiply(3, 4) = %d\n", multiply(3, 4));
+            return (add(3, 4) == 7 && multiply(3, 4) == 12) ? 0 : 1;
+        }
+        EOF
+        uv run clang-tool-chain-cosmocc mylib.c main.c -o multifile.com
+        ./multifile.com
+      shell: bash
+
+    - name: Run cosmocc unit tests
+      run: |
+        uv run pytest tests/test_cosmocc.py -v --timeout=300
+      shell: bash
+      timeout-minutes: 15

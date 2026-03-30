@@ -1,0 +1,44 @@
+name: OSSF Scorecard
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '33 11 * * 2'  # Every Tuesday at 11:33 AM UTC
+  push:
+    branches: [ main ]
+
+permissions: read-all
+
+concurrency: # avoid overlapping runs
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # upload SARIF to code-scanning
+      id-token: write # publish results for the badge
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@f35c64557cf912815708bb1126d9948f3e459487
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true  # enables the public badge
+
+      - name: Upload to code-scanning
+        uses: github/codeql-action/upload-sarif@df559355d593797519d70b90fc8edd5db049e7a2 # v3.29.9
+        with:
+          sarif_file: results.sarif

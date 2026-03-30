@@ -1,0 +1,33 @@
+name: Update user agents
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  update-user-agents:
+    if: github.repository == 'streamlink/streamlink'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - run: python -m pip install requests
+      - run: python ./script/update-user-agents.py
+        env:
+          WHATISMYBROWSER_API_KEY: ${{ secrets.WHATISMYBROWSER_API_KEY }}
+      - uses: peter-evans/create-pull-request@0979079bc20c05bbbb590a56c21c4e2b1d1f1bbe
+        with:
+          token: ${{ secrets.STREAMLINKBOT_USERAGENTS_PR }}
+          add-paths: |
+            src/streamlink/session/http_useragents.py
+          commit-message: "session.http_useragents: update useragents"
+          committer: "streamlinkbot <streamlinkbot@users.noreply.github.com>"
+          author: "streamlinkbot <streamlinkbot@users.noreply.github.com>"
+          branch: "automated/session/http_useragents/update"
+          branch-suffix: timestamp
+          delete-branch: true
+          title: "session.http_useragents: update useragents"
+          body: "Automated pull request"

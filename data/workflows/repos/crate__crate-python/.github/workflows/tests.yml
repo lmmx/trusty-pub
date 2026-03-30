@@ -1,0 +1,84 @@
+---
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: ~
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+  statuses: write
+
+jobs:
+  test:
+    name: "Python: ${{ matrix.python-version }}
+     on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-24.04"]
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+
+        # To save resources, only verify other variants particularly.
+        include:
+
+          # Linux/ARM
+          - os: 'ubuntu-24.04-arm'
+            python-version: '3.14'
+
+          # macOS/Intel
+          - os: 'macos-15-intel'
+            python-version: '3.14'
+
+          # macOS/ARM
+          - os: 'macos-latest'
+            python-version: '3.14'
+
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache-suffix: ${{ matrix.python-version }}
+          enable-cache: true
+          activate-environment: true
+          version: "latest"
+
+      - name: Setup env
+        run: uv pip install --group dev -e .
+
+      - name: Run Linters
+        run: |
+          ruff check .
+          mypy
+
+      - name: Run tests
+        run: |
+          coverage run -m pytest
+          coverage combine
+          coverage xml
+
+      - name: Upload coverage results to Codecov
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          fail_ci_if_error: true

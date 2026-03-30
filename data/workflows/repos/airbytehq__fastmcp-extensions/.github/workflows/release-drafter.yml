@@ -1,0 +1,53 @@
+name: Release Drafter
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-drafter
+  cancel-in-progress: false
+
+jobs:
+  draft_release:
+    name: Draft Release
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Checkout Repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Get Release Draft Info (Dry-Run)
+        id: dry-run
+        uses: aaronsteers/semantic-pr-release-drafter@v0.5.0
+        env:
+          # Needed to retrieve non-public draft release info.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          dry-run: true
+
+      - name: Build package
+        env:
+          UV_DYNAMIC_VERSIONING_BYPASS: ${{ steps.dry-run.outputs.resolved-version }}
+        run: uv build
+
+      - name: Create or update draft release
+        uses: aaronsteers/semantic-pr-release-drafter@v0.5.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          version: ${{ steps.dry-run.outputs.resolved-version }}
+          attach-files: |
+            dist/*.whl
+            dist/*.tar.gz

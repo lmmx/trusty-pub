@@ -1,0 +1,39 @@
+name: Test PyPI install
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+
+jobs:
+  build:
+    name: ${{ matrix.os }}-py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12"]
+        include:
+          - python-version: "3.11"
+            python-version-nd: 311
+          - python-version: "3.12"
+            python-version-nd: 312
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+
+      - name: create environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: causalml-py${{ matrix.python-version-nd }} 
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install using pip
+        run: |
+          pip install causalml

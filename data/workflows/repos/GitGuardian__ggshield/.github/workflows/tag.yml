@@ -1,0 +1,184 @@
+name: Application Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build_release_assets:
+    uses: ./.github/workflows/build_release_assets.yml
+    secrets: inherit
+    with:
+      release_mode: true
+
+  push_to_pypi:
+    needs: build_release_assets
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Download wheel and sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish distribution 📦 to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_password }}
+
+  release:
+    runs-on: ubuntu-22.04
+    needs: build_release_assets
+    continue-on-error: true
+    outputs:
+      tag: ${{ steps.tags.outputs.tag }}
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+
+    # This is required for `gh release create` to work
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read info
+        id: tags
+        shell: bash
+        run: |
+          echo "tag=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
+
+      - name: Download OS packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: os-packages-*
+          path: packages
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create --draft ${{ steps.tags.outputs.tag }}
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload \
+            ${{ steps.tags.outputs.tag }} \
+            packages/ggshield-*.pkg \
+            packages/ggshield_*.deb \
+            packages/ggshield-*.rpm \
+            packages/ggshield-*.zip \
+            packages/ggshield.*.nupkg \
+            packages/ggshield-*.gz
+
+  update_vscode_extension:
+    needs: release
+    uses: ./.github/workflows/update_vscode_extension.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.release.outputs.tag }}
+
+  push_docker_images:
+    name: Push Docker image to Docker Hub and GitHub Packages
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+    steps:
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            gitguardian/ggshield
+            ghcr.io/gitguardian/ggshield/ggshield
+          tags: |
+            type=ref,event=tag
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.tags }}
+            gitguardian/ggshield:latest
+            ghcr.io/gitguardian/ggshield/ggshield:latest
+
+  push_to_cloudsmith:
+    needs: build_release_assets
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: os-packages-*
+          path: packages
+          merge-multiple: true
+
+      - name: Install Cloudsmith CLI
+        run: pip install cloudsmith-cli
+
+      - name: Push to Cloudsmith
+        run: |
+          scripts/push-to-cloudsmith
+        env:
+          CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
+
+  push_to_chocolatey:
+    needs: build_release_assets
+    name: Push to Chocolatey
+    runs-on: windows-latest
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: os-packages-windows-*
+          path: packages
+          merge-multiple: true
+
+      - name: Push to Chocolatey
+        shell: bash
+        run: |
+          scripts/chocolatey/push packages/ggshield.*.nupkg
+        env:
+          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}

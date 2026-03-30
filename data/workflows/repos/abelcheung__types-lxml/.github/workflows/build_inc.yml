@@ -1,0 +1,135 @@
+# For inclusion in another workflow only
+
+name: Reusable build workflow
+
+on:
+  workflow_call:
+    inputs:
+      gitref:
+        required: false
+        type: string
+        default: ${{ github.ref }}
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    runs-on: ubuntu-slim
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ inputs.gitref }}
+        fetch-depth: 0  # detect tagged ver in repo
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        version: '0.9.26'
+        cache-dependency-glob: |
+          ./pyproject.toml
+
+    - name: Build flavor ${{ matrix.flavor }}
+      if: ( ! startsWith(inputs.gitref, 'refs/tags/') )
+      run: >
+        uvx
+        --python-preference only-system
+        --with tox-uv
+        tox@4.36.1 run -v
+        -e build-${{ matrix.flavor }}
+
+    - name: Build tagged flavor ${{ matrix.flavor }}
+      if: startsWith(inputs.gitref, 'refs/tags/')
+      env:
+        PDM_BUILD_SCM_VERSION: ${{ github.ref_name }}
+      run: >
+        uvx
+        --python-preference only-system
+        --with tox-uv
+        tox@4.36.1 run -v
+        -e build-${{ matrix.flavor }}
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: dist-${{ matrix.flavor }}
+        path: dist/*
+        if-no-files-found: error
+
+  pyrefly:
+    needs: build
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    uses: ./.github/workflows/inc_tc_pyrefly.yml
+    with:
+      tarball-flavor: ${{ matrix.flavor }}
+
+  pyright:
+    needs: build
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    uses: ./.github/workflows/inc_tc_pyright.yml
+    with:
+      tarball-flavor: ${{ matrix.flavor }}
+
+  mypy:
+    needs: build
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    uses: ./.github/workflows/inc_tc_mypy.yml
+    with:
+      tarball-flavor: ${{ matrix.flavor }}
+
+  basedpyright:
+    needs: build
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    uses: ./.github/workflows/inc_tc_basedpyright.yml
+    with:
+      tarball-flavor: ${{ matrix.flavor }}
+
+  ty:
+    needs: build
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    uses: ./.github/workflows/inc_tc_ty.yml
+    with:
+      tarball-flavor: ${{ matrix.flavor }}
+

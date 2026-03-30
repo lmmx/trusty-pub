@@ -1,0 +1,40 @@
+name: Docs Publish
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: docs-gh-pages
+
+jobs:
+  deploy:
+    if: github.repository_owner == 'Qiskit'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Install dependencies
+      run: |
+        pip install -U --group testinfra
+        sudo apt-get install graphviz pandoc
+    - name: Build docs
+      run: |
+        tools/build_documentation_dev.sh
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v3
+      with:
+        name: html_docs
+        path: docs/build/html
+    - name: Deploy
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_branch: gh-pages
+        publish_dir: dev_docs
+        force_orphan: true

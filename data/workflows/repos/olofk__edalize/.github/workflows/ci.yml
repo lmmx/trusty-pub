@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # Run CI once a week even without code changes to ensure tests pass with
+  # updated dependencies.
+  schedule:
+    - cron: '0 0 * * 5'
+  # Allow triggering a CI run from the web UI.
+  workflow_dispatch:
+
+jobs:
+
+  Format:
+    name: 🐍 Format
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: 🧰 Checkout
+      uses: actions/checkout@v3
+
+    - name: 🐍 Setup Python ${{ matrix.pyver }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.10'
+
+    - name: 🚦 Run pre-commit Action
+      uses: pre-commit/action@v3.0.1
+
+  Build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - { icon: 🐧, name: ubuntu }
+        #- { icon: 🍎, name: macos }
+        #- { icon: 🧊, name: windows }
+        pyver:
+        - '3.10'
+        - '3.11'
+        - '3.12'
+        - '3.13'
+        - '3.14'
+    runs-on: ${{ matrix.os.name }}-latest
+    name: ${{ matrix.os.icon }} ${{ matrix.os.name }} | ${{ matrix.pyver }}
+    steps:
+
+    - name: 🧰 Repository Checkout
+      uses: actions/checkout@v2
+
+    - name: 🐍 Set up Python ${{ matrix.pyver }}
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.pyver }}
+
+    - name: 🛠️ Install dependencies
+      run: |
+        python -c "import sys; print(sys.version)"
+        pip install tox
+
+    - name: 🚧 Build package and run tests with tox
+      run: tox -e py

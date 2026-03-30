@@ -1,0 +1,37 @@
+name: Lint
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  black:
+    runs-on: ubuntu-latest
+    name: black
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install black
+        run: pip install black
+      - name: Run black
+        run: black --check .
+
+  isort:
+    runs-on: ubuntu-latest
+    name: isort
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install dependencies and isort
+        run: pip install -e . isort
+      - name: Run isort
+        run: isort --check .

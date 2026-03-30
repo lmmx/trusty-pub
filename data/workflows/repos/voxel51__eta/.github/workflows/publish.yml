@@ -1,0 +1,44 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release # For trusted publishing. See below.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Clone ETA
+        uses: actions/checkout@v6
+      - name: Set up Python 3
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel twine
+      - name: Install ETA
+        run: |
+          pip install --no-deps -e .
+      - name: Validate version
+        run: |
+          SETUP_VERSION="$(pip list --format json | jq -r '.[] | select(.name=="voxel51-eta") | .version')"
+          TAG_VERSION="$(echo "${{ github.ref }}" | sed 's/^refs\/tags\/v//' | sed 's/-rc\..*//')"
+          echo "setup.py version: ${SETUP_VERSION}"
+          echo "tagged version: ${TAG_VERSION}"
+          test "${SETUP_VERSION}" = "${TAG_VERSION}"
+      - name: Build wheel
+        run: |
+          RELEASE_VERSION=$(echo "${{ github.ref }}" | sed 's/^refs\/tags\/v//') python setup.py sdist bdist_wheel
+      # Utilize
+      # [trusted publishers](https://docs.pypi.org/trusted-publishers/)
+      # This will use OIDC to publish the dists/ package to pypi.
+      # See
+      # [voxel51-eta](https://pypi.org/manage/project/voxel51-eta/settings/publishing)
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@v1.13.0

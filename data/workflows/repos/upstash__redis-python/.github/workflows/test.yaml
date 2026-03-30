@@ -1,0 +1,43 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install Poetry
+        run: curl -sSL https://install.python-poetry.org | python3 - --version 1.8.4
+
+      - name: Set up Poetry environment
+        run: poetry install --no-root
+
+      - name: Run ruff
+        run: |
+          poetry run ruff check .
+
+      - name: Run ruff format
+        run: |
+          poetry run ruff format --check .
+
+      - name: Run mypy
+        run: |
+          poetry run mypy --show-error-codes .
+
+      - name: Run tests
+        run: |
+          export UPSTASH_REDIS_REST_URL="${{secrets.UPSTASH_REDIS_REST_URL}}"
+          export UPSTASH_REDIS_REST_TOKEN="${{secrets.UPSTASH_REDIS_REST_TOKEN}}"
+          poetry run pytest

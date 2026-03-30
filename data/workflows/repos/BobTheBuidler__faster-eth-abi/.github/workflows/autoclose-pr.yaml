@@ -1,0 +1,87 @@
+name: Autoclose Bot PRs
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  autoclose-prs:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true || github.event.pull_request.state == 'closed'
+    steps:
+      - name: Find open stubgen PR
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const triggerPR = context.payload.pull_request;
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: 'auto/update-stubs'
+            });
+            for (const pr of prs) {
+              if (pr.body && pr.body.includes(`Triggered by PR: #${triggerPR.number}`)) {
+                // Close the stubgen PR
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  state: 'closed'
+                });
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: `Autoclosing this stubgen PR because the trigger PR #${triggerPR.number} was closed or merged.`
+                });
+              }
+            }
+
+      - name: Hide stubgen comment on trigger PR as outdated
+        uses: actions/github-script@v8
+        with:
+          script: |
+            // Find the comment on the trigger PR that contains the stubgen PR link
+            const triggerPR = context.payload.pull_request;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: triggerPR.number,
+              per_page: 100
+            });
+
+            // Find the comment with the stubgen PR link (unique marker)
+            const stubgenPRLinkPattern = /https:\/\/github\.com\/.*\/pull\/\d+/;
+            const stubgenComment = comments.find(comment =>
+              comment.body && stubgenPRLinkPattern.test(comment.body) && comment.body.includes('I generated a PR to update stubs')
+            );
+
+            if (!stubgenComment) {
+              core.info('No stubgen automation comment found to hide.');
+              return;
+            }
+
+            // Use GraphQL to minimize (hide) the comment as OUTDATED
+            const query = `
+              mutation MinimizeComment($subjectId: ID!, $reason: ReportedContentClassifiers!) {
+                minimizeComment(input: {subjectId: $subjectId, classifier: $reason}) {
+                  minimizedComment {
+                    isMinimized
+                    minimizedReason
+                  }
+                }
+              }
+            `;
+
+            const variables = {
+              subjectId: stubgenComment.node_id,
+              reason: "OUTDATED"
+            };
+
+            const result = await github.graphql(query, variables);
+            if (result.minimizeComment && result.minimizeComment.minimizedComment.isMinimized) {
+              core.info('Successfully hid stubgen automation comment as OUTDATED.');
+            } else {
+              core.warning('Failed to hide stubgen automation comment.');
+            }

@@ -1,0 +1,58 @@
+---
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:  # https://stackoverflow.com/questions/66335225#comment133398800_72408109
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write  # codecov/codecov-action
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.14']  # sync with make targets below
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0  # for setuptools_scm
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Load cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/pre-commit
+          ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ env.pythonLocation }}-${{ hashFiles('**/requirements/*.txt', '.pre-commit-config.yaml') }}
+
+    - name: Install
+      run: |
+        pip install -U pip setuptools wheel
+        make install
+
+    - name: Lint
+      if: matrix.python-version == '3.14'
+      run: make lint
+
+    - name: Test
+      run: make test
+
+    - name: Docs
+      if: matrix.python-version == '3.14'
+      run: SPHINXOPTS=-W make builddocs
+
+    - uses: codecov/codecov-action@v5
+      with:
+        fail_ci_if_error: true
+        use_oidc: true

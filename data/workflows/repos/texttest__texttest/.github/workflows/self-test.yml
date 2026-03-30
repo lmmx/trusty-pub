@@ -1,0 +1,109 @@
+name: self-tests
+
+on: 
+  workflow_dispatch:  # run on manual trigger
+  push:               # run on push events
+  pull_request:       # run on pull requests
+  schedule:           # check once a week, maybe the dependencies are broken
+    - cron:  '25 1 * * 1'
+
+jobs:
+  run-tests:
+    strategy:
+      # Allow all other matrix-jobs to continue running, even if one of the jobs fails
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        build_env: [native]
+        python: [3.9, '3.10', 3.11, 3.12, 3.13]
+        include:
+          - os: windows-latest
+            build_env: msys
+            python: msys
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Cloning TextTest
+      uses: actions/checkout@v4
+      with:
+        path: texttest
+
+    - name: Cloning SelfTests
+      uses: actions/checkout@v4
+      with:
+        repository: texttest/selftest
+        path: tests/selftest
+
+    - name: Configuring Python
+      if: matrix.build_env != 'msys'
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+        architecture: x64
+
+    - uses: msys2/setup-msys2@v2
+      if: matrix.build_env == 'msys'
+      with:
+        update: true
+        install: >
+          git mingw-w64-x86_64-python-setuptools mingw-w64-x86_64-python-cx-freeze mingw-w64-x86_64-python-gobject
+          mingw-w64-x86_64-python-pytest mingw-w64-x86_64-python-pip mingw-w64-x86_64-python-matplotlib
+          mingw-w64-x86_64-python-certifi mingw-w64-x86_64-python-psutil mingw-w64-x86_64-python-yaml
+          mingw-w64-x86_64-gtksourceview4 mingw-w64-x86_64-gsettings-desktop-schemas diffutils glib2-devel intltool
+
+    - name: Preparing Virtual Environment (Linux) 
+      if: runner.os == 'Linux'
+      run: |
+        python -m venv venv
+        venv/bin/pip install capturemock $PWD/texttest
+
+    - name: Preparing Virtual Environment (Windows)
+      if: runner.os == 'Windows' && matrix.build_env != 'msys'
+      run: |
+        python -m venv venv
+        venv\Scripts\pip.exe install capturemock $PWD/texttest
+
+    - name: Preparing Virtual Environment (Msys2)
+      if: matrix.build_env == 'msys'
+      run: |
+        python -m venv venv
+        venv/Scripts/pip install capturemock $PWD/texttest
+
+    - name: Running Linux Tests
+      if: runner.os == 'Linux'
+      run: |
+        export TEXTTEST_HOME=$PWD/tests
+        venv/bin/texttest -c $PWD/venv -b ci -v ci
+
+    - name: Compressing Test Results (Linux)
+      if: failure() && runner.os == 'Linux'
+      run: |
+        zip -r ~/.texttest/ttt.zip ~/.texttest/tmp/
+
+    - name: Running Windows Tests
+      if: runner.os == 'Windows' && matrix.build_env != 'msys'
+      run: |
+        $env:TEXTTEST_HOME = "$pwd\tests"
+        venv\Scripts\texttest.exe -c $PWD\venv -b ci -v ci
+
+    - name: Running MSYS Tests
+      if: matrix.build_env == 'msys'
+      shell: msys2 {0}
+      run: |
+        export TEXTTEST_HOME=$PWD/tests
+        venv/Scripts/texttest.exe -c $PWD/venv -b ci -v ci
+
+    - name: Compressing Test Results (Windows)
+      if: failure() && runner.os == 'Windows'
+      run: |
+        Compress-Archive -Path $HOME/.texttest/tmp -DestinationPath $HOME/.texttest/ttt.zip
+        dir $HOME/.texttest/tmp
+
+    - name: Uploading test results
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: texttesttmp-${{ runner.os }}-Py${{ matrix.python }}
+        path: ~/.texttest/ttt.zip
+        if-no-files-found: warn

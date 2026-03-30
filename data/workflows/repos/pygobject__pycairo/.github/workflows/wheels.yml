@@ -1,0 +1,71 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+
+  build_sdist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev pkg-config
+          python -m pip install --upgrade build
+
+      - name: Build sdist
+        run: python -m build --sdist
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: sdist
+          path: ./dist/*.tar.gz
+
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }} (${{ matrix.platform_id }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform_id: win_amd64
+            arch: x64
+          - os: windows-2022
+            platform_id: win32
+            arch: x86
+          - os: windows-11-arm
+            platform_id: win_arm64
+            arch: arm64
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch : ${{ matrix.arch }}
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CFLAGS: "-DCAIRO_WIN32_STATIC_BUILD=1"
+          CIBW_BEFORE_BUILD: "python {package}/.ci/download-cairo-win32.py ${{ matrix.arch }}"
+          CIBW_BUILD: cp310-${{ matrix.platform_id }} cp311-${{ matrix.platform_id }} cp312-${{ matrix.platform_id }} cp313-${{ matrix.platform_id }} cp314-${{ matrix.platform_id }} cp314t-${{ matrix.platform_id }}
+          CIBW_SKIP: cp314t-win32
+          CIBW_TEST_REQUIRES: pytest==8.3.5
+          CIBW_TEST_COMMAND: bash {package}/.ci/test-wheels.sh {package}
+          CIBW_ENVIRONMENT_WINDOWS: PKG_CONFIG_PATH='${{ github.workspace }}/cairo-prebuild/lib/pkgconfig' PKG_CONFIG='${{ github.workspace }}/cairo-prebuild/bin/pkgconf.exe'
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: "wheel-${{ matrix.arch }}"
+          path: ./wheelhouse/*.whl

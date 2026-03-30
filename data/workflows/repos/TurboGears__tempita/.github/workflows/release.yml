@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    # Pattern matched against refs/tags
+    tags:        
+      - '*'
+
+jobs:
+  source_release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+      - name: Install build
+        run: python -m pip install build
+      - name: Make distribution
+        run: python -m build --sdist --wheel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifact-sdist
+          path: dist/*
+      - uses: softprops/action-gh-release@v1
+        name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/*
+      - name: Publish to PyPI
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine upload dist/*
+        env:
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,272 @@
+name: PyPi wheels
+
+on: [push, pull_request]
+
+
+jobs:
+  buildLinxaarch:
+    if: startsWith(github.ref, 'refs/tags/20')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        architecture: ['x64']
+        include:
+          # https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip
+          - os: ubuntu-22.04
+            linux_archs: "aarch64"
+    name: ${{ matrix.os }} ${{ matrix.architecture }} ${{ matrix.linux_archs }}
+    env:
+      CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: "delvewheel repair -w {dest_dir} {wheel}"
+      CIBW_BEFORE_ALL: "pip install numpy cython"
+      CIBW_SKIP: "pp* *38* *-musllinux_aarch64"
+      CIBW_ARCHS_LINUX: ${{ matrix.linux_archs }}
+      CIBW_TEST_SKIP: "*"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Add msbuild to PATH
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: delvewheel install
+        if: runner.os == 'Windows'
+        run: |
+          python -m pip install delvewheel cython
+
+      - name: Build wheels
+        uses: joerick/cibuildwheel@v3.3.0
+
+      - name: list output
+        run: ls ./wheelhouse/*.whl
+
+      - uses: actions/upload-artifact@v6
+        with:
+          path: ./wheelhouse/*.whl
+          name: wheels-${{ matrix.os }}-${{ matrix.architecture}}-${{ matrix.linux_archs}}
+
+  buildLinx686:
+    if: startsWith(github.ref, 'refs/tags/20') 
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        architecture: ['x64']
+        include:
+          # https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip
+          - os: ubuntu-22.04
+            linux_archs: "i686"
+            skip: "pp*"
+
+    name: ${{ matrix.os }} ${{ matrix.architecture }} ${{ matrix.linux_archs }}
+    env:
+      CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: "delvewheel repair -w {dest_dir} {wheel}"
+      CIBW_BEFORE_ALL: "pip install cython"
+      CIBW_SKIP: ${{ matrix.skip }}
+      CIBW_ARCHS_LINUX: ${{ matrix.linux_archs }}
+      CIBW_TEST_SKIP: "*"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Add msbuild to PATH
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: delvewheel install
+        if: runner.os == 'Windows'
+        run: |
+          python -m pip install delvewheel cython
+
+      - name: Build wheels
+        uses: joerick/cibuildwheel@v3.3.0
+
+      - name: list output
+        run: ls ./wheelhouse/*.whl
+
+      - uses: actions/upload-artifact@v6
+        with:
+          path: ./wheelhouse/*.whl
+          name: wheels-${{ matrix.os }}-${{ matrix.architecture}}-${{ matrix.linux_archs }}
+
+  buildLinx86x64:
+    if: startsWith(github.ref, 'refs/tags/20') 
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        architecture: ['x64']
+        include:
+          # https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip
+          - os: ubuntu-22.04
+            linux_archs: "x86_64"
+            skip: "pp*"
+
+    name: ${{ matrix.os }} ${{ matrix.architecture}}
+    env:
+      CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: "delvewheel repair -w {dest_dir} {wheel}"
+      CIBW_BEFORE_ALL: "pip install cython"
+      CIBW_SKIP: ${{ matrix.skip }}
+      CIBW_ARCHS_LINUX: ${{ matrix.linux_archs }}
+      CIBW_TEST_SKIP: "*"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Add msbuild to PATH
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: delvewheel install
+        if: runner.os == 'Windows'
+        run: |
+          python -m pip install delvewheel cython
+
+      - name: Build wheels
+        uses: joerick/cibuildwheel@v3.3.0
+
+      - name: list output
+        run: ls ./wheelhouse/*.whl
+
+      - uses: actions/upload-artifact@v6
+        with:
+          path: ./wheelhouse/*.whl
+          name: wheels-${{ matrix.os }}-${{ matrix.architecture}}-${{ matrix.linux_archs}}
+
+  buildWin:
+    if: startsWith(github.ref, 'refs/tags/20') 
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        architecture: ['x64']
+        include:
+          # https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip
+          - os: windows-latest
+            skip: ""
+
+    name: ${{ matrix.os }} ${{ matrix.architecture}}
+    env:
+      CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: "delvewheel repair -w {dest_dir} {wheel}"
+      CIBW_BEFORE_ALL: "pip install cython"
+      CIBW_SKIP: ${{ matrix.skip }}
+      CIBW_ARCHS_LINUX: ${{ matrix.linux_archs }}
+      CIBW_TEST_SKIP: "*"
+      CIBW_BEFORE_TEST: "git status"
+
+    steps:
+        - uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
+
+        - name: Setup Python
+          uses: actions/setup-python@v5
+          with:
+            python-version: "3.12"
+
+        - name: Set up QEMU
+          if: runner.os == 'Linux'
+          uses: docker/setup-qemu-action@v3
+          with:
+            platforms: all
+
+        - name: Add msbuild to PATH
+          if: runner.os == 'Windows'
+          uses: microsoft/setup-msbuild@v2
+
+        - name: delvewheel install
+          if: runner.os == 'Windows'
+          run: |
+            python -m pip install delvewheel cython
+
+        - name: Build wheels
+          uses: joerick/cibuildwheel@v3.3.0
+
+        - name: list output
+          run: ls ./wheelhouse/*.whl
+
+        - uses: actions/upload-artifact@v6
+          with:
+            path: ./wheelhouse/*.whl
+            name: wheels-${{ matrix.os }}-${{ matrix.architecture}}
+
+  buildMAC:
+    if: startsWith(github.ref, 'refs/tags/20') 
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+        architecture: ["universal2",  "arm64"]
+
+    name: ${{ matrix.os }} ${{ matrix.architecture}}
+    env:
+      CIBW_BEFORE_ALL: "pip install numpy cython"
+      CIBW_SKIP: "*38* *39*"
+      CIBW_ARCHS_MACOS: ${{ matrix.architecture }}
+      CIBW_TEST_SKIP: "*"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build wheels
+        uses: joerick/cibuildwheel@v3.3.0
+
+      - name: list output
+        run: ls ./wheelhouse/*.whl
+
+      - uses: actions/upload-artifact@v6
+        with:
+          path: ./wheelhouse/*.whl
+          name: wheels-${{ matrix.os }}-${{ matrix.architecture}}

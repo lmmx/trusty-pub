@@ -1,0 +1,130 @@
+name: Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+      - "maintain/*"
+    paths-ignore:
+      - "docs/**"
+      - "news/**"
+      - "*.md"
+  push:
+    branches:
+      - main
+      - dev
+      - "maintain/*"
+    paths-ignore:
+      - "docs/**"
+      - "news/**"
+      - "*.md"
+
+concurrency:
+  group: ${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  Testing:
+    env:
+      PYTHONDEVMODE: 1
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.9, "3.10", 3.11, 3.12, 3.13, 3.14]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        install-via: [pip]
+        include:
+          - python-version: 3.12
+            os: ubuntu-latest
+            install-via: script
+          - python-version: pypy-3.11
+            os: ubuntu-latest
+            install-via: pip
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Setup Python Versions
+        uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.9
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+          allow-prereleases: true
+        if: matrix.os != 'macos-latest'
+      - name: Setup Python Versions
+        uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+          allow-prereleases: true
+        if: matrix.os == 'macos-latest'
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          allow-prereleases: true
+
+      - name: Cache venv
+        uses: actions/cache@v5.0.3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('pdm.lock') }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7.3.1
+        with:
+          version: "latest"
+      - name: Install current PDM via pip
+        if: matrix.install-via == 'pip'
+        run: python -m pip install -U .
+      - name: Install current PDM via script
+        if: matrix.install-via == 'script'
+        run: |
+          shasum -a256 --check install-pdm.py.sha256
+          python install-pdm.py --version head
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install Dev Dependencies
+        run: |
+          pdm install -v -Gtest
+          pdm run pip install -U setuptools
+          pdm info
+      # - name: Setup tmate session
+      #   uses: mxschmitt/action-tmate@v3.22
+      - name: Run Tests
+        run: pdm run pytest -n auto --cov=pdm --cov-config=pyproject.toml --cov-report=xml tests
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5.5.2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          flags: unittests
+
+  Pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.x
+      - name: Install PDM
+        run: |
+          python -m pip install .
+          pdm self add pdm-packer
+      - name: Pack pdm
+        run: pdm pack
+
+      - name: Test zipapp
+        run: python pdm.pyz --version

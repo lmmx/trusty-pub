@@ -1,0 +1,52 @@
+name: pre-commit
+run-name: Run pre-commit tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.9.1
+        with:
+          pixi-version: v0.55.0
+          cache: true
+
+      - uses: pre-commit/action@v3.0.0
+
+  lint-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+        with:
+          python_version: "3.x"
+
+      # Current repo organization will not permit to set up pre-commit config for
+      # TS lint related packages due to absence of package.json in the top level
+      # repo. So we run lint step separately here
+      - name: Lint the extension
+        run: |
+          # Install JupyterLab in an isolated env to get jlpm
+          pip install jupyterlab>=4
+
+          # Install lint deps and lint extension
+          cd jupyterlab/
+          jlpm
+          jlpm run lint:check

@@ -1,0 +1,205 @@
+name: tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Setup python3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --group dev
+      - name: Run ruff check
+        run: uv run ruff check .
+        env:
+          FORCE_COLOR: 1
+      - name: Run ruff format check
+        run: uv run ruff format --check .
+        env:
+          FORCE_COLOR: 1
+
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Setup python3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --group dev
+      - run: uv run mypy
+        env:
+          FORCE_COLOR: 1
+
+  docs-examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Setup python3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --group dev
+      - run: uv run pytest -svv docs/source
+        env:
+          FORCE_COLOR: 1
+
+  tests-on-linux:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        python:
+          - '3.11'
+          - '3.12'
+          - '3.13'
+          - '3.14'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Setup python${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python }}"
+          allow-prereleases: true
+      - run: uv sync --group dev --group uvloop
+      - run: >-
+          uv run pytest \
+            -vv \
+            --cov=aiomisc \
+            --cov=aiomisc_log \
+            --cov=aiomisc_pytest \
+            --cov=aiomisc_worker \
+            --cov-report=term-missing \
+            --doctest-modules \
+            --aiomisc-test-timeout=120 \
+            tests
+        env:
+          FORCE_COLOR: 1
+      - run: uv run coveralls
+        env:
+          COVERALLS_PARALLEL: 'true'
+          COVERALLS_SERVICE_NAME: github
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  tests-on-macos:
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        python:
+          - '3.11'
+          - '3.12'
+          - '3.13'
+          - '3.14'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Setup python${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python }}"
+          allow-prereleases: true
+      - run: uv sync --group dev
+      - run: uv run pytest -vv --aiomisc-test-timeout=120 tests
+        env:
+          FORCE_COLOR: 1
+
+  tests-on-windows:
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        python:
+          - '3.11'
+          - '3.12'
+          - '3.13'
+          - '3.14'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Setup python${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python }}"
+          allow-prereleases: true
+      - run: uv sync --group dev
+      - run: uv run pytest -vv --aiomisc-test-timeout=120 tests
+        env:
+          FORCE_COLOR: 1
+
+  tests-rpc-example:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        example:
+          - 'rpc'
+          - 'rpc_udp'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Setup python3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --group dev --group uvloop
+      - run: uv pip install msgspec~=0.9.1
+      - run: >-
+          cd examples/${{ matrix.example }} &&
+          uv run pytest -v --doctest-modules tests.py
+        env:
+          FORCE_COLOR: 1
+
+  finish:
+    needs:
+       - tests-on-linux
+       - tests-on-macos
+       - tests-on-windows
+       - tests-rpc-example
+    runs-on: ubuntu-latest
+    steps:
+      - name: Coveralls Finished
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.github_token }}
+          parallel-finished: true

@@ -1,0 +1,728 @@
+# Based on: https://github.com/ClementTsang/bottom/blob/master/.github/workflows/deployment.yml
+
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+
+env:
+  CARGO_TERM_COLOR: always
+  WASM_PACK_VERSION: "v0.10.3"
+
+jobs:
+  publish-crate:
+    name: Publish Crate
+    runs-on: ubuntu-24.04
+    needs: publish-github-release
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup
+            target
+          key: ${{ runner.os }}-stable-min165
+
+      - name: Install Nightly Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          default: true
+          components: rustfmt, clippy, rust-src
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          default: true
+          components: rustfmt, clippy
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: ${{env.WASM_PACK_VERSION}}
+
+      - name: Get Version
+        run: echo GIT_VERSION="$(git describe --tags | sed 's/^v\(.*\)$/\1/')" >> $GITHUB_ENV
+      - name: Prepare Git
+        run: |
+          git config user.email "github@github.com"
+          git config user.name "Github Actions"
+          git checkout -b main
+          # Use throw-away branch so we don't push the changes to origin
+          git checkout -b deploy_branch
+      - name: Prepare Crates
+        run: |
+          # Update cargo version,
+          node ./.backstage/version.cjs
+          git add ./pagefind/Cargo.toml
+          git add ./pagefind_web/Cargo.toml
+          git add ./pagefind_ui/default/package.json
+          git add ./pagefind_ui/modular/package.json
+          git add ./pagefind_ui/component/package.json
+          # Commit changes so cargo doesn't complain about dirty repo
+          git commit -m "Deploy changes."
+
+      - name: Build Coupled JS
+        working-directory: ./pagefind_web_js
+        run: npm i && npm run build-coupled
+
+      - name: Build WASM
+        working-directory: ./pagefind_web
+        run: ./local_build.sh
+
+      - name: Build UI
+        working-directory: ./pagefind_ui/default
+        run: npm i && npm run build
+
+      - name: Build Modular UI
+        working-directory: ./pagefind_ui/modular
+        run: npm i && npm run build
+
+      - name: Build Component UI
+        working-directory: ./pagefind_ui/component
+        run: npm i && npm run build
+
+      - name: Build Playground
+        working-directory: ./pagefind_playground
+        run: npm i && npm run build
+
+      - name: Build
+        run: cargo build --release --verbose
+      - name: Publish
+        working-directory: ./pagefind
+        run: cargo publish --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-python-packages:
+    name: Publish python packages
+    runs-on: ubuntu-latest # ok since none of the scripts depend on version-specific features
+    defaults:
+      run:
+        shell: bash
+    needs: publish-github-release
+    permissions: # required for trusted publishing to pypi/test-pypi
+      id-token: write
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+      - name: Download CLI binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ./wrappers/python/vendor
+      - name: Set up python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        run: ./wrappers/python/scripts/ci/github/setup_uv.sh
+
+      - name: cache venv
+        uses: actions/cache@v4
+        with:
+          path: wrappers/python/.venv
+          key: ${{ runner.os }}-uv-3.12-${{ hashFiles('**/uv.lock') }}
+
+      - name: Install dev dependencies
+        run: ./wrappers/python/scripts/ci/github/install_dev_dependencies.sh
+
+      - name: activate venv
+        run: ./wrappers/python/scripts/ci/github/activate_venv.sh
+
+      - name: debug python paths
+        run: ./wrappers/python/scripts/ci/github/debug_python_paths.sh
+
+      - name: package binaries
+        working-directory: ./wrappers/python
+        run: | # should take ~30s; writes wheels to wrappers/python/dist
+          export PAGEFIND_PYTHON_LOG_LEVEL=DEBUG
+          python -m scripts.build.all_binary_only_wheels \
+            --tag "${{ github.ref_name }}" \
+            --bin-dir ./vendor
+      - name: package python api
+        working-directory: ./wrappers/python
+        run: | # writes stdist + wheel to wrappers/python/dist
+          export PAGEFIND_PYTHON_LOG_LEVEL=DEBUG
+          python -m scripts.build.api_package --tag "${{ github.ref_name }}"
+      - name: Archive dist
+        uses: actions/upload-artifact@v4
+        with:
+          path: wrappers/python/dist
+          name: python-packages
+          if-no-files-found: error
+
+      - name: Publish to pypi
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Note: this action requires test-pypi / pypi trusted publishing to be
+        # configured in the target repository. For instructions, see
+        # - https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-pypi
+        # - https://docs.pypi.org/trusted-publishers/
+        with: # see https://github.com/pypa/gh-action-pypi-publish/tree/release/v1/?tab=readme-ov-file#customizing-target-package-dists-directory
+          packages-dir: wrappers/python/dist
+          # repository-url: https://test.pypi.org/legacy/ # Use to publish test packages
+          verbose: true # can be commented out once the action is working as expected
+
+  publish-npm-package:
+    name: Publish NPM packages
+    runs-on: ubuntu-24.04
+    needs: publish-binary-npm-packages
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: wrappers/node/checksums
+          pattern: release-checksums-*
+          merge-multiple: true
+
+      - name: Get Version
+        run: echo GIT_VERSION="$(git describe --tags | sed 's/^v\(.*\)$/\1/')" >> $GITHUB_ENV
+      - name: Get Tag
+        run: echo GIT_TAG="$(node ./.backstage/get_tag.cjs)" >> $GITHUB_ENV
+
+      - name: Version optional dependencies
+        run: |
+          node ./.backstage/version_main_package.cjs
+
+      - name: Prepare wrapper package
+        working-directory: ./wrappers/node
+        run: |
+          npm version $GIT_VERSION
+      - name: Publish wrapper package
+        working-directory: ./wrappers/node
+        run: npm publish --tag $GIT_TAG
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Prepare default ui package
+        working-directory: ./pagefind_ui/default
+        run: |
+          npm version $GIT_VERSION
+      - name: Publish default ui package
+        working-directory: ./pagefind_ui/default
+        run: |
+          npm i
+          npm run build
+          npm publish --tag $GIT_TAG --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Prepare modular ui package
+        working-directory: ./pagefind_ui/modular
+        run: |
+          npm version $GIT_VERSION
+      - name: Publish modular ui package
+        working-directory: ./pagefind_ui/modular
+        run: |
+          npm i
+          npm run build
+          npm publish --tag $GIT_TAG --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Prepare component ui package
+        working-directory: ./pagefind_ui/component
+        run: |
+          npm version $GIT_VERSION
+      - name: Publish component ui package
+        working-directory: ./pagefind_ui/component
+        run: |
+          npm i
+          npm run build
+          npm publish --tag $GIT_TAG --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-binary-npm-packages:
+    name: Publish NPM binaries
+    runs-on: ubuntu-24.04
+    needs: publish-github-release
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            package: windows-x64
+            os: win32
+            cpu: x64
+          - target: x86_64-unknown-linux-musl
+            package: linux-x64
+            os: linux
+            cpu: x64
+          - target: aarch64-unknown-linux-musl
+            package: linux-arm64
+            os: linux
+            cpu: arm64
+          - target: x86_64-apple-darwin
+            package: darwin-x64
+            os: darwin
+            cpu: x64
+          
+          - target: x86_64-unknown-freebsd
+            package: freebsd-x64
+            os: freebsd
+            cpu: x64
+          - target: aarch64-apple-darwin
+            package: darwin-arm64
+            os: darwin
+            cpu: arm64
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: build-artifacts
+
+      - name: Get Version
+        run: echo GIT_VERSION="$(git describe --tags | sed 's/^v\(.*\)$/\1/')" >> $GITHUB_ENV
+      - name: Get Tag
+        run: echo GIT_TAG="$(node ./.backstage/get_tag.cjs)" >> $GITHUB_ENV
+
+      - name: Create Package
+        run: |
+          mkdir -p ${{ matrix.package }}/bin/
+          cd ${{ matrix.package }}
+          node ../.backstage/create_package.cjs ${{ matrix.os }} ${{ matrix.cpu }}
+          cp ../wrappers/node/.npmrc .
+      - name: Extract Binary
+        working-directory: build-artifacts
+        run: |
+          tar xzf pagefind_extended-v$GIT_VERSION-${{ matrix.target }}.tar.gz
+          rm *.tar.gz
+          mv * ../${{ matrix.package }}/bin/
+      - name: Prepare package
+        working-directory: ${{ matrix.package }}
+        run: |
+          npm version $GIT_VERSION
+      - name: Publish
+        working-directory: ${{ matrix.package }}
+        run: npm publish --tag $GIT_TAG --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-github-release:
+    name: GitHub Release
+    runs-on: ubuntu-24.04
+    needs: test-and-build
+    defaults:
+      run:
+        working-directory: ./
+    steps:
+      - name: Get Token
+        id: get_workflow_token
+        uses: peter-murray/workflow-application-token-action@v2
+        with:
+          application_id: ${{ secrets.PF_BOT_ID }}
+          application_private_key: ${{ secrets.PF_BOT_PEM }}
+
+      - name: Clone
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.get_workflow_token.outputs.token }}
+
+      - name: Swap to main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0 # Full fetch
+          token: ${{ steps.get_workflow_token.outputs.token }}
+
+      - name: Get Version
+        run: echo GIT_VERSION="$(git describe --tags | sed 's/^v\(.*\)$/\1/')" >> $GITHUB_ENV
+      - name: Get Tag
+        run: echo GIT_TAG="$(node ./.backstage/get_tag.cjs)" >> $GITHUB_ENV
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: build-artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Build CHANGELOG
+        if: env.GIT_TAG == 'latest'
+        run: |
+          node ./.backstage/changelog.cjs write
+          echo CHANGELOG=\"$(base64 -w 0 -i CHANGELOG.md)\" >> $GITHUB_ENV
+          echo SHA=\"$( git rev-parse main:CHANGELOG.md )\" >> $GITHUB_ENV
+      - name: Build CHANGELOG
+        if: env.GIT_TAG == 'beta' || env.GIT_TAG == 'rc'
+        run: |
+          node ./.backstage/changelog.cjs write
+      - name: Build CHANGELOG
+        if: env.GIT_TAG != 'latest' && env.GIT_TAG != 'beta' && env.GIT_TAG != 'rc'
+        run: |
+          echo "## Prerelease" > RELEASE.md
+          node ./.backstage/changelog.cjs write || true
+
+      - name: Commit new CHANGELOG
+        uses: octokit/request-action@v2.x
+        if: env.GIT_TAG == 'latest'
+        id: push_changes
+        with:
+          route: PUT /repos/{owner}/{repo}/contents/CHANGELOG.md
+          owner: pagefind
+          repo: pagefind
+          branch: main
+          message: Changelog for ${{ env.GIT_VERSION }}
+          sha: ${{ env.SHA }}
+          content: ${{ env.CHANGELOG }}
+        env:
+          GITHUB_TOKEN: ${{ steps.get_workflow_token.outputs.token }}
+      - name: Release documentation branch
+        uses: octokit/request-action@v2.x
+        if: env.GIT_TAG == 'latest'
+        id: merge_docs
+        with:
+          route: POST /repos/{owner}/{repo}/merges
+          owner: pagefind
+          repo: pagefind
+          base: production-docs
+          head: main
+          commit_message: Release documentation for ${{ env.GIT_VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ steps.get_workflow_token.outputs.token }}
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && env.GIT_TAG == 'latest'
+        with:
+          repository: pagefind/pagefind
+          prerelease: false
+          body_path: RELEASE.md
+          discussion_category_name: Announcements
+          files: |
+            build-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ steps.get_workflow_token.outputs.token }}
+
+      - name: Prerelease
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && (env.GIT_TAG == 'beta' || env.GIT_TAG == 'rc')
+        with:
+          repository: pagefind/pagefind
+          prerelease: true
+          body_path: RELEASE.md
+          discussion_category_name: Announcements
+          files: |
+            build-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ steps.get_workflow_token.outputs.token }}
+
+      - name: Test Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && env.GIT_TAG != 'latest' && env.GIT_TAG != 'beta' && env.GIT_TAG != 'rc'
+        with:
+          repository: pagefind/pagefind-beta
+          prerelease: true
+          body_path: RELEASE.md
+          discussion_category_name: Announcements
+          files: |
+            build-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ steps.get_workflow_token.outputs.token }}
+
+  test-and-build:
+    name: Build
+    runs-on: ${{matrix.os}}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      matrix:
+        include:
+          - build: windows
+            os: windows-latest
+            rust: stable
+            target: x86_64-pc-windows-msvc
+            cross: false
+            run_tests: true
+          - build: linux
+            os: ubuntu-latest
+            rust: stable
+            target: x86_64-unknown-linux-musl
+            cross: false
+            run_tests: true
+          - build: linux
+            os: ubuntu-latest
+            rust: stable
+            target: aarch64-unknown-linux-musl
+            cross: false
+            run_tests: false
+          - build: macos
+            os: macos-latest
+            rust: stable
+            target: x86_64-apple-darwin
+            cross: false
+            run_tests: true
+          - build: macos-m1
+            os: macos-latest
+            rust: stable
+            target: aarch64-apple-darwin
+            cross: false
+            run_tests: false
+          
+          - build: freebsd
+            os: ubuntu-latest
+            rust: stable
+            target: x86_64-unknown-freebsd
+            cross: true
+            run_tests: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup
+            target
+          key: ${{ runner.os }}-${{ matrix.rust }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # From https://github.com/Emoun/duplicate/blob/master/.github/workflows/rust.yml
+      - name: Get Version
+        run: echo GIT_VERSION="$(git describe --tags | sed 's/^v\(.*\)$/\1/')" >> $GITHUB_ENV
+
+      - name: Get Tag
+        run: echo GIT_TAG="$(node ./.backstage/get_tag.cjs)" >> $GITHUB_ENV
+
+      - name: Verify Changelog
+        if: env.GIT_TAG == 'latest' || env.GIT_TAG == 'beta' || env.GIT_TAG == 'rc'
+        run: |
+          node ./.backstage/changelog.cjs
+
+      - name: Install Linker
+        if: matrix.cross
+        run: |
+          sudo apt update
+          sudo apt install ${{ matrix.linker }}
+      - name: Install MUSL Tooling
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update -y
+          sudo apt install -y musl-tools musl-dev
+      - name: Install aarch64 Tooling
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          sudo apt update -y
+          sudo apt install -y clang gcc-aarch64-linux-gnu
+          echo "TARGET_CC=clang" >> $GITHUB_ENV
+          echo "CFLAGS_aarch64_unknown_linux_musl=--sysroot=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=/usr/aarch64-linux-gnu/bin/ld" >> $GITHUB_ENV
+
+      - name: Install Nightly Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: ${{ matrix.target }}
+          override: true
+          default: true
+          components: rustfmt, clippy, rust-src
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          override: true
+          default: true
+          components: rustfmt, clippy
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: ${{env.WASM_PACK_VERSION}}
+      
+      - name: Install cross (FreeBSD binary build)
+        if: matrix.cross == true
+        run: cargo install cross
+
+      - name: Set up python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare Git
+        run: |
+          git config user.email "github@github.com"
+          git config user.name "Github Actions"
+          git checkout -b main
+          # Use throw-away branch so we don't push the changes to origin
+          git checkout -b deploy_branch
+      - name: Prepare Crates
+        run: |
+          # Update cargo version,
+          node ./.backstage/version.cjs
+          git add ./pagefind/Cargo.toml
+          git add ./pagefind_web/Cargo.toml
+          git add ./pagefind_ui/default/package.json
+          git add ./pagefind_ui/modular/package.json
+          git add ./pagefind_ui/component/package.json
+          # Commit changes so cargo doesn't complain about dirty repo
+          git commit -m "Deploy changes."
+
+      - name: Build Coupled JS
+        working-directory: ./pagefind_web_js
+        run: npm i && npm run build-coupled
+
+      - name: Build WASM
+        working-directory: ./pagefind_web
+        run: ./local_build.sh
+
+      - name: Build UI
+        working-directory: ./pagefind_ui/default
+        run: npm i && npm run build
+
+      - name: Build Modular UI
+        working-directory: ./pagefind_ui/modular
+        run: npm i && npm run build
+
+      - name: Build Component UI
+        working-directory: ./pagefind_ui/component
+        run: npm i && npm run build
+
+      - name: Build Playground
+        working-directory: ./pagefind_playground
+        run: npm i && npm run build
+
+      - name: Test Web
+        if: matrix.run_tests == true
+        working-directory: ./pagefind_web
+        run: cargo test --release
+
+      - name: Build
+        working-directory: ./pagefind
+        if: matrix.build!= 'freebsd'
+        run: cargo build --release --target ${{ matrix.target }} --features extended
+      - name: Build FreeBSD Binary
+        working-directory: ./pagefind
+        if: matrix.build == 'freebsd'
+        run: cross build --release --target ${{ matrix.target }} --features extended
+      - name: Test Lib
+        if: matrix.run_tests == true
+        working-directory: ./pagefind
+        run: cargo test --release --target ${{ matrix.target }} --features extended
+
+      - name: Test CLI
+        if: matrix.run_tests == true
+        run: npx -y toolproof@latest -s -c 1 --timeout 45 --placeholders pagefind_mode="${{ matrix.target }}/release"
+
+      - name: Move extended binary aside
+        run: |
+          cp target/${{ matrix.target }}/release/pagefind target/${{ matrix.target }}/release/pagefind_extended
+
+
+      - name: Build Non-Extended
+        working-directory: ./pagefind
+        if: matrix.build!= 'freebsd'
+        run: cargo build --release --target ${{ matrix.target }}
+      
+      - name: Build Non-Extended (FreeBSD)
+        if: matrix.build == 'freebsd'
+        working-directory: ./pagefind
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Create Standard Release
+        run: |
+          EXEC_NAME="pagefind"
+          ASSET_PATH="$EXEC_NAME-v$GIT_VERSION-${{ matrix.target }}.tar.gz"
+          CHECKSUM_PATH="$ASSET_PATH.sha256"
+
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            EXEC_NAME="pagefind.exe"
+          fi
+
+          tar czf $ASSET_PATH -C target/${{ matrix.target }}/release $EXEC_NAME
+
+          if command -v gtar &> /dev/null; then
+            echo "Using gtar"
+            gtar czf $ASSET_PATH -C target/${{ matrix.target }}/release $EXEC_NAME
+          else
+            echo "Using system tar"
+            tar czf $ASSET_PATH -C target/${{ matrix.target }}/release $EXEC_NAME
+          fi
+
+          case $RUNNER_OS in
+              Windows)
+                  sha256sum $ASSET_PATH > $CHECKSUM_PATH
+                  ;;
+              Linux)
+                  sha256sum $ASSET_PATH > $CHECKSUM_PATH
+                  ;;
+              macOS)
+                  shasum -a 256 $ASSET_PATH > $CHECKSUM_PATH
+                  ;;
+          esac
+
+          echo "ASSET_PATH=$ASSET_PATH" >> $GITHUB_ENV
+          echo "CHECKSUM_PATH=$CHECKSUM_PATH" >> $GITHUB_ENV
+
+      - name: Create Extended Release
+        run: |
+          EXEC_NAME="pagefind_extended"
+          ASSET_PATH="$EXEC_NAME-v$GIT_VERSION-${{ matrix.target }}.tar.gz"
+          CHECKSUM_PATH="$ASSET_PATH.sha256"
+
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            EXEC_NAME="pagefind_extended.exe"
+          fi
+
+          if command -v gtar &> /dev/null; then
+            echo "Using gtar"
+            gtar czf $ASSET_PATH -C target/${{ matrix.target }}/release $EXEC_NAME
+          else
+            echo "Using system tar"
+            tar czf $ASSET_PATH -C target/${{ matrix.target }}/release $EXEC_NAME
+          fi
+
+          case $RUNNER_OS in
+              Windows)
+                  sha256sum $ASSET_PATH > $CHECKSUM_PATH
+                  ;;
+              Linux)
+                  sha256sum $ASSET_PATH > $CHECKSUM_PATH
+                  ;;
+              macOS)
+                  shasum -a 256 $ASSET_PATH > $CHECKSUM_PATH
+                  ;;
+          esac
+
+          echo "EXTENDED_ASSET_PATH=$ASSET_PATH" >> $GITHUB_ENV
+          echo "EXTENDED_CHECKSUM_PATH=$CHECKSUM_PATH" >> $GITHUB_ENV
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ${{ env.ASSET_PATH }}
+            ${{ env.CHECKSUM_PATH }}
+            ${{ env.EXTENDED_ASSET_PATH }}
+            ${{ env.EXTENDED_CHECKSUM_PATH }}
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums-${{ matrix.target }}
+          path: |
+            ${{ env.CHECKSUM_PATH }}
+            ${{ env.EXTENDED_CHECKSUM_PATH }}

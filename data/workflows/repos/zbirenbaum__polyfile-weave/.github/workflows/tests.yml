@@ -1,0 +1,53 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest] # windows-latest, macos-latest,
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4.2.2
+      with:
+        submodules: recursive
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install setuptools
+        pip install .[dev]
+    - name: Scan with pip-audit (Python 3.10+)
+      if: matrix.python-version != '3.9'
+      uses: trailofbits/gh-action-pip-audit@v1.1.0
+    - name: Scan with pip-audit (Python 3.9 - ignore filelock vulns)
+      if: matrix.python-version == '3.9'
+      uses: trailofbits/gh-action-pip-audit@v1.1.0
+      with:
+        ignore-vulns: |
+          GHSA-w853-jp5j-5j7f
+          GHSA-qmgc-5h2g-mvrw
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 polyfile polymerge tests --exclude polyfile/kaitai/parsers --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 polyfile polymerge tests --exclude polyfile/kaitai/parsers --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Test with pytest
+      run: |
+        pytest tests

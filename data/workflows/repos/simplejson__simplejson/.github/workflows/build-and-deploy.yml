@@ -1,0 +1,155 @@
+name: Build and upload to PyPI
+
+# Build on every branch push, tag push, and pull request change:
+on: [push, pull_request]
+# Alternatively, to publish when a (published) GitHub Release is created, use the following:
+# on:
+#   push:
+#   pull_request:
+#   release:
+#     types:
+#       - published
+
+jobs:
+  test_pure_python:
+    name: Tests without speedup on ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - 'ubuntu-latest'
+        python:
+          - 3.13
+          - pypy-3.11
+          - graalpy-25.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m simplejson.tests._cibw_runner .
+
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - 'ubuntu-latest'
+        - 'windows-latest'
+        - 'macos-latest'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.20.0
+        env:
+          CIBW_TEST_COMMAND: >-
+            python -m simplejson.tests._cibw_runner "{project}"
+          CIBW_SKIP: "pp*"
+          CIBW_ARCHS_WINDOWS: "auto"
+          CIBW_ARCHS_LINUX: "auto aarch64 ppc64le"
+          CIBW_ARCHS_MACOS: "x86_64 universal2 arm64"
+
+      - name: Build Python 2.7 wheels
+        if: runner.os == 'Linux'
+        uses: pypa/cibuildwheel@v1.12.0
+        env:
+          CIBW_TEST_COMMAND: >-
+            python -m simplejson.tests._cibw_runner "{project}"
+          CIBW_BUILD: "cp27-*"
+          CIBW_SKIP: "pp*"
+          CIBW_ARCHS_LINUX: "auto aarch64"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        name: Install Python
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip setuptools wheel
+
+      - name: Build sdist
+        run: python setup.py sdist
+
+      - name: Build wheel
+        run: DISABLE_SPEEDUPS=1 python setup.py bdist_wheel
+
+      - name: Test sdist
+        run: |
+          mkdir tmp
+          cd tmp
+          tar zxf ../dist/simplejson-*.tar.gz
+          cd simplejson-*
+          REQUIRE_SPEEDUPS=1 python setup.py build build_ext -i test
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')
+        with:
+          name: sdist
+          path: |
+            dist/*.tar.gz
+            dist/*-none-any.whl
+
+  upload_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://pypi.org/p/simplejson/
+    permissions:
+      id-token: write
+    # upload to PyPI on every tag starting with 'v'
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v')
+    # alternatively, to publish when a GitHub Release is created, use the following rule:
+    # if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  upload_pypi_test:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: "testpypi"
+      url: https://test.pypi.org/p/simplejson/
+    permissions:
+      id-token: write
+    # upload to test PyPI on every tag starting with 'test-v'
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/test-v')
+    # alternatively, to publish when a GitHub Release is created, use the following rule:
+    # if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

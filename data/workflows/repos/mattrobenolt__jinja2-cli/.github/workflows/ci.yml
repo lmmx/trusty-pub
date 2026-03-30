@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      UV_MANAGED_PYTHON: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: extractions/setup-just@v3
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache-python: true
+      - name: Install bats
+        uses: bats-core/bats-action@3.0.1
+        id: setup-bats
+      - name: Install dependencies
+        run: just sync
+      - name: Run tests
+        run: just test
+      - name: Run bats
+        run: just bats
+        env:
+          BATS_LIB_PATH: ${{ steps.setup-bats.outputs.lib-path }}
+      - name: Lint
+        run: just lint

@@ -1,0 +1,57 @@
+name: "🧪 Test"
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "main"
+      - "releases"
+
+jobs:
+  test:
+    name: "${{ matrix.name }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Linux"
+            runner: "ubuntu-latest"
+            cpythons:
+              - "3.10"
+              - "3.11"
+              - "3.12"
+              - "3.13"
+              - "3.14"
+            cache-paths:
+              - ".mypy_cache/"
+            cache-key-hash-files:
+              - "docs/conf.py"
+              - "pyproject.toml"
+              - "requirements/*/requirements.txt"
+
+            # macOS and Windows tests target only the upper and lower CPython versions.
+          - name: "macOS"
+            runner: "macos-latest"
+            cpythons:
+              - "3.10"
+              - "3.14"
+            tox-factors:
+              - "chardet"
+            cache-key-hash-files:
+              - "pyproject.toml"
+              - "requirements/*/requirements.txt"
+
+          - name: "Windows"
+            runner: "windows-latest"
+            cpythons:
+              - "3.10"
+              - "3.14"
+            tox-factors:
+              - "chardet"
+            cache-key-hash-files:
+              - "pyproject.toml"
+              - "requirements/*/requirements.txt"
+
+    uses: "kurtmckee/github-workflows/.github/workflows/tox.yaml@19c3c069be51d3bfc3ac73e85e81b2b1646e91a8" # v1.7
+    with:
+      config: "${{ toJSON(matrix) }}"

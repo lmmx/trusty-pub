@@ -1,0 +1,193 @@
+name: "Tests"
+on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - CHANGELOG.md
+      - README.md
+      - LICENSE
+      - LICENSE.txt
+      - release-process.rst
+      - .gitignore
+      - .coveragerc
+      - .github/workflows/deploy.yml
+      - .github/workflows/codeql-analysis.yml
+      - .github/workflows/FUNDING.yml
+      - setup.cfg
+      - setup.py
+      - webdriver_manager/__init__.py
+
+  pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - CHANGELOG.md
+      - README.md
+      - LICENSE
+      - LICENSE.txt
+      - release-process.rst
+      - .gitignore
+      - .coveragerc
+      - .github/workflows/deploy.yml
+      - .github/workflows/codeql-analysis.yml
+      - .github/workflows/FUNDING.yml
+      - setup.cfg
+      - setup.py
+      - webdriver_manager/__init__.py
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11']
+        selenium-version: ['4.10.0']
+        os: [ windows-latest ]
+        wdm-log: ['']
+        include:
+          - python-version: '3.11'
+            selenium-version: '4.10.0'
+            os: ubuntu-latest
+          - python-version: '3.11'
+            selenium-version: '4.10.0'
+            os: macos-latest
+            wdm-log: '0'
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install browsers on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install software-properties-common apt-transport-https wget curl
+          
+          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i google-chrome-stable_current_amd64.deb
+          
+          wget -q https://packages.microsoft.com/keys/microsoft.asc -O- | sudo apt-key add -
+          sudo add-apt-repository "deb [arch=amd64] https://packages.microsoft.com/repos/edge stable main"
+          sudo apt-get update && sudo apt install microsoft-edge-beta
+          
+          wget -qO- https://deb.opera.com/archive.key | sudo apt-key add -
+          sudo add-apt-repository "deb [arch=i386,amd64] https://deb.opera.com/opera-stable/ stable non-free"
+          sudo apt-get update
+          sudo apt-get -y --no-install-recommends install opera-stable
+          
+          sudo apt-get install chromium-browser
+          
+          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main"|sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+          sudo apt update
+          sudo apt install brave-browser
+
+      -  name: Check browser versions on Linux
+         if: runner.os == 'Linux'
+         run: |
+          google-chrome --version
+          microsoft-edge --version
+          opera --version
+          chromium --version
+          brave-browser --version
+
+      - name: Install browsers on Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install chromium opera brave googlechrome --no-progress -y --force
+
+      - name: Install browsers on MacOS
+        if: startsWith(runner.os, 'macOS')
+        run: |
+          brew tap domt4/chromium
+          brew update
+          brew install --cask mac-chromium opera brave-browser
+          brew upgrade google-chrome
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install -U pip wheel
+          pip install pipenv
+          pipenv install --dev --skip-lock --python=${{ matrix.python-version }}
+          pipenv install selenium==${{ matrix.selenium-version }}
+
+      - name: Run tests on Linux (with xvfb)
+        if: runner.os == 'Linux'
+        env:
+          WDM_LOG: ${{ matrix.wdm-log }}
+        uses: coactions/setup-xvfb@v1
+        with:
+          run: |
+            pipenv run py.test -sv --cov-config .coveragerc --cov-report xml --cov-report term:skip-covered --cov=webdriver_manager --tb=short tests/
+
+      - name: Run tests on Windows (without xvfb)
+        if: runner.os == 'Windows'
+        run: |
+          pipenv run py.test -sv --cov-config .coveragerc --cov-report xml --cov-report term:skip-covered --cov=webdriver_manager --tb=short tests/
+
+      - name: Run tests on MacOS (without xvfb)
+        if: startsWith(runner.os, 'macOS')
+        run: |
+          pipenv run py.test -sv --cov-config .coveragerc --cov-report xml --cov-report term:skip-covered --cov=webdriver_manager --tb=short tests/
+
+      - name: Codecov Upload
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          file: ./coverage.xml
+          name: ${{ matrix.os }}-py${{ matrix.python-version }}
+
+  test-negative:
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.7' ]
+        selenium-version: [ '3.141.0' ]
+        os: [ ubuntu-latest ]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Uninstall browsers
+        run: |
+          sudo apt remove firefox google-chrome-stable -y
+          sudo apt autoremove && sudo apt autoclean -y
+          sudo apt clean
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install -U pip wheel
+          pip install pipenv
+          pipenv install --dev --skip-lock --python=${{ matrix.python-version }}
+          pipenv install selenium==${{ matrix.selenium-version }}
+
+      - name: Run tests on Linux (with xvfb)
+        if: runner.os == 'Linux'
+        uses: coactions/setup-xvfb@v1
+        with:
+          run: |
+            pipenv run py.test -sv --cov-config .coveragerc --cov-report xml --cov-report term:skip-covered --cov=webdriver_manager --tb=short tests_negative/
+
+      - name: Codecov Upload
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          file: ./coverage.xml
+          name: ${{ matrix.os }}-py${{ matrix.python-version }}

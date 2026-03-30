@@ -1,0 +1,163 @@
+name: Rust library & CLI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check_format:
+    name: Run cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check format
+        run: cargo fmt -- --check
+
+  build_workspace:
+    name: Check and build entire workspace
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        lfs: true
+    - name: Update rust toolchain
+      run: |
+        rustup update stable
+        rustup default stable
+        rustup --version
+    - name: Cache rust dependencies
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-dev-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Check (default members)
+      run: cargo check
+    - name: Check with examples
+      run: cargo check --examples
+    - name: Check workspace (including pySplashsurf)
+      run: cargo check --workspace --all-targets
+    - name: Build (excluding pySplashsurf)
+      run: cargo build
+    - name: Run tests
+      run: cargo test
+
+  build_release:
+    name: Build & test release mode (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    needs: build_workspace
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+      - name: Update rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup --version
+      - name: Cache rust dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.runner }}-release-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build (release)
+        run: cargo build --release
+      - name: Test (release)
+        run: cargo test --release
+
+  build_lib_all_features:
+    name: Build splashsurf_lib with all features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+      - name: Update rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup --version
+      - name: Cache rust dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-lib-all-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build
+        run: |
+          cargo build --package splashsurf_lib --all-targets --all-features
+      - name: Run tests
+        run: |
+          cargo test --package splashsurf_lib --all-features
+      - name: Run tests release mode
+        run: |
+          cargo test --package splashsurf_lib --release --all-features
+
+  build_lib_no_default_features:
+    name: Build splashsurf_lib with no default features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+      - name: Update rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup --version
+      - name: Cache rust dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-lib-no-default-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build
+        run: |
+          cargo build --package splashsurf_lib --all-targets --no-default-features
+      - name: Run tests
+        run: |
+          cargo test --package splashsurf_lib --no-default-features
+
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+    needs: [check_format, build_workspace, build_lib_all_features, build_lib_no_default_features, build_release]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Update rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup --version
+      - name: Publish splashsurf_lib
+        run: |
+          cargo publish --package splashsurf_lib
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Publish splashsurf
+        run: |
+          cargo publish --package splashsurf
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

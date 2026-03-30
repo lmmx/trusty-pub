@@ -1,0 +1,138 @@
+name: Build Linux
+
+on:
+  workflow_call:
+    inputs:
+      edgar_ref:
+        description: 'Arelle/EDGAR branch, tag or SHA to checkout (blank for default)'
+        required: false
+        type: string
+      openssl_version:
+        default: '3.6.0'
+        description: 'OpenSSL version to use'
+        required: false
+        type: string
+      python_version:
+        default: '3.14.2'
+        description: 'Python version to use'
+        required: false
+        type: string
+      xule_ref:
+        description: 'xbrlus/xule branch, tag or SHA to checkout (blank for default)'
+        required: false
+        type: string
+    outputs:
+      artifact_versioned_name:
+        description: 'The file name of the tarball including the version, e.g. "arelle-ubuntu-1.0.0.tgz".'
+        value: ${{ jobs.build-linux.outputs.artifact_versioned_name }}
+      uploaded_artifact_name:
+        description: 'The name of the GitHub Actions artifact for the tarball.'
+        value: ${{ jobs.build-linux.outputs.uploaded_artifact_name }}
+  workflow_dispatch:
+    inputs:
+      edgar_ref:
+        description: 'Arelle/EDGAR branch, tag or SHA to checkout (blank for default)'
+        required: false
+        type: string
+      openssl_version:
+        default: '3.6.0'
+        description: 'OpenSSL version to use'
+        required: true
+        type: string
+      python_version:
+        default: '3.14.2'
+        description: 'Python version to use'
+        required: true
+        type: string
+      xule_ref:
+        description: 'xbrlus/xule branch, tag or SHA to checkout (blank for default)'
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact_versioned_name: ${{ steps.define-artifact-names.outputs.artifact_versioned_name }}
+      uploaded_artifact_name: ${{ steps.define-artifact-names.outputs.uploaded_artifact_name }}
+
+    steps:
+      - name: Checkout arelle
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Checkout EDGAR
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: Arelle/EDGAR
+          path: arelle/plugin/EDGAR
+          ref: ${{ inputs.edgar_ref }}
+      - name: Cleanup EDGAR
+        run: rm -rf arelle/plugin/EDGAR/.git
+      - name: Checkout XULE
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: xbrlus/xule
+          path: xule
+          ref: ${{ inputs.xule_ref }}
+      - name: Move XULE plugins
+        run: |
+          mv xule/plugin/validate/* arelle/plugin/validate/
+          rm -rf xule/plugin/validate
+          mv xule/plugin/* arelle/plugin/
+      - name: Cleanup XULE
+        run: rm -rf xule
+      - name: Docker setup buildx
+        uses: docker/setup-buildx-action@v4.0.0
+      - name: Docker build
+        uses: docker/build-push-action@v7.0.0
+        with:
+          build-args: |
+            "OPENSSL_VERSION=${{ inputs.openssl_version }}"
+            "PYTHON_VERSION=${{ inputs.python_version }}"
+          context: .
+          file: docker/ubuntu.Dockerfile
+          load: true
+          tags: arelle:arelle
+      - name: Docker copy build artifact
+        run: |
+          docker create --name arelle arelle:arelle
+          docker cp arelle:/build/dist/ dist/
+          docker rm -v arelle
+      - name: Define artifact names
+        id: define-artifact-names
+        run: |
+          [[ $(echo dist/*.tgz) =~ -([0-9]+\.[0-9]+\.[0-9]+)\.tgz$ ]] && echo "artifact_versioned_name=arelle-ubuntu-${BASH_REMATCH[1]}.tgz" >> $GITHUB_OUTPUT
+          echo "BUILD_ARTIFACT_PATH=$(echo dist/*.tgz)" >> $GITHUB_ENV
+          echo "uploaded_artifact_name=ubuntu distribution" >> $GITHUB_OUTPUT
+      - name: Capture build env
+        run: |
+          echo "ARTIFACT_NAME=arelle-ubuntu.tgz" >> $GITHUB_ENV
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: ${{ steps.define-artifact-names.outputs.uploaded_artifact_name }}
+          if-no-files-found: error
+          path: ${{ env.BUILD_ARTIFACT_PATH }}
+      - name: "[Test] Set up Python ${{ inputs.python_version }}"
+        uses: actions/setup-python@v6.2.0
+        with:
+          cache: 'pip'
+          check-latest: true
+          python-version: ${{ inputs.python_version }}
+      - name: "[Test] Test build artifact"
+        run : |
+          mkdir .test_build
+          tar -xvzf "${{ env.BUILD_ARTIFACT_PATH }}" -C .test_build
+          pip install -r requirements-test.txt
+          pytest -s --disable-warnings --all-frozen-builds --download-cache --offline --arelle=".test_build/arelleCmdLine" tests/integration_tests/scripts/test_scripts.py
+      - name: "[Test] Upload test artifacts"
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: 'linux test logs'
+          if-no-files-found: error
+          include-hidden-files: true
+          path: '.test/**/*.logfile.xml'

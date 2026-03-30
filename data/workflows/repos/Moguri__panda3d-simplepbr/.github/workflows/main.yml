@@ -1,0 +1,38 @@
+name: Pipeline
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+    - name: Setup xvfb
+      run: |
+        sudo apt-get install -y xvfb
+        Xvfb :1 -screen 0 1024x1024x16 &
+    - name: Install Dependencies
+      run: uv sync
+    - name: Run Tests
+      env:
+        DISPLAY: :1
+      run: |
+        uv run ruff check
+        uv run pytest
+    - name: Build package
+      run: |
+        uv build
+    - name: Publish package
+      if: startsWith(github.event.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.pypi_password }}

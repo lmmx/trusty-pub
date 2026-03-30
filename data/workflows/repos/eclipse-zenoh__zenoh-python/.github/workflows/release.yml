@@ -1,0 +1,255 @@
+name: Release
+
+on:
+  schedule:
+    - cron: "0 1 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      live-run:
+        type: boolean
+        description: Live-run
+        required: false
+      version:
+        type: string
+        description: Release number
+        required: false
+      zenoh-version:
+        type: string
+        description: Release number of Zenoh
+        required: false
+      branch:
+        type: string
+        description: Release branch
+        required: false
+
+jobs:
+  tag:
+    name: Branch, Bump & tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.create-release-branch.outputs.version }}
+      branch: ${{ steps.create-release-branch.outputs.branch }}
+    steps:
+      - id: create-release-branch
+        uses: eclipse-zenoh/ci/create-release-branch@main
+        with:
+          repo: ${{ github.repository }}
+          live-run: ${{ inputs.live-run || false }}
+          version: ${{ inputs.version }}
+          branch: ${{ inputs.branch }}
+          github-token: ${{ secrets.BOT_TOKEN_WORKFLOW }}
+
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.create-release-branch.outputs.branch }}
+
+      - name: Bump and tag project
+        run: bash ci/scripts/bump-and-tag.bash
+        env:
+          LIVE_RUN: ${{ inputs.live-run || false }}
+          VERSION: ${{ steps.create-release-branch.outputs.version }}
+          BUMP_DEPS_VERSION: ${{ inputs.zenoh-version }}
+          BUMP_DEPS_PATTERN: ${{ inputs.zenoh-version && 'zenoh.*' || '' }}
+          BUMP_DEPS_BRANCH: ${{ inputs.zenoh-version && format('release/{0}', inputs.zenoh-version) || '' }}
+          GIT_USER_NAME: eclipse-zenoh-bot
+          GIT_USER_EMAIL: eclipse-zenoh-bot@users.noreply.github.com
+
+  build-macos:
+    needs: tag
+    runs-on: macos-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.branch }}
+
+      - name: Install Rust toolchain
+        run: |
+          rustup set profile minimal
+          rustup show
+
+      - name: Build wheels - x86_64
+        uses: messense/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist --sdist # Note: this step builds also the sources distrib
+
+      - name: Build wheels - universal2
+        uses: messense/maturin-action@v1
+        with:
+          target: universal2-apple-darwin
+          args: --release --out dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos
+          path: dist
+
+  build-windows:
+    needs: tag
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x64]
+        # target: [x64, x86]   NOTE: x86 deactivated because of strange error: failed to run custom build command for `pyo3-ffi v0.17.1`
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.branch }}
+
+      - name: Install Rust toolchain
+        run: |
+          rustup set profile minimal
+          rustup show
+
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-${{ matrix.target }}
+          path: dist
+
+  build-linux:
+    needs: tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, i686, armv7]
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.branch }}
+
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: --release --out dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: dist
+
+  build-linux-aarch64:
+    needs: tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.branch }}
+
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: aarch64
+          # NOTE(fuzzypixelz): We manually specify a more recent manylinux platform tag for aarch64:
+          # - zenoh-link-quic indirectly depends on ring 0.17 through rustls-webpki.
+          # - ring 0.17 depends on a version of BoringSSL that requires GCC/Clang to provide __ARM_ARCH
+          # - When setting the manylinux tag to 'auto', messense/maturin-action@v1 uses manylinux2014 to compile for for aarch64
+          # - the GCC included in the manylinux2014 docker image doesn't provide __ARM_ARCH
+          # See: https://github.com/briansmith/ring/issues/1728
+          manylinux: manylinux_2_28
+          args: --release --out dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-aarch64
+          path: dist
+
+  build-linux-armv6:
+    needs: tag
+    runs-on: macos-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.branch }}
+
+      - name: Install Rust toolchain
+        run: |
+          rustup set profile minimal
+          rustup target add arm-unknown-linux-gnueabihf
+
+      - name: Install cross toolchain
+        run: |
+          brew tap messense/macos-cross-toolchains
+          brew install arm-unknown-linux-gnueabihf
+
+          export CC_arm_unknown_linux_gnueabihf=arm-unknown-linux-gnueabihf-gcc
+          export CXX_arm_unknown_linux_gnueabihf=arm-unknown-linux-gnueabihf-g++
+          export AR_arm_unknown_linux_gnueabihf=arm-unknown-linux-gnueabihf-ar
+          export CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-unknown-linux-gnueabihf-gcc
+
+          python3 -m venv venv
+          source venv/bin/activate
+          pip3 install -r requirements-dev.txt
+          maturin build --release --target arm-unknown-linux-gnueabihf --out dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-armv6
+          path: dist
+
+  publish-pypi:
+    needs:
+      [
+        tag,
+        build-macos,
+        build-windows,
+        build-linux,
+        build-linux-armv6,
+        build-linux-aarch64,
+      ]
+    name: Deploy wheels to pypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+
+      - name: Check dist
+        run: ls -al ./dist/*
+
+      - name: Publish
+        if: ${{ inputs.live-run || false }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_ORG_TOKEN }}
+
+  publish-github:
+    needs:
+      [
+        tag,
+        build-macos,
+        build-windows,
+        build-linux,
+        build-linux-armv6,
+        build-linux-aarch64,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: eclipse-zenoh/ci/publish-crates-github@main
+        with:
+          repo: ${{ github.repository }}
+          live-run: ${{ inputs.live-run || false }}
+          version: ${{ needs.tag.outputs.version }}
+          branch: ${{ needs.tag.outputs.branch }}
+          github-token: ${{ secrets.BOT_TOKEN_WORKFLOW }}
+          archive-patterns: "^$"

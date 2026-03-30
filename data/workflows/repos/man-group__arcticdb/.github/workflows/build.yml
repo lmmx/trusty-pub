@@ -1,0 +1,541 @@
+name: Build and Test
+on:
+  push:
+    # On push only local storage tests get executed
+    tags: ["v**"]
+    branches: ["master"]
+  pull_request:
+    # On pull requests only local storage tests get executed
+    branches: ["**"]
+  schedule:
+    - cron: '0 23 * * 0,1,2,3,4,5' # Start from 23:00 on the previous day to finish on the next day
+  workflow_dispatch:
+    inputs:
+      persistent_storage:
+        description: Run the persistent storage tests?
+        type: choice
+        options:
+          - 'no'
+          - 'AWS_S3'
+          - 'GCPXML'
+          - 'AZURE'
+        default: 'no'
+      pypi_publish:
+        type: boolean
+      publish_env:
+        description: Environment to publish to
+        type: environment
+      cmake_preset_type:
+        description: Override CMAKE preset type
+        type: choice
+        options: ["-", debug, release]
+      dev_image_tag:
+        description: Tag of the ArcticDB development image to use for the Linux C++ tests build
+        type: string
+        default: arcticdb-dev-clang:latest
+      version_cache_full_test:
+        description: 'Run tests with both version cache 0 and 2000000000'
+        required: false
+        default: false
+        type: boolean
+      flags:
+        type: string
+        description: 'Enable debug logging or debug by setting respective value to 1'
+        required: true
+        default: "DEBUG_LOGGING=0;DEBUG=0"
+      pytest_args:
+        description: Rewrite what tests will run or do your own pytest line if string starts with pytest ... (Example -- pytest -n auto -v --count=50 -x python/tests/compat)
+        type: string
+        default: ""
+      run_full_matrix_of_persistent_tests:
+        description: Run full matrix of persistent tests
+        required: false
+        default: false
+        type: boolean
+run-name: Building ${{github.ref_name}} on ${{github.event_name}} by ${{github.actor}}
+concurrency:
+  group: ${{github.ref}}
+  cancel-in-progress: true
+
+jobs:
+
+  storage_type:
+    runs-on: ubuntu-latest
+    env:
+      INPUT_STORAGE: ${{ inputs.persistent_storage }}
+    outputs:
+      storage: ${{ steps.set-storage.outputs.storage }}
+      DEBUG_LOGGING_ENABLED: ${{ steps.parse-flags.outputs.DEBUG_LOGGING_ENABLED }}
+      DEBUG_ENABLED: ${{ steps.parse-flags.outputs.DEBUG_ENABLED }}
+    steps:
+      - name: Determine Storage Type Based On Schedule
+        id: set-storage
+        shell: bash
+        run: |
+          _storage='not_scheduled'
+          day=$(date +'%a')
+          echo "Today is $day"
+          if [[ "$day" == "Sun" || "$day" == "Tue" || "$day" == "Thu" ]]; then
+            _storage='AWS_S3'
+          elif [[ "$day" == "Mon" || "$day" == "Wed" ]]; then
+            _storage='GCPXML'
+          elif [[ "$day" == "Fri" ]]; then
+            _storage='AZURE'
+          else
+            echo "UNSPECIFIED RESULT for this day (assumed LMDB)"
+            _storage='no'
+          fi
+          echo "Storage type calculated for scheduled job: $_storage"
+
+          if [[ "$GITHUB_EVENT_NAME" != "schedule" ]]; then
+            echo "Workflow not triggered by schedule."
+            echo "inputs.persistent_storage=[$INPUT_STORAGE]"
+            if [[ -z "${INPUT_STORAGE+x}" || -z "$INPUT_STORAGE" ]]; then
+              echo "INPUT_STORAGE" not defined
+              _storage='no'
+            else
+              echo "INPUT_STORAGE" is defined
+              _storage=$INPUT_STORAGE
+            fi
+          fi
+
+          echo "Final storage type for workflow execution: $_storage"
+          echo "storage=$_storage" >> $GITHUB_OUTPUT
+
+      - name: Parse flags
+        id: parse-flags
+        run: |
+          declare -A FLAGS
+          IFS=';' read -ra PAIRS <<< "${{ inputs.flags }}"
+          for pair in "${PAIRS[@]}"; do
+            key="${pair%%=*}"
+            value="${pair##*=}"
+            # Trim leading/trailing whitespace
+            value="$(echo "$value" | xargs)"
+            echo "$key=$value"
+            # Format of flags will be as defined below
+            echo "${key}_ENABLED=$value" >> $GITHUB_OUTPUT
+          done
+
+  cibw_docker_image:
+    uses: ./.github/workflows/cibw_docker_image.yml
+    permissions: {packages: write}
+    with:
+      cibuildwheel_ver: "3.1.4"
+      force_update: false
+
+  run_linting_checks:
+    name: Linting checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3.3.0
+
+      - name: Install linters
+        run: |
+          python3 build_tooling/format.py --install-tools
+
+      - name: Lint Python
+        if: always()
+        run: |
+          python3 build_tooling/format.py --check --type python
+
+      - name: Lint C++
+        if: always()
+        run: |
+          python3 build_tooling/format.py --check --type cpp
+
+  common_config:
+    needs: [cibw_docker_image]
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          # Use a matrix to build the common hierarchical structure used by multiple matrix jobs in build_steps.yaml
+          # Please declare any key you added below in build_steps.yaml's dummy matrix as well to aid the linting tools
+          - linux_matrix:
+              - os: linux
+                distro: ubuntu-22.04
+                cmake_preset_prefix: linux
+                cibw_build_suffix: manylinux_x86_64
+                build_dir: /tmp/cpp_build
+                vcpkg_packages_dir: ""
+                symbols: "*.gz" # Please update publish.yml when changing this!!
+                do_not_archive: ["*.so", "*.[ao]", "vcpkg_installed"]
+                test_services: {}
+                container:
+                  image: ghcr.io/man-group/${{inputs.dev_image_tag || 'arcticdb-dev-clang:latest'}}
+                  volumes:
+                    - /:/mnt
+            windows_matrix:
+              - os: windows
+                distro: windows-2022
+                cmake_preset_prefix: windows-cl
+                cibw_build_suffix: win_amd64
+                build_dir: C:/cpp_build
+                vcpkg_packages_dir: C:/vcpkg_packages
+                symbols: "*.pdb" # Please update publish.yml when changing this!!
+                do_not_archive: ["*.lib", "*.ilk", "*.pyd", "*.dll", "CMakeFiles/*.dir", "vcpkg_installed"]
+                test_services: {}
+                container: null
+            macos_matrix:
+              - os: macos
+                distro: macos-15
+                cmake_preset_prefix: macos
+                cibw_build_suffix: macosx_arm64
+                build_dir: /tmp/cpp_build
+                vcpkg_packages_dir: ""
+                symbols: "*.dSYM"
+                do_not_archive: ["*.dylib", "*.[ao]", "vcpkg_installed"]
+                test_services: {}
+                container: null
+    steps:
+      - run: |
+          if ${{startsWith(github.ref, 'refs/tags/v')}}; then
+            # Can only upload to Pypi once per version, so only auto upload on tag builds:
+            echo -e "PUBLISH_ENV=ProdPypi\nCMAKE_PRESET_TYPE=release\nPYPI_PUBLISH=1" | tee -a $GITHUB_ENV
+          elif $GITHUB_REF_PROTECTED || ${{github.ref == 'refs/heads/master'}} ; then
+            echo -e "PUBLISH_ENV=TestPypi\nCMAKE_PRESET_TYPE=release" | tee -a $GITHUB_ENV
+          else
+            echo -e "PUBLISH_ENV=${{vars.DEFAULT_PUBLISH_ENV}}\nCMAKE_PRESET_TYPE=$DEFAULT_PRESET" | tee -a $GITHUB_ENV
+          fi
+        env:
+          DEFAULT_PRESET: ${{startsWith(github.repository, 'man-group/ArcticDB') && 'release' || vars.DEFAULT_CMAKE_PRESET_TYPE || 'debug'}}
+    outputs:
+      cibuildwheel_ver: ${{needs.cibw_docker_image.outputs.cibuildwheel_ver}}
+      publish_env: ${{inputs.publish_env || env.PUBLISH_ENV || ''}}
+      pypi_publish: ${{inputs.pypi_publish || env.PYPI_PUBLISH}}
+      cmake_preset_type_resolved: ${{inputs.cmake_preset_type != '-' && inputs.cmake_preset_type || env.CMAKE_PRESET_TYPE}}
+      linux_matrix: ${{toJson(matrix.linux_matrix)}}
+      windows_matrix: ${{toJson(matrix.windows_matrix)}}
+      macos_matrix: ${{toJson(matrix.macos_matrix)}}
+
+  pre_seed_cleanup:
+    needs: [storage_type]
+    if: ${{ needs.storage_type.outputs.storage != 'no' }}
+    name: Cleanup persistent storages
+    uses: ./.github/workflows/persistent_storage.yml
+    secrets: inherit
+    with:
+      job_type: cleanup
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+
+  persistent_storage_seed_linux:
+    needs: [common_config, pre_seed_cleanup, storage_type]
+    if: ${{ needs.storage_type.outputs.storage != 'no' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # This uses old arcticdb versions which won't work on python >= 3.12
+        python3: ${{fromJson(inputs.run_full_matrix_of_persistent_tests && '[9, 10, 11]' || '[11]')}}
+        arcticdb_version: ["oldest", "latest"]
+        include:
+          - python_deps_ids: [""]
+            matrix_override: ${{fromJson(needs.common_config.outputs.linux_matrix)}}
+    name: Seed Persistent Storage for 3.${{matrix.python3}} Linux with ${{ matrix.arcticdb_version }} ArcticDB package version
+    uses: ./.github/workflows/persistent_storage.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: seed
+      python3: ${{matrix.python3}}
+      arcticdb_version: ${{matrix.arcticdb_version}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      python_deps_ids: ${{toJson(matrix.python_deps_ids)}}
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+
+
+  persistent_storage_seed_windows:
+    needs: [common_config, pre_seed_cleanup, storage_type]
+    if: ${{ needs.storage_type.outputs.storage != 'no' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # This uses old arcticdb versions which won't work on python >= 3.12
+        python3: ${{fromJson(inputs.run_full_matrix_of_persistent_tests && '[9, 10, 11]' || '[11]')}}
+        arcticdb_version: ["oldest", "latest"]
+        include:
+          - python_deps_ids: [""]
+            matrix_override: ${{fromJson(needs.common_config.outputs.windows_matrix)}}
+    name: Seed Persistent Storage for 3.${{matrix.python3}} Windows with ${{ matrix.arcticdb_version }} ArcticDB package version
+    uses: ./.github/workflows/persistent_storage.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: seed
+      python3: ${{matrix.python3}}
+      arcticdb_version: ${{matrix.arcticdb_version}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      python_deps_ids: ${{toJson(matrix.python_deps_ids)}}
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+
+  persistent_storage_seed_macos:
+    needs: [common_config, pre_seed_cleanup, storage_type]
+    if: ${{ needs.storage_type.outputs.storage != 'no' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # This uses old arcticdb versions which won't work on python >= 3.12
+        python3: ${{fromJson(inputs.run_full_matrix_of_persistent_tests && '[9, 10, 11]' || '[11]')}}
+        arcticdb_version: ["oldest", "latest"]
+        include:
+          - python_deps_ids: [""]
+            matrix_override: ${{fromJson(needs.common_config.outputs.macos_matrix)}}
+    name: Seed Persistent Storage for 3.${{matrix.python3}} MacOS with ${{ matrix.arcticdb_version }} ArcticDB package version
+    uses: ./.github/workflows/persistent_storage.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: seed
+      python3: ${{matrix.python3}}
+      arcticdb_version: ${{matrix.arcticdb_version}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      python_deps_ids: ${{toJson(matrix.python_deps_ids)}}
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+
+  cpp-test-linux:
+    needs: [cibw_docker_image, common_config]
+    name: Linux C++ Tests
+    uses: ./.github/workflows/build_steps.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: cpp-tests
+      cmake_preset_type: ${{needs.common_config.outputs.cmake_preset_type_resolved}}
+      cibw_image_tag: ${{needs.cibw_docker_image.outputs.tag}}
+      matrix: ${{needs.common_config.outputs.linux_matrix}}
+
+  build-python-wheels-linux:
+    # Then use the cached compilation artifacts to build other python versions concurrently in cibuildwheels
+    needs: [cibw_docker_image, common_config, storage_type]
+    strategy:
+      fail-fast: false
+      matrix:
+        # For storage runs that are not full matrix will have only one Python version
+        python3: ${{fromJson( !inputs.run_full_matrix_of_persistent_tests && (needs.storage_type.outputs.storage != 'no') && '[11]' || '[9, 10, 11, 12, 13, 14]')}}
+        include:
+          - python_deps_ids: [""]
+            matrix_override: ${{fromJson(needs.common_config.outputs.linux_matrix)}}
+            pytest_xdist_mode: "-n logical --dist worksteal"
+          - python3: 11
+            python_deps_ids: ["", -compat311]
+            matrix_override:
+              - ${{fromJson(needs.common_config.outputs.linux_matrix)[0]}}
+              - python_deps_id: -compat311
+                python_deps: requirements-compatibility-py311.txt
+    name: 3.${{matrix.python3}} Linux
+    uses: ./.github/workflows/build_steps.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: build-python-wheels
+      python3: ${{matrix.python3}}
+      cibw_image_tag: ${{needs.cibw_docker_image.outputs.tag}}
+      cibw_version: ${{needs.common_config.outputs.cibuildwheel_ver}}
+      cmake_preset_type: ${{needs.common_config.outputs.cmake_preset_type_resolved}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      python_deps_ids: ${{toJson(matrix.python_deps_ids)}}
+      # When scheduled job persistence storage will be AWS
+      # When not triggered via workflow_dispatch always assume local tests to run only
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+      pytest_xdist_mode: ${{matrix.pytest_xdist_mode}}
+      pytest_args: ${{inputs.pytest_args || ''}}
+      version_cache_full_test: ${{inputs.version_cache_full_test || false}}
+      DEBUG_ENABLED: ${{ needs.storage_type.outputs.DEBUG_ENABLED }}
+      DEBUG_LOGGING_ENABLED: ${{ needs.storage_type.outputs.DEBUG_LOGGING_ENABLED }}
+
+
+  cpp-test-windows:
+    needs: [common_config]
+    name: Windows C++ Tests
+    uses: ./.github/workflows/build_steps.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: cpp-tests
+      cmake_preset_type: ${{needs.common_config.outputs.cmake_preset_type_resolved}}
+      matrix: ${{needs.common_config.outputs.windows_matrix}}
+
+  cpp-test-macos:
+    needs: [common_config]
+    name: macOS C++ Tests
+    uses: ./.github/workflows/build_steps.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: cpp-tests
+      cmake_preset_type: ${{needs.common_config.outputs.cmake_preset_type_resolved}}
+      matrix: ${{needs.common_config.outputs.macos_matrix}}
+
+  build-python-wheels-windows:
+    needs: [common_config, storage_type]
+    strategy:
+      fail-fast: false
+      matrix:
+        # For storage runs that are not full matrix will have only one Python version
+        python3: ${{fromJson( !inputs.run_full_matrix_of_persistent_tests && (needs.storage_type.outputs.storage != 'no') && '[11]' || '[9, 10, 11, 12, 13, 14]')}}
+        include:
+          - matrix_override: ${{fromJson(needs.common_config.outputs.windows_matrix)}}
+    name: 3.${{matrix.python3}} Windows
+    uses: ./.github/workflows/build_steps.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: build-python-wheels
+      python3: ${{matrix.python3}}
+      cibw_version: ${{needs.common_config.outputs.cibuildwheel_ver}}
+      cmake_preset_type: ${{needs.common_config.outputs.cmake_preset_type_resolved}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      # When scheduled job persistence storage will be AWS
+      # When not triggered via workflow_dispatch always assume local tests to run only
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+      pytest_xdist_mode: "-n logical --dist worksteal"
+      pytest_args: ${{inputs.pytest_args || ''}}
+      version_cache_full_test: ${{github.event_name == 'schedule' || inputs.version_cache_full_test || false}}
+      DEBUG_ENABLED: ${{ needs.storage_type.outputs.DEBUG_ENABLED }}
+      DEBUG_LOGGING_ENABLED: ${{ needs.storage_type.outputs.DEBUG_LOGGING_ENABLED }}
+
+  persistent_storage_verify_linux:
+    needs: [common_config, build-python-wheels-linux, storage_type]
+    if: ${{ needs.storage_type.outputs.storage != 'no'}}
+    strategy:
+      fail-fast: false
+      matrix:
+        # This uses old arcticdb versions which won't work on python >= 3.12
+        python3: ${{ fromJson(inputs.run_full_matrix_of_persistent_tests && '[9, 10, 11]' || '[11]') }}
+        arcticdb_version: ["oldest", "latest"]
+        include:
+          - python_deps_ids: [""]
+            matrix_override: ${{fromJson(needs.common_config.outputs.linux_matrix)}}
+    name: Verify Persistent Storage for 3.${{matrix.python3}} Linux with ${{ matrix.arcticdb_version }} ArcticDB package version
+    uses: ./.github/workflows/persistent_storage.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: verify
+      python3: ${{matrix.python3}}
+      arcticdb_version: ${{matrix.arcticdb_version}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      python_deps_ids: ${{toJson(matrix.python_deps_ids)}}
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+
+  persistent_storage_verify_windows:
+    needs: [common_config, build-python-wheels-windows, storage_type]
+    if: ${{ needs.storage_type.outputs.storage != 'no'}}
+    strategy:
+      fail-fast: false
+      matrix:
+        # This uses old arcticdb versions which won't work on python >= 3.12
+        python3: ${{ fromJson(inputs.run_full_matrix_of_persistent_tests && '[9, 10, 11]' || '[11]') }}
+        arcticdb_version: ["oldest", "latest"]
+        include:
+          - python_deps_ids: [""]
+            matrix_override: ${{fromJson(needs.common_config.outputs.windows_matrix)}}
+    name: Verify Persistent Storage for 3.${{matrix.python3}} Windows with ${{ matrix.arcticdb_version }} ArcticDB package version
+    uses: ./.github/workflows/persistent_storage.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: verify
+      python3: ${{matrix.python3}}
+      arcticdb_version: ${{matrix.arcticdb_version}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      python_deps_ids: ${{toJson(matrix.python_deps_ids)}}
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+
+  build-python-wheels-macos:
+    needs: [common_config, storage_type]
+    strategy:
+      fail-fast: false
+      matrix:
+        # Skipping Python 3.8 on macOS due to auditwheel error for this configuration
+        python3: ${{ fromJson( !inputs.run_full_matrix_of_persistent_tests && (needs.storage_type.outputs.storage != 'no') && '[11]' || '[9, 10, 11, 12, 13, 14]' ) }}
+        include:
+          - python_deps_ids: [""]
+            matrix_override: ${{fromJson(needs.common_config.outputs.macos_matrix)}}
+            pytest_xdist_mode: "-n logical --dist worksteal"
+    name: 3.${{matrix.python3}} macOS
+    uses: ./.github/workflows/build_steps.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: build-python-wheels
+      python3: ${{matrix.python3}}
+      cibw_version: ${{needs.common_config.outputs.cibuildwheel_ver}}
+      cmake_preset_type: ${{needs.common_config.outputs.cmake_preset_type_resolved}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      python_deps_ids: ${{toJson(matrix.python_deps_ids)}}
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+      pytest_xdist_mode: ${{matrix.pytest_xdist_mode}}
+      pytest_args: ${{inputs.pytest_args}}
+      DEBUG_ENABLED: ${{ needs.storage_type.outputs.DEBUG_ENABLED }}
+      DEBUG_LOGGING_ENABLED: ${{ needs.storage_type.outputs.DEBUG_LOGGING_ENABLED }}
+
+  persistent_storage_verify_macos:
+    needs: [common_config, build-python-wheels-macos, storage_type]
+    if: ${{ needs.storage_type.outputs.storage != 'no'}}
+    strategy:
+      fail-fast: false
+      matrix:
+        # This uses old arcticdb versions which won't work on python >= 3.12
+        python3: ${{ fromJson(inputs.run_full_matrix_of_persistent_tests && '[9, 10, 11]' || '[11]') }}
+        arcticdb_version: ["oldest", "latest"]
+        include:
+          - python_deps_ids: [""]
+            matrix_override: ${{fromJson(needs.common_config.outputs.macos_matrix)}}
+    name: Verify Persistent Storage for 3.${{matrix.python3}} MacOS with ${{ matrix.arcticdb_version }} ArcticDB package version
+    uses: ./.github/workflows/persistent_storage.yml
+    secrets: inherit
+    permissions: {packages: write}
+    with:
+      job_type: verify
+      python3: ${{matrix.python3}}
+      arcticdb_version: ${{matrix.arcticdb_version}}
+      matrix: ${{toJson(matrix.matrix_override)}}
+      python_deps_ids: ${{toJson(matrix.python_deps_ids)}}
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+
+  post_verify_cleanup:
+    needs: [persistent_storage_verify_windows, persistent_storage_verify_linux, persistent_storage_verify_macos, storage_type]
+    if: ${{ always() && !failure() && !cancelled() && needs.storage_type.outputs.storage != 'no' }}
+    name: Cleanup persistent storages
+    uses: ./.github/workflows/persistent_storage.yml
+    secrets: inherit
+    with:
+      job_type: cleanup
+      persistent_storage: ${{ needs.storage_type.outputs.storage }}
+
+  publish_pytest_data:
+    needs: [common_config,build-python-wheels-linux, build-python-wheels-windows, build-python-wheels-macos]
+    if: |
+      always() &&
+      !cancelled()
+    uses: ./.github/workflows/publish_pytest_data.yml
+    secrets: inherit
+    permissions: {contents: write}
+    with:
+      environment: ${{needs.common_config.outputs.publish_env}}
+
+  can_merge:
+    needs: [cpp-test-linux, cpp-test-windows, cpp-test-macos, build-python-wheels-linux, build-python-wheels-windows, build-python-wheels-macos, persistent_storage_verify_linux, persistent_storage_verify_windows]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled()
+    runs-on: ubuntu-22.04
+    steps:
+      - run: echo Dummy job to simplify PR merge checks configuration
+      # FUTURE: add some test stats/reporting
+
+  publish:
+    needs: [common_config, can_merge]
+    if: |
+      always() &&
+      !failure() &&
+      !cancelled() &&
+      (needs.common_config.outputs.pypi_publish && needs.common_config.outputs.publish_env)
+    uses: ./.github/workflows/publish.yml
+    secrets: inherit
+    permissions: {contents: write}
+    with:
+      environment: ${{needs.common_config.outputs.publish_env}}

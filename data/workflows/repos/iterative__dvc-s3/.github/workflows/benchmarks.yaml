@@ -1,0 +1,84 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Dataset Size"
+        required: false
+        default: "small"
+        type: choice
+        options:
+          - tiny
+          - small
+          - large
+          - mnist
+
+env:
+  DVC_TEST: "true"
+  FORCE_COLOR: "1"
+  DATASET: ${{ github.event.inputs.dataset || ( github.event_name == 'schedule' && 'mnist' || 'small' ) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    timeout-minutes: 45
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        pyv: ["3.14"]
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        path: dvc-s3
+
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        repository: iterative/dvc
+        path: dvc
+
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        repository: iterative/dvc-bench
+        path: dvc-bench
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.pyv }}
+        cache: 'pip'
+        cache-dependency-path: |
+          pyproject.toml
+          dvc/pyproject.toml
+
+    - name: install
+      run: pip install -e "./dvc[testing]" -e "./dvc-s3[tests]"
+
+    - name: run benchmarks
+      timeout-minutes: 180
+      working-directory: dvc-s3/
+      run: >
+        pytest --benchmark-save benchmarks-s3 --benchmark-group-by func
+        dvc_s3/tests/benchmarks.py
+        --dvc-revs main,3.60.1,3.53.2
+        --dataset ${DATASET}
+        --dvc-install-deps s3
+        --dvc-bench-repo ../dvc-bench --dvc-repo ../dvc
+
+    - run: pytest-benchmark compare --group-by func --sort name
+      working-directory: dvc-s3

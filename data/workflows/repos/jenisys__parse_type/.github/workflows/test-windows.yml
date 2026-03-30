@@ -1,0 +1,72 @@
+# -- SOURCE: https://github.com/marketplace/actions/setup-python
+# SEE: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+# SUPPORTED PYTHON VERSIONS: https://github.com/actions/python-versions
+
+name: test-windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "release/**" ]
+  pull_request:
+    types: [opened, reopened, review_requested]
+    branches: [ "main" ]
+
+env:
+  PYTHONUTF8: 1
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # PREPARED: os: [ubuntu-latest, macos-latest, windows-latest]
+        # DISABLED: os: [ubuntu-latest, windows-latest]
+        python-version: ["3.13", "3.12", "3.11", "3.10"]
+        # -- PREPARED FOR: Experimental Python versions with "continue-on-error".
+        experimental: [false]
+        include:
+          - python-version: "3.14.0-rc.1"
+            experimental: true
+        # -- DISABLED:
+        # exclude:
+        #  - os: windows-latest
+        #    python-version: "2.7"
+    # DISABLED: runs-on: ${{ matrix.os }}
+    runs-on: "windows-latest"
+    continue-on-error: ${{ matrix.experimental }}
+    steps:
+      - uses: actions/checkout@v5
+      # DISABLED: name: Setup Python ${{ matrix.python-version }} on platform=${{ matrix.os }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          # DISABLED: cache: 'pip'
+          # DISABLED: cache-dependency-path: 'py.requirements/*.txt'
+      # -- DISABLED:
+      # - name: Show Python version
+      #   run: python --version
+      - name: setup-uv -- Speed-up Python package installations ...
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/pyproject.toml
+            **/py.requirements/ci.github.testing.txt
+            **/py.requirements/basic.txt
+            **/py.requirements/testing.txt
+      - name: "Install Python package dependencies (with: uv)"
+        run: |
+          uv pip install --system -U pip setuptools wheel
+          uv pip install --system -U -r py.requirements/ci.github.testing.txt
+          uv pip install --system -e .
+      - name: Run tests
+        run: pytest
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: test reports
+          path: |
+            build/testing/report.xml
+            build/testing/report.html
+        if: ${{ job.status == 'failure' }}
+        # MAYBE: if: ${{ always() }}

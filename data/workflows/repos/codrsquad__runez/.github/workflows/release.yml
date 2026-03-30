@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+jobs:
+  deploy:
+
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write  # mandatory for trusted publishing
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.14"
+
+    - uses: astral-sh/setup-uv@v7
+    - run: uvx --with tox-uv tox -e py,style
+    - run: uv build
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,88 @@
+name: 'Comp-LEO Check'
+description: 'Run compliance and security checks on Leo smart contracts'
+author: 'CompliLedger'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Path to Leo source code (file or directory)'
+    required: true
+    default: 'programs/'
+  
+  policy:
+    description: 'Policy pack to use'
+    required: false
+    default: 'aleo-baseline'
+  
+  threshold:
+    description: 'Minimum passing score (0-100)'
+    required: false
+    default: '75'
+  
+  fail-on-critical:
+    description: 'Fail if any critical violations found'
+    required: false
+    default: 'true'
+  
+  fail-on-high:
+    description: 'Fail if any high severity violations found'
+    required: false
+    default: 'false'
+  
+  api-key:
+    description: 'Comp-LEO API key (optional, for API-based checks)'
+    required: false
+
+outputs:
+  passed:
+    description: 'Whether compliance check passed'
+    value: ${{ steps.check.outputs.passed }}
+  
+  score:
+    description: 'Compliance score (0-100)'
+    value: ${{ steps.check.outputs.score }}
+  
+  violations:
+    description: 'Number of violations found'
+    value: ${{ steps.check.outputs.violations }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install Comp-LEO
+      shell: bash
+      run: pip install comp-leo
+    
+    - name: Run compliance check
+      id: check
+      shell: bash
+      run: |
+        set +e
+        
+        comp-leo check ${{ inputs.path }} \
+          --policy ${{ inputs.policy }} \
+          --threshold ${{ inputs.threshold }} \
+          ${{ inputs.fail-on-critical == 'true' && '--fail-on-critical' || '' }} \
+          ${{ inputs.fail-on-high == 'true' && '--fail-on-high' || '' }} \
+          --output compliance-report.json
+        
+        exit_code=$?
+        
+        # Parse results
+        score=$(jq -r '.score' compliance-report.json)
+        violations=$(jq -r '.violations | length' compliance-report.json)
+        passed=$(jq -r '.passed' compliance-report.json)
+        
+        echo "score=$score" >> $GITHUB_OUTPUT
+        echo "violations=$violations" >> $GITHUB_OUTPUT
+        echo "passed=$passed" >> $GITHUB_OUTPUT
+        
+        exit $exit_code

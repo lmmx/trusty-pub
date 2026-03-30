@@ -1,0 +1,23 @@
+name: Delete PR Image
+
+on:
+  pull_request:
+    types:
+    - closed
+    branches:
+    - main
+
+jobs:
+  clean-image:
+    runs-on: ubuntu-24.04-arm
+    steps:
+    - id: details
+      uses: kpfleming/composite-actions/image-details@v3
+      with:
+        base_image: python:trixie-main
+    - uses: kpfleming/composite-actions/delete-pr-image@v3
+      with:
+        image_registry: ${{ steps.details.outputs.image_registry }}
+        registry_account: ${{ steps.details.outputs.registry_account }}
+        registry_token: ${{ secrets.FORGE_API_TOKEN }}
+        repo_name: ${{ steps.details.outputs.repo_name }}

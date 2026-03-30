@@ -1,0 +1,137 @@
+name: Test Upstream Dependencies
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - CHANGELOG.rst
+      - README.rst
+      - pyproject.toml
+      - src/xclim/__init__.py
+  schedule:
+    - cron: "0 0 * * *" # Daily “At 00:00” UTC
+  workflow_dispatch: # allows you to trigger the workflow run manually
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  upstream-dev:
+    name: test-upstream-dev (Python${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    if: |
+      (github.event_name == 'schedule') ||
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'push')
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.12" ]
+        testdata-cache: [ '~/.cache/xclim-testdata' ]
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
+        with:
+          disable-sudo: true
+          egress-policy: block
+          allowed-endpoints: >
+            api.electricitymap.org:443
+            api.github.com:443
+            api.green-coding.io:443
+            api.securityscorecards.dev:443
+            conda.anaconda.org:443
+            dap.service.does.not.exist:443
+            files.pythonhosted.org:443
+            github.com:443
+            ip-api.com:80
+            ipapi.co:443
+            objects.githubusercontent.com:443
+            proxy.golang.org:4433
+            pypi.org:443
+            raw.githubusercontent.com:443
+            repo.anaconda.com:443
+            sum.golang.org:443
+      - name: Start Measurement
+        uses: green-coding-solutions/eco-ci-energy-estimation@0fd2200a8f02d7939066c535e3642c2ebee9db16 # v5.1
+        with:
+          task: start-measurement
+          branch: ${{ github.head_ref || github.ref_name }}
+      - name: Checkout Repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0 # Fetch all history for all branches and tags.
+          persist-credentials: false
+      - name: Setup Conda (Micromamba) with Python${{ matrix.python-version }}
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          cache-downloads: true
+          cache-environment: true
+          environment-file: environment.yml
+          create-args: >-
+            eigen
+            pybind11
+            pytest-reportlog
+            python=${{ matrix.python-version }}
+      - name: Micromamba version
+        run: |
+          echo "micromamba: $(micromamba --version)"
+      - name: Install upstream versions and SBCK
+        run: |
+          # git-based dependencies cannot be installed from hashes
+          python -m pip install -r CI/requirements_upstream.txt
+          python -m pip install "sbck @ git+https://github.com/yrobink/SBCK-python.git@master"
+      - name: Install xclim
+        run: |
+          python -m pip install --no-user --no-deps --editable .
+      - name: Check versions
+        run: |
+          micromamba list
+          xclim show_version_info
+          python -m pip check || true
+      - name: Setup Python Measurement
+        uses: green-coding-solutions/eco-ci-energy-estimation@0fd2200a8f02d7939066c535e3642c2ebee9db16 # v5.1
+        with:
+          task: get-measurement
+          label: 'Environment Setup (Upstream, Python${{ matrix.python-version }})'
+        continue-on-error: true
+      - name: Test Data Caching
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ${{ matrix.testdata-cache }}
+          key: ${{ runner.os }}-xclim-testdata-upstream-${{ hashFiles('pyproject.toml', 'tox.ini') }}
+      - name: Run Tests
+        if: success()
+        id: status
+        run: |
+          python -m pytest --numprocesses=logical --durations=10 --cov=xclim --cov-report=term-missing --report-log output-${{ matrix.python-version }}-log.jsonl
+      - name: Generate and publish the report
+        if: |
+          failure()
+          && steps.status.outcome == 'failure'
+          && github.event_name == 'schedule'
+          && github.repository_owner == 'Ouranosinc'
+        uses: xarray-contrib/issue-from-pytest-log@558a3dfdd251069b328d3fded994824ddbefc47b # v1.4.0
+        with:
+          issue-title: "⚠️ Nightly upstream-dev CI failed for Python${{ matrix.python-version }} ⚠️"
+          log-path: output-${{ matrix.python-version }}-log.jsonl
+      - name: Tests measurement
+        uses: green-coding-solutions/eco-ci-energy-estimation@0fd2200a8f02d7939066c535e3642c2ebee9db16 # v5.1
+        with:
+          task: get-measurement
+          label: 'Testing and Reporting (Upstream, Python${{ matrix.python-version }})'
+        continue-on-error: true
+      - name: Show Energy Results
+        uses: green-coding-solutions/eco-ci-energy-estimation@0fd2200a8f02d7939066c535e3642c2ebee9db16 # v5.1
+        with:
+          task: display-results
+        continue-on-error: true

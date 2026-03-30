@@ -1,0 +1,54 @@
+name: Nightly Package Tests
+on:
+  schedule:
+    - cron: '0 12 * * *' # run at 12 AM UTC
+  workflow_dispatch:  # to trigger manually
+
+permissions:
+  contents: read
+
+jobs:
+  get-versions:
+    uses: ./.github/workflows/get-versions.yaml
+
+  stable:
+    uses: ./.github/workflows/test-package.yaml
+    with:
+      install-cmd: 'uv pip install hatchling_autoextras_hook'
+
+  stable-all:
+    uses: ./.github/workflows/test-package.yaml
+    with:
+      install-cmd: 'uv pip install "hatchling_autoextras_hook[all]"'
+
+  stable-numpy:
+    uses: ./.github/workflows/test-package.yaml
+    with:
+      install-cmd: 'uv pip install "hatchling_autoextras_hook[numpy]"'
+
+  latest:
+    uses: ./.github/workflows/test-package.yaml
+    with:
+      install-cmd: 'uv pip install --pre hatchling_autoextras_hook'
+
+  latest-all:
+    uses: ./.github/workflows/test-package.yaml
+    with:
+      install-cmd: 'uv pip install --pre "hatchling_autoextras_hook[all]"'
+
+  latest-numpy:
+    uses: ./.github/workflows/test-package.yaml
+    with:
+      install-cmd: 'uv pip install --pre "hatchling_autoextras_hook[numpy]"'
+
+
+  ########################
+  #     Dependencies     #
+  ########################
+
+  hatchling:
+    needs: get-versions
+    uses: ./.github/workflows/test-package-dep.yaml
+    with:
+      package-name: hatchling
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).hatchling) }}

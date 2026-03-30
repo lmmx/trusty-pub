@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+      - uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --hook-stage manual --all-files
+      - name: Run PyLint
+        run: |
+          echo "::add-matcher::$GITHUB_WORKSPACE/.github/matchers/pylint.json"
+          pipx run nox -s pylint
+
+  checks:
+    name: Check Python ${{ matrix.python-version }} on ${{ matrix.sys.os }}
+    runs-on: ${{ matrix.sys.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    needs: [pre-commit]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.12"]
+        sys:
+          - { os: ubuntu-latest, shell: bash }
+          - { os: macos-latest, shell: bash }
+        experimental: [false]
+        exclude: []
+        #  - sys: { os: macos-latest, shell: bash }
+        #    python-version: 3.12
+
+        include:
+          - python-version: pypy-3.8
+            sys: { os: ubuntu-latest, shell: bash }
+            experimental: false
+          #- python-version: "3.9"
+          #  sys: { os: windows-latest, shell: "msys2 {0}" }
+          #  experimental: true
+
+    defaults:
+      run:
+        shell: ${{ matrix.sys.shell }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        if: matrix.sys.os == 'windows-latest'
+        with:
+          update: true
+          install: >-
+            mingw-w64-x86_64-git mingw-w64-x86_64-autotools
+            mingw-w64-x86_64-cmake mingw-w64-x86_64-gcc mingw-w64-x86_64-make
+            mingw-w64-x86_64-python-pip mingw-w64-x86_64-python-pytest
+            mingw-w64-x86_64-ninja
+
+      - name: Install build tools (macos-latest)
+        if: matrix.sys.os == 'macos-latest'
+        run: brew install autoconf automake libtool
+
+      - uses: actions/setup-python@v5
+        if: matrix.sys.os != 'windows-latest'
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Check build tools
+        run: |
+          which cmake
+          which make
+          which autoreconf
+          which python
+
+      - name: Install package
+        run: |
+          python -m pip install -U pip setuptools
+          python -m pip install .[test]
+
+      - name: Uninstall magic (linux)
+        if: matrix.sys.os == 'ubuntu-latest'
+        run: |
+          sudo apt remove -y file libmagic-mgc libmagic1
+
+      - name: Test package
+        run: |
+          python -m pytest -ra
+          python -m pytest -ra -m 'isolate' tests/test_import.py

@@ -1,0 +1,71 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: "1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    timeout-minutes: 30
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        pyv: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python ${{ matrix.pyv }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.pyv }}
+        allow-prereleases: true
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-suffix: ${{ matrix.pyv }}
+        cache-dependency-glob: pyproject.toml
+    - name: Install nox
+      run: uv pip install --system nox --upgrade
+
+    - name: Cache pre-commit hooks
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pre-commit
+        key: pre-commit-3|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml') }}
+
+    - name: Lint code
+      run: nox -s lint
+
+    - name: Run tests
+      run: nox -s tests-${{ matrix.pyv }} -- --cov-report=xml
+
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v5
+
+    - name: Build package
+      run: nox -s build
+
+  check:
+    if: always()
+    needs: [tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

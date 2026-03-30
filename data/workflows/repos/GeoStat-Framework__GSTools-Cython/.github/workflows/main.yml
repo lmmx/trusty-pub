@@ -1,0 +1,194 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - "main"
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - "main"
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  source_check:
+    name: source check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: "0"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -v --editable '.[lint,test]'
+
+      - name: black check
+        run: |
+          python -m black --check --diff --color .
+
+      - name: black preview
+        run: |
+          python -m black --preview --diff --color .
+
+      - name: isort check
+        run: |
+          python -m isort --check --diff --color .
+
+      - name: pylint check
+        run: |
+          python -m pylint src/gstools_cython/
+
+      - name: cython-lint check
+        run: |
+          cython-lint src/gstools_cython/
+
+  build_wheels:
+    name: wheels for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15-intel is an intel runner, macos-latest is apple silicon
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: "0"
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.0
+        with:
+          output-dir: dist-wheel-${{ matrix.os }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-wheel-${{ matrix.os }}
+          path: ./dist-wheel-${{ matrix.os }}/*.whl
+
+  build_sdist:
+    name: sdist on ${{ matrix.os }} with py ${{ matrix.ver.py }} numpy${{ matrix.ver.np }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15-intel, macos-latest]
+        # https://github.com/scipy/oldest-supported-numpy/blob/main/setup.cfg
+        ver:
+          - { py: "3.10", np: "==1.21.6" }
+          - { py: "3.11", np: "==1.23.2" }
+          - { py: "3.12", np: "==1.26.2" }
+          - { py: "3.13", np: "==2.1.0" }
+          - { py: "3.14", np: "==2.3.2" }
+          - { py: "3.14", np: ">=2.3.2" }
+        exclude:
+          - os: macos-latest
+            ver: { py: "3.10", np: "==1.21.6" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: "0"
+
+      - name: Set up Python ${{ matrix.ver.py }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.ver.py }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Install GSTools-Cython
+        env:
+          GSTOOLS_BUILD_PARALLEL: 1
+        run: |
+          pip install -v --editable .[test]
+
+      - name: Run tests
+        run: |
+          pip install "numpy${{ matrix.ver.np }}"
+          python -m pytest -v tests/
+
+      - name: Build sdist
+        run: |
+          # PEP 517 package builder from pypa
+          python -m build --sdist --outdir dist-sdist .
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.ver.py == '3.11'
+        with:
+          name: dist-sdist
+          path: dist-sdist/*.tar.gz
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "coveralls>=3.0.0"
+
+      - name: Install GSTools-Cython
+        env:
+          GSTOOLS_CY_COV: 1
+          GSTOOLS_BUILD_PARALLEL: 1
+        run: |
+          pip install -v --editable .[test]
+
+      - name: Run tests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m pytest --cov gstools_cython --cov-report term-missing -v tests/
+          python -m coveralls --service=github
+
+  upload_to_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish to Test PyPI
+        # only if working on main
+        if: github.ref == 'refs/heads/main'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.test_pypi_password }}
+          repository_url: https://test.pypi.org/legacy/
+          skip_existing: true
+
+      - name: Publish to PyPI
+        # only if tagged
+        if: startsWith(github.ref, 'refs/tags')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_password }}

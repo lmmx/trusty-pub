@@ -1,0 +1,97 @@
+name: Test iso-codes and build
+on: 
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_to_testpypi:
+        description: 'Publish to TestPyPI with dev version'
+        required: false
+        default: false
+        type: boolean
+      version_suffix:
+        description: 'Version suffix for TestPyPI (e.g., dev1, rc1)'
+        required: false
+        default: 'dev1'
+jobs:
+  test:
+    name: Run tests on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.13t"
+          - "3.14"
+          - "3.14t"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the test group dependencies
+        run: uv sync --group test
+      - name: Run Tox
+        run: uv run tox -e ${{ matrix.python-version }}
+  build:
+    name: Build package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Build wheel
+        run: uv build
+      - name: Install twine for validation
+        run: uv tool install twine
+      - name: Test build integrity
+        run: |
+          uv tool run twine check dist/*
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  test-publish:
+    name: Test publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to_testpypi
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Generate test version
+        id: version
+        run: |
+          BASE_VERSION=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
+          SUFFIX="${{ inputs.version_suffix }}"
+          TEST_VERSION="${BASE_VERSION}.${SUFFIX}"
+          echo "version=${TEST_VERSION}" >> $GITHUB_OUTPUT
+          echo "Generated test version: ${TEST_VERSION}"
+      - name: Update version for testing
+        run: |
+          sed -i 's/^version = .*/version = "${{ steps.version.outputs.version }}"/' pyproject.toml
+      - name: Build wheel
+        run: uv build
+      - name: Publish to TestPyPI
+        run: uv publish --index testpypi
+      - name: Test installation
+        run: |
+          sleep 30  # Wait for TestPyPI to process
+          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ isocodes==${{ steps.version.outputs.version }}
+          python -c "from isocodes import countries; print('Installation test passed!')"

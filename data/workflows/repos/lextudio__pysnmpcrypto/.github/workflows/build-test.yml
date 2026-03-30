@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "master"
+      - "release-*"
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    name: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13.0-rc.1']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - name: Run image
+        uses: abatilo/actions-poetry@v2
+        with:
+          poetry-version: "1.6.1"
+      - name: Build
+        run: |
+          poetry install
+          poetry build
+      - name: Test
+        run: |
+          poetry run pytest --junitxml=junit/test-results-${{ matrix.python-version }}.xml
+      - name: Test summary
+        uses: test-summary/action@v2
+        with:
+          paths: "junit/*.xml"
+        if: always()
+      # - uses: actions/upload-artifact@v4
+      #   with:
+      #     name: dist
+      #     path: dist
+      # - uses: actions/upload-artifact@v4
+      #   with:
+      #     name: output
+      #     path: output

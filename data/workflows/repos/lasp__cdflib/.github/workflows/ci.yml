@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} / ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.13"
+            tox-env: devdeps
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install Tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install tox
+
+      - name: Run Tests via Tox
+        # If a specific tox-env is set in matrix, use it; otherwise use standard py version
+        run: |
+          if [ -z "${{ matrix.tox-env }}" ]; then
+            tox -e py$(echo ${{ matrix.python-version }} | tr -d .)
+          else
+            tox -e ${{ matrix.tox-env }}
+          fi
+        shell: bash

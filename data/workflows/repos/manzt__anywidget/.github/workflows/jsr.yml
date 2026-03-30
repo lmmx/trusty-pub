@@ -1,0 +1,34 @@
+name: Publish to jsr
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.repository == 'manzt/anywidget'
+    runs-on: macos-14
+    strategy:
+      matrix:
+        directory:
+          - packages/deno
+          - packages/signals
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: |
+          cd ${{ matrix.directory }}
+          # sync deno version with package.json
+          sed -i '' 's/\"version\": \"[^\"]*\"/\"version\": \"'$(jq -r '.version' package.json)'\"/' deno.json
+          rm package.json
+          deno publish --allow-dirty

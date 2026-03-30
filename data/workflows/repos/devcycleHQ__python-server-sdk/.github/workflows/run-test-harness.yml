@@ -1,0 +1,18 @@
+name: Run Test Harness
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  harness-tests:
+    name: Harness Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: DevCycleHQ/test-harness@main
+        with:
+          sdks-to-test: python
+          sdk-github-sha: ${{github.event.pull_request.head.sha}}

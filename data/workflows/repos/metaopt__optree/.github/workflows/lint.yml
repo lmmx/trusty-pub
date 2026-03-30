@@ -1,0 +1,171 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - labeled
+      - unlabeled
+      - opened
+      - synchronize
+      - reopened
+  # Allow to trigger the workflow manually
+  workflow_dispatch:
+    inputs:
+      nightly-pybind11:
+        description: "Use nightly pybind11"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  OPTREE_CXX_WERROR: "ON"
+  _GLIBCXX_USE_CXX11_ABI: "1"
+  PYTHONDEVMODE: "1"
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "1"
+  CLICOLOR_FORCE: "1"
+  XDG_CACHE_HOME: "${{ github.workspace }}/.cache"
+  PIP_CACHE_DIR: "${{ github.workspace }}/.cache/pip"
+  PRE_COMMIT_HOME: "${{ github.workspace }}/.cache/pip/.pre-commit"
+  PIP_EXTRA_INDEX_URL: "https://download.pytorch.org/whl/cpu"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          update-environment: true
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements*.txt
+            */requirements*.txt
+            .pre-commit-config.yaml
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip setuptools
+
+      - name: Install dependencies
+        run: python -m pip install wheel pybind11 -r docs/requirements.txt
+
+      - name: Enable core dump generation
+        run: |
+          sudo sysctl -w kernel.core_pattern="core.%P"
+          sudo sysctl -w kernel.core_uses_pid=0
+          sudo sysctl -w fs.suid_dumpable=1
+          sysctl kernel.core_pattern kernel.core_uses_pid fs.suid_dumpable
+
+      - name: Install nightly pybind11
+        shell: bash
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.nightly-pybind11 == 'true') ||
+          (
+            github.event_name == 'pull_request' &&
+            contains(github.event.pull_request.labels.*.name, 'test-with-nightly-pybind11')
+          )
+        run: |
+          python -m pip install --force-reinstall "$(python .github/workflows/set_setup_requires.py)"
+          echo "::group::pyproject.toml"
+          cat pyproject.toml
+          echo "::endgroup::"
+
+      - name: Install OpTree
+        run: python -m pip install -v --no-build-isolation --editable '.[lint]'
+
+      - name: pre-commit
+        run: make pre-commit
+
+      - name: clang-format
+        run: make clang-format
+
+      - name: clang-tidy
+        run: make clang-tidy CMAKE_CXX_STANDARD=17
+
+      - name: cpplint
+        run: make cpplint
+
+      - name: python-format
+        run: make python-format
+
+      - name: ruff
+        run: make ruff
+
+      - name: pylint
+        run: make pylint
+
+      - name: mypy
+        run: make mypy
+
+      - name: doctest
+        run: make doctest
+
+      - name: addlicense
+        run: make addlicense
+
+      - name: docstyle
+        run: make docstyle
+
+      - name: spelling
+        run: |
+          dictionary="$(cat docs/source/spelling_wordlist.txt)"
+          if [[ "$(sort --ignore-case <<<"${dictionary}" | uniq)" != "${dictionary}" ]]; then
+            echo "::error::spelling_wordlist.txt is not sorted or contains duplicates" >&2
+            exit 1
+          fi
+          make spelling
+
+      - name: List generated files
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          find . -type f -name '*.py[co]' -delete
+          find . -depth -type d -name "__pycache__" -exec rm -r "{}" +
+          if git status --ignored --porcelain | grep -qvE '/$'; then
+            ls -alh $(git status --ignored --porcelain | grep -vE '/$' | grep -oE '\S+$')
+          fi
+
+      - name: Collect backtraces from coredumps (if any)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          CORE_DUMP_FILES="$(find . -iname "core.[1-9]*")"
+          if [[ -n "${CORE_DUMP_FILES}" ]]; then
+            echo "Found core dumps:"
+            ls -alh ${CORE_DUMP_FILES}
+            BACKTRACE_COMMAND="gdb --exec python --core '{}' -ex 'bt -full' -ex 'q'"
+            echo "::group::Install GDB"
+            (
+              export DEBIAN_FRONTEND=noninteractive
+              sudo apt-get update -qq && sudo apt-get install -yqq gdb
+            )
+            echo "::endgroup::"
+            echo "Collecting backtraces:"
+            find . -iname "core.[1-9]*" \
+              -exec bash -xc "
+                echo '::group::backtrace from: {}';
+                ${BACKTRACE_COMMAND};
+                echo '::endgroup::';
+              " ';'
+            echo "::warning::Coredump files found, see backtraces above for details." >&2
+            exit 1
+          fi

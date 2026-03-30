@@ -1,0 +1,28 @@
+name: Publish
+on:
+  release:
+    types: [published]
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/aiomqtt
+    permissions:
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.11"
+      - name: Install Python and dependencies
+        run: scripts/setup --locked
+      - name: Build package
+        run: uv build
+      - name: Publish to PyPI # With trusted publishing (no token required)
+        uses: pypa/gh-action-pypi-publish@release/v1

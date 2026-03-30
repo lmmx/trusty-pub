@@ -1,0 +1,37 @@
+name: Python tests
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '3 15 * * SUN'
+
+permissions: {}
+
+jobs:
+  test:
+    name: test with ${{ matrix.env }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ["3.10", 3.11, 3.12, 3.13, 3.14]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # 7.6.0
+      - name: Install tox
+        run: uv tool install --python-preference only-managed --python 3.14 tox --with tox-uv --with tox-gh
+      - name: Install Python
+        if: matrix.env != '3.14'
+        run: uv python install --python-preference only-managed ${{ matrix.env }}
+      - name: Run test suite
+        run: tox run --skip-missing-interpreters false
+        env:
+          MAXMINDDB_REQUIRE_EXTENSION: 1
+          MM_FORCE_EXT_TESTS: 1
+          TOX_GH_MAJOR_MINOR: ${{ matrix.env }}

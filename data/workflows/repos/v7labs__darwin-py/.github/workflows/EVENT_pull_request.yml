@@ -1,0 +1,34 @@
+name: pull_request
+run-name: Pull Request
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# Prevent running concurrently
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  get_changed_files:
+    name: Get changed files
+    uses: ./.github/workflows/JOB_get_changed_files.yml
+    permissions:
+      contents: read
+
+  python_checks:
+    name: Python Checks
+    needs: get_changed_files
+    if: needs.get_changed_files.outputs.python_changed_files != ''
+
+    uses: ./.github/workflows/JOB_python_checks.yml
+
+    with:
+      files: ${{ needs.get_changed_files.outputs.python_changed_files }}
+    permissions:
+      contents: read
+

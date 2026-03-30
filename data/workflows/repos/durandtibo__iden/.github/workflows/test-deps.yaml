@@ -1,0 +1,72 @@
+name: Test - Dependencies
+on:
+  workflow_call:
+  workflow_dispatch:  # to trigger manually
+
+permissions:
+  contents: read
+
+jobs:
+  get-versions:
+    uses: ./.github/workflows/get-versions.yaml
+
+  coola:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: coola
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).coola) }}
+
+  objectory:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: objectory
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).objectory) }}
+
+
+  #################################
+  #     Optional dependencies     #
+  #################################
+
+  cloudpickle:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: cloudpickle
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).cloudpickle) }}
+
+  joblib:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: joblib
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).joblib) }}
+
+  numpy:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: numpy
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).numpy) }}
+
+  pyyaml:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: pyyaml
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).pyyaml) }}
+
+  safetensors:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: safetensors
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).safetensors) }}
+
+  torch:
+    needs: get-versions
+    uses: ./.github/workflows/test-code-dep.yaml
+    with:
+      package-name: torch
+      package-versions: ${{ toJson(fromJson(needs.get-versions.outputs.package_versions).torch) }}

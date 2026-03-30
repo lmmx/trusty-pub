@@ -1,0 +1,86 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Unit tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "tests/**"
+      - "plotly_resampler/**"
+      - "poetry.lock"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "tests/**"
+      - "plotly_resampler/**"
+      - "poetry.lock"
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['windows-latest', 'macOS-latest', 'ubuntu-latest']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        exclude:
+          - os: ubuntu-latest
+            python-version: '3.12'
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - uses: nanasess/setup-chromedriver@v2
+      # with:
+        # Optional: do not specify to match Chrome's version
+        # chromedriver-version: '114.0.5735.90'
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: 1.5.1
+    - name: Cache poetry
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pypoetry/virtualenvs
+        key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}-python-${{ matrix.python-version }}
+    - run: poetry --version
+    - name: Install dependencies
+      run: poetry install --all-extras
+      # Do not use caching (anymore)
+#      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+
+#     - name: Lint with flake8
+#       run: |
+#         # stop the build if there are Python syntax errors or undefined names
+#         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+#         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+#         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Test with pytest
+      run: |
+        poetry run pytest --cov=plotly_resampler --junitxml=junit/test-results-${{ matrix.python-version }}.xml --cov-report=xml tests
+    - name: Upload pytest test results
+       # Use always() to always run this step to publish test results when there are test failures
+      if: ${{ always() && hashFiles('junit/test-results-${{ matrix.python-version }}.xml') != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: pytest-results-${{ matrix.python-version }}-${{ matrix.os }}-${{ github.run_number }}
+        path: junit/test-results-${{ matrix.python-version }}.xml
+        overwrite: true
+        retention-days: 7
+        compression-level: 5
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3

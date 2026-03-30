@@ -1,0 +1,42 @@
+name: Cyclic Imports
+on:
+  workflow_call:
+  workflow_dispatch:  # to trigger manually
+
+permissions:
+  contents: read
+
+jobs:
+  cyclic-import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup python environment
+        uses: durandtibo/setup-venv-uv-action@v0.0.3
+
+      - name: check feu
+        run: |
+          python -c "import feu"
+
+      - name: check feu.install
+        run: |
+          python -c "from feu import install"
+      - name: check feu.install.pip
+        run: |
+          python -c "from feu.install import pip"
+
+      - name: check feu.repo
+        run: |
+          python -c "from feu import repo"
+
+      - name: check feu.utils
+        run: |
+          python -c "from feu import utils"
+
+      - name: check feu.version
+        run: |
+          python -c "from feu import version"

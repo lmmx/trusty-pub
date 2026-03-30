@@ -1,0 +1,132 @@
+name: 📦 tsv2py
+
+on:
+  push:
+    paths:
+      - /lib/**
+      - /tsv/**
+  workflow_dispatch:
+    inputs:
+      publish-to-github:
+        type: boolean
+        description: 'Publish to GitHub'
+        required: true
+        default: false
+
+jobs:
+  build-linux:
+    name: 🧱 [Linux] Build and store distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+      - name: Install pypa/build
+        run: |
+          python3 -m pip install --user build cibuildwheel
+      - name: Create source distribution
+        run: |
+          python3 -m build --sdist --outdir wheelhouse
+      - name: Create binary distribution
+        env:
+          CIBW_PLATFORM: linux
+        run: |
+          cibuildwheel
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsv2py-linux
+          path: wheelhouse/
+          retention-days: 1
+          compression-level: 0
+
+  build-macos:
+    name: 🧱 [macOS] Build and store distribution
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+      - name: Install pypa/build
+        run: |
+          python3 -m pip install --user cibuildwheel
+      - name: Create binary distribution
+        env:
+          CIBW_PLATFORM: macos
+        run: |
+          python3 -m cibuildwheel
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsv2py-macos
+          path: wheelhouse/
+          retention-days: 1
+          compression-level: 0
+
+  build-windows:
+    name: 🧱 [Windows] Build and store distribution
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+      - name: Install pypa/build
+        run: |
+          python3 -m pip install --user cibuildwheel
+      - name: Create binary distribution
+        env:
+          CIBW_PLATFORM: windows
+        run: |
+          cibuildwheel
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsv2py-windows
+          path: wheelhouse/
+          retention-days: 1
+          compression-level: 0
+
+  github-release:
+    name: 📝 GitHub Release signed with Sigstore
+    if: ${{ inputs.publish-to-github }}
+    needs:
+    - build-linux
+    - build-macos
+    - build-windows
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # IMPORTANT: mandatory for making GitHub Releases
+      id-token: write  # IMPORTANT: mandatory for sigstore
+
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v4
+      with:
+        path: dist/
+        merge-multiple: true
+    - name: Sign the dists with Sigstore
+      uses: sigstore/gh-action-sigstore-python@v2.1.1
+      with:
+        inputs: >-
+          ./dist/*.tar.gz
+          ./dist/*.whl
+    - name: Upload artifact signatures to GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      # Upload to GitHub Release using the `gh` CLI.
+      # `dist/` contains the built packages, and the
+      # sigstore-produced signatures and certificates.
+      run: >-
+        gh release create
+        `ls -1 dist/*.tar.gz | grep -Eo '[0-9]+[.][0-9]+[.][0-9]+'` dist/**
+        --repo '${{ github.repository }}' --notes ''

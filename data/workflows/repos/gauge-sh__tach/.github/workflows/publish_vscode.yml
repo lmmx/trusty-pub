@@ -1,0 +1,103 @@
+name: build & publish vscode extension
+
+on:
+  pull_request:
+  release:
+    types: [published]
+
+defaults:
+  run:
+    working-directory: vscode
+
+env:
+  dist_path: ./vscode/dist
+
+jobs:
+  # Build the extension on all platforms.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # windows (no windows 32 bit build because that doesn't seem to be supported by vsce)
+          - os: windows-latest
+            code-target: win32-x64
+
+          # manylinux
+          - os: ubuntu-latest
+            code-target: linux-x64
+          - os: ubuntu-24.04-arm
+            code-target: linux-arm64
+
+          # musllinux (github doesn't have alpine runners so we need to run it in a docker container instead)
+          - os: ubuntu-latest
+            container: quay.io/pypa/musllinux_1_2_x86_64
+            code-target: alpine-x64
+          - os: ubuntu-24.04-arm
+            container: quay.io/pypa/musllinux_1_2_aarch64
+            code-target: alpine-arm64
+
+          # macos (https://docs.github.com/en/actions/reference/runners/github-hosted-runners#single-cpu-runners)
+          - os: macos-15-intel
+            code-target: darwin-x64
+          - os: macos-14
+            code-target: darwin-arm64
+
+    name: Build (${{ matrix.code-target }})
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - if: matrix.container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: ${{ matrix.container }}
+          options: -v ${{ github.workspace }}:/io -w /io
+          run: |
+            cd vscode
+            ../pw uv sync --only-group vscode
+            ../pw uv run --no-sync nox --session build_package
+            ../pw uv run npx vsce package -o "./dist/tach-${{ matrix.code-target }}.vsix" --target ${{ matrix.code-target }}
+
+      - if: ${{ !matrix.container }}
+        uses: actions/setup-python@v5
+      - if: ${{ !matrix.container }}
+        run: |
+          ../pw uv sync --only-group vscode
+          ../pw uv run --no-sync nox --session build_package
+          ../pw uv run npx vsce package -o "./dist/tach-${{ matrix.code-target }}.vsix" --target ${{ matrix.code-target }}
+
+      # Upload the extension.
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.code-target }}
+          path: ${{ env.dist_path }}
+
+  # Publish the built extension to the Marketplace & openVSX.
+  publish:
+    name: "Publish"
+    if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'release' && github.event.action == 'published'
+    needs: ["build"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Download all built artifacts.
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ env.dist_path }}
+      - run: ls -al ./dist
+
+      - name: Install dependencies
+        run: ../pw uv run --only-group vscode npm ci
+
+      - name: Publish Extension - visual studio marketplace
+        run: |
+          ../pw uv run --only-group vscode npx vsce publish --pat ${{ secrets.MARKETPLACE_TOKEN }} --packagePath ./dist/*/tach-*.vsix
+
+      - name: Publish Extension - open VSX
+        run: |
+          ../pw uv run npx ovsx publish --pat ${{ secrets.OPEN_VSX_TOKEN }} --packagePath ./dist/*/tach-*.vsix

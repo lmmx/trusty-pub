@@ -1,0 +1,23 @@
+name: Enforce License Compliance
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - release/*
+  pull_request:
+
+# Cancel in progress workflows on pull_requests.
+# https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-a-fallback-value
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+
+jobs:
+  enforce-license-compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Enforce License Compliance'
+        uses: getsentry/action-enforce-license-compliance@48236a773346cb6552a7bda1ee370d2797365d87 # main
+        with:
+          fossa_api_key: ${{ secrets.FOSSA_API_KEY }}

@@ -1,0 +1,157 @@
+name: build
+
+on:
+  push:
+    branches:
+      - '*'
+    tags-ignore:
+      - 'v[0-9]*'
+  pull_request:
+  workflow_call:
+    inputs:
+      skip_codecov:
+        type: boolean
+        required: false
+        default: false
+jobs:
+  unittests:
+    runs-on: ubuntu-latest
+
+    # We want to run on external PRs, but not on our own internal PRs as they'll be run
+    # by the push to the branch.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+
+    strategy:
+      matrix:
+        include:
+          - python-version: "3.10"
+            resolution: "lowest-direct"
+          - python-version: 3.14
+            resolution: "highest"
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Install a specific version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Packages
+        run: |
+          # Install as an editable so that the coverage path
+          # is predicable
+          uv sync
+          uv pip install --resolution=${{ matrix.resolution }} -e ".[extra,test]"
+
+      - name: Environment Information
+        run: uv pip list
+
+      - name: Run Tests
+        run: make test
+
+      - name: List Directory
+        run: ls -la
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: result-images
+          path: tests/result_images/
+          if-no-files-found: ignore
+
+      # To change secrets
+      # https://app.codecov.io/github/has2k1/plotnine/settings
+      # https://github.com/has2k1/plotnine/settings/secrets/actions
+      - name: Upload coverage to Codecov
+        if: ${{ !inputs.skip_codecov }}
+        uses: codecov/codecov-action@v4
+        with:
+          name: "py${{ matrix.python-version }}"
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
+  lint-and-format:
+    runs-on: ubuntu-latest
+
+    # We want to run on external PRs, but not on our own internal PRs as they'll be run
+    # by the push to the branch.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+
+    strategy:
+      matrix:
+        python-version: [3.14]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Install a specific version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Packages
+        run: |
+          uv sync
+          uv pip install ruff
+
+      - name: Environment Information
+        run: uv pip list
+
+      - name: Check lint with Ruff
+        run: make lint
+
+      - name: Check format with Ruff
+        run: make format
+
+  typecheck:
+    runs-on: ubuntu-latest
+
+    # We want to run on external PRs, but not on our own internal PRs as they'll be run
+    # by the push to the branch.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+
+    strategy:
+      matrix:
+        python-version: [3.14]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Install a specific version of uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Packages
+        run: |
+          uv sync
+          uv pip install ".[extra, typing]"
+
+      - name: Environment Information
+        run: uv pip list
+
+      - name: Run Tests
+        run: make typecheck
+
+  call-build-documentation:
+    if: |
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    uses: ./.github/workflows/documentation.yml
+
+  build-website:
+    # Requires all the previous jobs to pass
+    needs: [unittests, lint-and-format, typecheck, call-build-documentation]
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build Website (Dev)
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PLOTNINE_WEBSITE }}
+          repository: has2k1/plotnine.org
+          event-type: push-plotnine-main

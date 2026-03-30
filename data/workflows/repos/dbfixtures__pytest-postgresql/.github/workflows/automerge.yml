@@ -1,0 +1,19 @@
+name: Merge me test dependencies!
+
+on:
+  workflow_run:
+    types:
+      - completed
+    workflows:
+      # List all required workflow names here.
+      - 'Run tests'
+      - 'Run tests on macos'
+      - 'Run linters'
+      - 'Test build package'
+
+jobs:
+  automerge:
+    uses: fizyk/actions-reuse/.github/workflows/shared-automerge.yml@v4.4.5
+    secrets:
+      app_id: ${{ secrets.MERGE_APP_ID }}
+      private_key: ${{ secrets.MERGE_APP_PRIVATE_KEY }}

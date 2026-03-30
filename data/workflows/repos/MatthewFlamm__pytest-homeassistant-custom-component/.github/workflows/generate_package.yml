@@ -1,0 +1,28 @@
+name: Generate Package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate_package:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: "actions/checkout@v5"
+      - name: checkout repo content
+        uses: actions/checkout@v5
+      - name: setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: install dependencies
+        run: pip install -r requirements_generate.txt
+      - name: Install phacc for current versions
+        run: pip install -e .
+      - name: execute generate package
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          python generate_phacc/generate_phacc.py --regen
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.REPO_SCOPED_TOKEN }}

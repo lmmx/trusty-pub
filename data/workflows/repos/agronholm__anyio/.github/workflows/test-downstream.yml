@@ -1,0 +1,138 @@
+---
+name: Test against downstream projects
+
+on:
+  workflow_dispatch:
+
+jobs:
+  starlette:
+    name: "Starlette on Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: Kludex/starlette
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install dependencies
+        run: |
+          scripts/install
+          pip install anyio[trio]@git+https://github.com/agronholm/anyio.git@${{ github.ref_name }}
+      - name: Run tests
+        run: scripts/test
+      - name: Enforce coverage
+        run: scripts/coverage
+
+  httpcore:
+    name: "Httpcore on Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: encode/httpcore
+      - name: Install uv
+        uses: actions/setup-python@v6
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Install dependencies
+        run: |
+          scripts/install
+          pip install anyio[trio]@git+https://github.com/agronholm/anyio.git@${{ github.ref_name }}
+      - name: Run tests
+        run: scripts/test
+      - name: Enforce coverage
+        run: scripts/coverage
+
+  fastapi:
+    name: "FastAPI on Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    env:
+      UV_SYSTEM_PYTHON: 1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: tiangolo/fastapi
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.4.15"
+          enable-cache: true
+          cache-dependency-glob: |
+            requirements**.txt
+            pyproject.toml
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements-tests.txt
+          uv pip install anyio[trio]@git+https://github.com/agronholm/anyio.git@${{ github.ref_name }}
+      - name: Run tests
+        run: pytest -W ignore::ResourceWarning
+        env:
+          PYTHONPATH: ./docs_src
+
+  litestar:
+    name: "Litestar on Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: litestar-org/litestar
+      - name: Set up python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.8.8"
+          enable-cache: true
+      - name: Install dependencies
+        run: |
+          uv sync
+          uv pip install anyio[trio]@git+https://github.com/agronholm/anyio.git@${{ github.ref_name }}
+      - name: Test
+        run: uv run pytest docs/examples tests -n auto
+
+  mcp:
+    name: "Anthropic MCP on Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+        dep-resolution: ["lowest-direct", "highest"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: modelcontextprotocol/python-sdk
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          version: "0.7.2"
+      - name: Install the project
+        run: |
+          uv sync --frozen --all-extras --python ${{ matrix.python-version }} --resolution ${{ matrix.dep-resolution }}
+          uv pip install anyio[trio]@git+https://github.com/agronholm/anyio.git@${{ github.ref_name }}
+      - name: Run pytest
+        run: uv run --frozen --no-sync pytest

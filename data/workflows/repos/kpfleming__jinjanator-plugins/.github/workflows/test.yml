@@ -1,0 +1,34 @@
+name: CI tests
+
+on:
+  workflow_call:
+    inputs:
+      if:
+        required: false
+        default: true
+        type: boolean
+      image:
+        required: true
+        type: string
+      python:
+        required: true
+        type: string
+
+jobs:
+  test:
+    if: inputs.if
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ${{ inputs.image }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        show-progress: false
+    - name: build wheel
+      run: hatch build -t wheel
+      shell: bash
+    - name: install project
+      run: hatch run ci.py${{ inputs.python }}:uv pip install dist/*.whl
+      shell: bash
+    - name: run tests
+      run: hatch run ci.py${{ inputs.python }}:ci

@@ -1,0 +1,29 @@
+name: Publish TPV to PyPI
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - '*'
+jobs:
+  build-n-publish:
+    name: Build and publish Python 🐍 distributions 📦 to PyPI and TestPyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v5
+    - name: Create and check packages
+      run: |
+        python3 setup.py sdist bdist_wheel
+        uvx twine check dist/*
+        ls -l dist
+    - name: Publish distribution 📦 to PyPI
+      if: github.event_name == 'release'
+      uses: pypa/gh-action-pypi-publish@release/v1

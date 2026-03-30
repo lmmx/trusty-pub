@@ -1,0 +1,24 @@
+name: Lint rq
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v6
+
+    - name: 📝 Run Lint Check
+      uses: astral-sh/ruff-action@v3
+      with:
+        src: "rq tests"

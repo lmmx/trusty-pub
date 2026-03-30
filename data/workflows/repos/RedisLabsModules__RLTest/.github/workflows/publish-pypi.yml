@@ -1,0 +1,37 @@
+name: Publish Pypi
+on:
+  release:
+    types: [ published ]
+
+jobs:
+  pytest:
+    name: Publish to PyPi
+    runs-on: ubuntu-latest
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    steps:
+      - uses: actions/checkout@master
+
+      - name: get version from tag
+        id: get_version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+          cache: 'poetry'
+
+      - name: Install Python dependencies
+        run: |
+          poetry version ${{ steps.get_version.outputs.VERSION }}
+          poetry install
+
+      - name: Publish to PyPI
+        run: |
+          poetry publish -u __token__ -p ${{ secrets.PYPI_TOKEN }} --build

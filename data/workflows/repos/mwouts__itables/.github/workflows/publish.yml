@@ -1,0 +1,31 @@
+name: Publish to PyPI
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/itables
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - name: Build package
+        run: |
+          # hatch==1.16.0 fails with
+          # hatchling.plugin.exceptions.UnknownPluginError: Unknown build hook: jupyter-builder
+          python -m pip install 'hatch<1.16' 'virtualenv<21'  # https://github.com/pypa/hatch/issues/2193
+          python -m hatch build
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1

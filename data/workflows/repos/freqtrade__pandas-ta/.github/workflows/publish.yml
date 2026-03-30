@@ -1,0 +1,43 @@
+name: Publish
+on:
+  push:
+    tags: [ '[0-9]+\.[0-9]+.*' ]
+  workflow_dispatch:
+
+jobs:
+  # build:
+    # uses: ./.github/workflows/ci.yml
+  publish:
+    # needs: build
+    runs-on: ubuntu-22.04
+    environment:
+      name: release
+      url: https://pypi.org/p/ft-pandas-ta
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build distribution
+        run: |
+          pip install -U build
+          python -m build --sdist --wheel
+
+      # - name: Download artifact
+      #   uses: actions/download-artifact@v3
+      #   with:
+      #     name: package
+      #     path: dist
+
+      # - name: Publish 📦 on PyPI Test
+      #   uses: pypa/gh-action-pypi-publish@v1.8.11
+      #   with:
+      #     repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish 📦 on PyPI
+        uses: pypa/gh-action-pypi-publish@v1.12.4

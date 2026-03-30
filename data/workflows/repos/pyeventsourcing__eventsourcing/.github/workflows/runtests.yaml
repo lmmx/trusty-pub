@@ -1,0 +1,123 @@
+name: Python package
+
+on: [push, pull_request]
+
+jobs:
+  lint-and-test-code:
+
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 30
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        postgres-version: ["12", "13", "14", "15", "16", "17"]
+
+    # Service containers to run with `runner-job`
+    services:
+      # Label used to access the service container
+      postgres:
+        # Docker Hub image
+        image: postgres:${{ matrix.postgres-version }}
+        # Provide the password for postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+        # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          # Maps tcp port 5432 on service container to the host
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Setup database
+      run: |
+        PGPASSWORD=postgres psql -c 'CREATE DATABASE eventsourcing;' -U postgres -h localhost
+        PGPASSWORD=postgres psql -c 'CREATE DATABASE eventsourcing_nopublic;' -U postgres -h localhost
+        PGPASSWORD=postgres psql -c "CREATE USER eventsourcing WITH PASSWORD 'eventsourcing';" -U postgres -h localhost
+        PGPASSWORD=postgres psql -c "ALTER DATABASE eventsourcing OWNER TO eventsourcing;" -U postgres -h localhost
+        PGPASSWORD=postgres psql -c "ALTER DATABASE eventsourcing_nopublic OWNER TO eventsourcing;" -U postgres -h localhost
+        PGPASSWORD=postgres psql eventsourcing -c "CREATE SCHEMA myschema AUTHORIZATION eventsourcing" -U postgres -h localhost
+        PGPASSWORD=postgres psql eventsourcing_nopublic -c "CREATE SCHEMA myschema AUTHORIZATION eventsourcing" -U postgres -h localhost
+        PGPASSWORD=postgres psql eventsourcing_nopublic -c "DROP SCHEMA public;" -U postgres -h localhost
+
+    - name: Start UmaDB
+      run: make start-umadb
+
+    - name: Install Poetry
+      run: make install-poetry
+
+    - name: Install packages
+      run: make install
+
+    - name: Lint
+      run: make lint
+
+    - name: Test
+      run: make test
+
+    - name: Benchmark
+      run: make benchmark
+
+    - name: Stop UmaDB
+      run: make stop-umadb
+
+
+#    - name: Coveralls
+#      uses: AndreMiras/coveralls-python-action@develop
+#      with:
+#        parallel: true
+#        flag-name: Unit Test
+
+  build-and-test-distribution:
+
+    needs: lint-and-test-code
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 5
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      run: make install-poetry
+
+    - name: Build and Test Distribution
+      run: |
+        pip install -U pip
+        pip install wheel
+        make build
+        find ./dist -type f -name '*.whl' -exec pip install '{}[postgres]' \;
+        rm -r dist
+        rm -r eventsourcing
+        python -m unittest -v tests/domain_tests/test_aggregate.py
+        python -m unittest -v tests/application_tests/test_application_with_popo.py
+        python -m unittest -v tests/application_tests/test_processapplication.py
+        python -c "import eventsourcing.postgres"
+
+#  coveralls_finish:
+#    needs: lint-and-test-code
+#    runs-on: ubuntu-latest
+#    steps:
+#    - name: Coveralls Finished
+#      uses: AndreMiras/coveralls-python-action@develop
+#      with:
+#        parallel-finished: true

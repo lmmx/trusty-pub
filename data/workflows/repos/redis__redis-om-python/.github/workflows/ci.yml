@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - '[0-9].[0-9]+'  # matches to backport branches, e.g. 3.6
+    tags: [ 'v*' ]
+  pull_request:
+    branches:
+      - main
+      - '[0-9].[0-9]+'
+      - 'update/pre-commit-autoupdate'
+  schedule:
+    - cron: '0 6 * * *'  # Daily 6AM UTC build
+
+env:
+  pythonversion: "3.10"
+
+
+jobs:
+
+  lint:
+    name: Linter
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{env.pythonversion}}
+      - name: Install dependencies
+        run: uv sync
+      - name: Make sync version of library (redis_om)
+        run: make sync
+      - name: Run linter
+        run: |
+          make dist
+          make lint
+
+  test-unix:
+    name: Test Unix
+    needs: lint
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+        pyver: [ "3.10", "3.11", "3.12", "3.13", "pypy-3.10" ]
+        redisstack: [ "redis/redis-stack:latest", "redis:8.4.0" ]
+      fail-fast: false
+    services:
+      redis:
+        image: ${{ matrix.redisstack }}
+        ports:
+          # Maps port 6379 on service container to the host
+          - 6379:6379
+        # Set health checks to wait until redis has started
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      OS: ${{ matrix.os }}
+      INSTALL_DIR: ${{ github.workspace }}/redis
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Setup Python ${{ matrix.pyver }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.pyver }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Make sync version of library (redis_om)
+        run: make sync
+      - name: Run unittests (redisstack:${{ matrix.redisstack }}, ${{ matrix.os }})
+        env:
+          REDIS_OM_URL: "redis://localhost:6379?decode_responses=True"
+        run: |
+          make test
+          uv run coverage xml
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          file: ./coverage.xml
+          flags: unit
+          env_vars: OS
+          fail_ci_if_error: false
+
+  benchmark:
+    name: Benchmarks
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      redis:
+        image: redis/redis-stack:latest
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Setup Python ${{ env.pythonversion }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.pythonversion }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Make sync version of library (redis_om)
+        run: make sync
+      - name: Run benchmarks
+        env:
+          REDIS_OM_URL: "redis://localhost:6379?decode_responses=True"
+        run: |
+          uv run pytest tests/test_benchmarks.py -v --benchmark-only --benchmark-json=benchmark-results.json
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
+      - name: Display benchmark summary
+        run: |
+          # Generate the benchmark table
+          uv run python << 'PYTHON_SCRIPT' > benchmark-table.txt
+          import json
+          print("## Benchmark Results")
+          print("")
+          print("| Test | Mean | Min | Max | OPS |")
+          print("|------|------|-----|-----|-----|")
+          with open('benchmark-results.json') as f:
+              data = json.load(f)
+          for b in data['benchmarks']:
+              name = b['name'].replace('test_', '')
+              mean = b['stats']['mean'] * 1e6  # convert to microseconds
+              min_val = b['stats']['min'] * 1e6
+              max_val = b['stats']['max'] * 1e6
+              ops = b['stats']['ops']
+              if mean < 1:
+                  mean_str = f'{mean*1000:.0f}ns'
+              elif mean < 1000:
+                  mean_str = f'{mean:.1f}us'
+              else:
+                  mean_str = f'{mean/1000:.1f}ms'
+              if min_val < 1:
+                  min_str = f'{min_val*1000:.0f}ns'
+              elif min_val < 1000:
+                  min_str = f'{min_val:.1f}us'
+              else:
+                  min_str = f'{min_val/1000:.1f}ms'
+              if max_val < 1:
+                  max_str = f'{max_val*1000:.0f}ns'
+              elif max_val < 1000:
+                  max_str = f'{max_val:.1f}us'
+              else:
+                  max_str = f'{max_val/1000:.1f}ms'
+              print(f'| {name} | {mean_str} | {min_str} | {max_str} | {ops:.0f}/s |')
+          PYTHON_SCRIPT
+          # Output to both logs and step summary
+          cat benchmark-table.txt
+          cat benchmark-table.txt >> $GITHUB_STEP_SUMMARY
+      - name: Prepare for benchmark storage
+        run: |
+          # Save benchmark results outside the repo before stashing
+          cp benchmark-results.json /tmp/benchmark-results.json
+          # Stash changes from make sync to allow branch switching
+          git stash --include-untracked
+          # Restore the benchmark results
+          cp /tmp/benchmark-results.json benchmark-results.json
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'pytest'
+          output-file-path: benchmark-results.json
+          # Store benchmark data in gh-pages branch
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          # Alert if performance regresses by more than 20%
+          alert-threshold: '120%'
+          fail-on-alert: false
+          # Dependabot PRs cannot create review comments with the default token.
+          comment-on-alert: ${{ github.actor != 'dependabot[bot]' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Only push to gh-pages on main branch
+          auto-push: ${{ github.ref == 'refs/heads/main' }}

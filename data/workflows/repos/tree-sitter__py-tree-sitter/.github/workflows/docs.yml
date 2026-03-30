@@ -1,0 +1,47 @@
+name: Docs
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - pyproject.toml
+      - tree_sitter/__init__.py
+      - tree_sitter/binding/*
+      - docs/**
+
+concurrency:
+  group: ${{github.workflow}}-${{github.ref}}
+  cancel-in-progress: true
+
+permissions:
+  pages: write
+  id-token: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{steps.deploy.outputs.page_url}}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .[docs]
+        env:
+          CFLAGS: -O0
+      - name: Build docs
+        run: sphinx-build -M html docs docs/_build
+      - name: Upload docs artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/_build/html
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v5

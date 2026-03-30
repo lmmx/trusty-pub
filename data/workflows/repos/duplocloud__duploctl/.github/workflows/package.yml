@@ -1,0 +1,95 @@
+name: Python Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      push:
+        description: Push the artifact to PyPi?
+        default: false
+        type: boolean
+      tag:
+        description: Tag to push
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      push:
+        description: Push the artifact to PyPi?
+        default: true
+        type: boolean
+      tag:
+        description: Tag to push
+        required: true
+        type: string
+    outputs:
+      version:
+        description: The true version of the package
+        value: ${{ jobs.package.outputs.version }}
+    secrets:
+      PYPI_API_TOKEN:
+        description: PyPi token
+        required: true
+      GH_APP_KEY:
+        description: GitHub App private key
+        required: true
+
+jobs:
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/duplocloud-client
+    outputs:
+      version: ${{ steps.check_version.outputs.version }}
+    steps:
+
+    - name: Setup
+      uses: duplocloud/duploctl/.github/actions/setup@main
+      with:
+        ref: ${{ inputs.tag }}
+        install: ".[build]"
+        app-id: ${{ vars.GH_APP_ID }}
+        private-key: ${{ secrets.GH_APP_KEY }}
+
+    - name: Check True Version
+      id: check_version
+      run: |
+        version=$(python -m setuptools_scm)
+        package="duplocloud_client-${version}"
+        echo "Building Version: $version"
+        echo "version=$version" >> $GITHUB_OUTPUT
+        echo "package=$package" >> $GITHUB_OUTPUT
+
+    - name: Run the Build
+      run: python -m build
+
+    - name: Show Files
+      run: ls -l dist
+
+    - name: Publish Package to PyPI
+      if: inputs.push == true
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+
+    - name: Build Plugin aws
+      run: |
+        python -m build ./plugins/aws -o=dist/plugins/aws
+        ls -l dist/plugins/aws
+
+    - name: Publish Plugin aws to PyPI
+      if: inputs.push == true
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        packages-dir: dist/plugins/aws/
+
+    - name: Github Artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ steps.check_version.outputs.package }}
+        path: |
+          dist/*.tar.gz
+          dist/plugins/**/*.tar.gz
+

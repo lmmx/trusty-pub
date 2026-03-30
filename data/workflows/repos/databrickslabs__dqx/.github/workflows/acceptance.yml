@@ -1,0 +1,252 @@
+name: acceptance
+
+on:
+  pull_request:
+    types: [ opened, synchronize, ready_for_review ]
+  merge_group:
+    types: [ checks_requested ]
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false  # don't cancel ongoing runs to ensure fixtures are completed and resources terminated
+
+jobs:
+
+  integration:
+    # Only run this job for PRs from branches on the main repository and not from forks.
+    # Workflows triggered by PRs from forks don't have access to the tool environment.
+    # PRs from forks to be tested by the reviewer(s) / maintainer(s) before merging.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork
+    environment: tool
+    runs-on: larger
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          cache: 'pip'
+          cache-dependency-path: '**/pyproject.toml'
+          python-version: '3.12'
+
+      - name: Install hatch
+        run: pip install hatch==1.16.5
+
+      - name: Run unit tests and generate test coverage report
+        run: make test
+
+      # Integration tests are run from within tests/integration folder.
+      # Create .coveragerc with correct relative path to source code.
+      - name: Prepare code coverage configuration for integration tests
+        run: |
+          cat > tests/integration/.coveragerc << EOF
+          [run]
+          source = ../../src
+          relative_files = true
+          EOF
+
+      # Run tests from `tests/integration` as defined in .codegen.json
+      # and generate code coverage for modules defined in .coveragerc
+      # Run 10 tests in parallel: https://github.com/databrickslabs/sandbox/blob/main/acceptance/ecosystem/pytest_run.py
+      - name: Run integration tests and generate test coverage report
+        uses: databrickslabs/sandbox/acceptance@3313d06ce86227537b3f37f5974f7eecb2a8e59a # acceptance/v0.4.4
+        with:
+          vault_uri: ${{ secrets.VAULT_URI }}
+          timeout: 2h
+          codegen_path: tests/integration/.codegen.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage  # make sure the coverage report is preserved
+
+      - name: Merge coverage reports and convert them to XML
+        run: |
+          hatch run combine_coverage
+
+      # Recursively search the entire workspace directory for all coverage reports.
+      # All uploaded test coverage reports will be used even if publish is done multiple time.
+      - name: Publish test coverage
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
+        with:
+          use_oidc: true
+
+  integration_serverless:
+    # Only run this job for PRs from branches on the main repository and not from forks.
+    # Workflows triggered by PRs from forks don't have access to the tool environment.
+    # PRs from forks to be tested by the reviewer(s) / maintainer(s) before merging.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork
+    environment: tool
+    runs-on: larger
+    env:
+      DATABRICKS_SERVERLESS_COMPUTE_ID: auto
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          cache: 'pip'
+          cache-dependency-path: '**/pyproject.toml'
+          python-version: '3.12'
+
+      - name: Install hatch
+        run: pip install hatch==1.16.5
+
+      # Integration tests are run from within tests/integration folder.
+      # Create .coveragerc with correct relative path to source code.
+      - name: Prepare code coverage configuration for integration tests
+        run: |
+          cat > tests/integration/.coveragerc << EOF
+          [run]
+          source = ../../src
+          relative_files = true
+          EOF
+
+      - name: Run integration tests on serverless cluster
+        uses: databrickslabs/sandbox/acceptance@3313d06ce86227537b3f37f5974f7eecb2a8e59a # acceptance/v0.4.4
+        with:
+          vault_uri: ${{ secrets.VAULT_URI }}
+          timeout: 2h
+          codegen_path: tests/integration/.codegen.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          DATABRICKS_SERVERLESS_COMPUTE_ID: ${{ env.DATABRICKS_SERVERLESS_COMPUTE_ID }}
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage  # make sure the coverage report is preserved
+
+      - name: Merge coverage reports and convert them to XML
+        run: |
+          hatch run combine_coverage
+
+      # collects all coverage reports
+      - name: Publish test coverage
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
+        with:
+          use_oidc: true
+
+  e2e:
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork
+    environment: tool
+    runs-on: larger
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          cache: 'pip'
+          cache-dependency-path: '**/pyproject.toml'
+          python-version: '3.12'
+
+      - name: Install hatch
+        run: pip install hatch==1.16.5
+
+      - name: Install dbt
+        run: |
+          pip install dbt-core==1.10.9 dbt-databricks==1.10.9
+
+      - name: Install Databricks CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+          databricks --version
+
+      - name: Azure login (OIDC)
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Set env vars for Azure CLI auth
+        run: |
+          val=$(az keyvault secret show --id "${{ secrets.VAULT_URI }}/secrets/DATABRICKS-HOST" --query value -o tsv)
+          echo "DATABRICKS_HOST=$val" >> $GITHUB_ENV
+          echo "DATABRICKS_AUTH_TYPE=azure-cli" >> $GITHUB_ENV
+
+      - name: Run e2e tests
+        uses: databrickslabs/sandbox/acceptance@3313d06ce86227537b3f37f5974f7eecb2a8e59a # acceptance/v0.4.4
+        with:
+          vault_uri: ${{ secrets.VAULT_URI }}
+          timeout: 2h
+          codegen_path: tests/e2e/.codegen.json
+        env:
+          REF_NAME: ${{ github.ref_name }} # NOTE: end-to-end tests use this to pip install from the current PR branch
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+  e2e_serverless:
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork
+    environment: tool
+    runs-on: larger
+    env:
+      DATABRICKS_SERVERLESS_COMPUTE_ID: auto
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          cache: 'pip'
+          cache-dependency-path: '**/pyproject.toml'
+          python-version: '3.12'
+
+      - name: Install hatch
+        run: pip install hatch==1.16.5
+
+      - name: Install dbt
+        run: |
+          pip install dbt-core==1.10.9 dbt-databricks==1.10.9
+
+      - name: Install Databricks CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+          databricks --version
+
+      - name: Azure login (OIDC)
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Set env vars for Azure CLI auth
+        run: |
+          val=$(az keyvault secret show --id "${{ secrets.VAULT_URI }}/secrets/DATABRICKS-HOST" --query value -o tsv)
+          echo "DATABRICKS_HOST=$val" >> $GITHUB_ENV
+          echo "DATABRICKS_AUTH_TYPE=azure-cli" >> $GITHUB_ENV
+
+      - name: Run e2e tests on serverless cluster
+        uses: databrickslabs/sandbox/acceptance@3313d06ce86227537b3f37f5974f7eecb2a8e59a # acceptance/v0.4.4
+        with:
+          vault_uri: ${{ secrets.VAULT_URI }}
+          timeout: 2h
+          codegen_path: tests/e2e/.codegen.json
+        env:
+          REF_NAME: ${{ github.ref_name }} # NOTE: end-to-end tests use this to pip install from the current PR branch
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          DATABRICKS_SERVERLESS_COMPUTE_ID: ${{ env.DATABRICKS_SERVERLESS_COMPUTE_ID }}

@@ -1,0 +1,17 @@
+name: CI
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+  pull_request: ~
+
+jobs:
+  shared-ci:
+    uses: zigpy/workflows/.github/workflows/ci.yml@main
+    with:
+      CODE_FOLDER: zigpy_zigate
+      CACHE_VERSION: 2
+      PRE_COMMIT_CACHE_PATH:  ~/.cache/pre-commit
+      MINIMUM_COVERAGE_PERCENTAGE: 46
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

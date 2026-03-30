@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags-ignore:
+    - v*
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  pre-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    - uses: pre-commit/action@v3.0.0
+
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [3.8, 3.11, 3.12] # sweep range of currently gaped
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Installation (deps and package)
+      # we install with flit --pth-file,
+      # so that coverage will be recorded for the module
+      run: |
+        pip install flit
+        flit install --deps=all
+
+    - name: Run pytest
+      run: |
+        pytest --cov=mdformat_frontmatter --cov-report=xml --cov-report=term-missing
+
+    - name: Upload to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == 3.11
+      uses: codecov/codecov-action@v1
+      with:
+        name: pytests-py3.11
+        flags: pytests
+        file: ./coverage.xml
+        fail_ci_if_error: true
+
+  pre-commit-hook:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+
+    - name: Installation (deps and package)
+      run: |
+        pip install pre-commit
+        pip install .
+
+    - name: run pre-commit with plugin
+      run: |
+        pre-commit run --config .pre-commit-test.yaml --all-files --verbose --show-diff-on-failure
+
+  tag_github_publish:
+    needs: [pre-commit, tests, pre-commit-hook]
+    if: github.ref == 'refs/heads/main' && github.repository == 'butler54/mdformat-frontmatter'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+        fetch-depth: 0
+        # needs to be a GH admins
+        token: ${{ secrets.ADMIN_WRITE_PAT }}
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    - name: Install python release tools
+      run: pip install python-semantic-release flit
+
+    - name: Release a new version to github
+      env:
+        GH_TOKEN: ${{ secrets.ADMIN_WRITE_PAT }}
+      run: |
+        git config --global user.name "semantic-release (via Github actions)"
+        git config --global user.email "semantic-release@github-actions"
+        git config --global core.eol lf
+        semantic-release -v version

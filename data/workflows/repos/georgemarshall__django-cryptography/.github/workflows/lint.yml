@@ -1,0 +1,50 @@
+name: lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Use the lowest version of Python supported
+          python-version: "3.7"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: setup-python-${{ runner.os }}-mypy-pip-${{ hashFiles('**/setup.cfg') }}
+          restore-keys: |
+            setup-python-${{ runner.os }}-mypy-pip
+
+      - name: Install mypy
+        run: pip install -e '.[mypy]'
+
+      - uses: pr-annotators/mypy-pr-annotator@v1.0.0
+
+      - name: Run mypy
+        run: mypy django_cryptography/
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "16"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: pre-commit/action@v3.0.1

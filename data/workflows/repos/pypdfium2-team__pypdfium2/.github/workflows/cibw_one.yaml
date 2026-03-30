@@ -1,0 +1,129 @@
+# SPDX-FileCopyrightText: 2026 geisserml <geisserml@gmail.com>
+# SPDX-FileContributor: 2025 wojiushixiaobai <296015668@qq.com>
+# SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
+
+name: CIBW build one
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+      cibw_target:
+        type: string
+      cibw_arch:
+        type: string
+      cibw_py_ver:
+        default: 'cp310'
+        type: string
+      branch:
+        type: string
+        default: ''
+      repo_tag:
+        type: string
+        default: ''
+      test_pdfium:
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      os:
+        type: string
+        default: ubuntu-latest
+      cibw_target:
+        type: string
+        default: manylinux_x86_64
+      cibw_arch:
+        type: string
+        default: x86_64
+      cibw_py_ver:
+        default: 'cp310'
+        type: string
+      branch:
+        type: string
+        default: ''
+      repo_tag:
+        type: string
+        default: ''
+      test_pdfium:
+        type: boolean
+        default: true
+
+jobs:
+  
+  build:
+    name: ${{ inputs.cibw_target }} on ${{ inputs.os }}
+    runs-on: ${{ inputs.os }}
+    
+    steps:
+      
+      - name: Check out pypdfium2
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.branch || github.ref_name }}
+      
+      - name: Create pypdfium2 tag (optional)
+        if: ${{ inputs.repo_tag }}
+        run: |
+          git config user.email "geisserml@gmail.com"
+          git config user.name "geisserml"
+          git tag -a "$REPO_TAG" -m "Autorelease"
+        env:
+          REPO_TAG: ${{ inputs.repo_tag }}
+      
+      - name: Set up QEMU
+        if: ${{ contains(inputs.cibw_target, 'linux') && !(inputs.cibw_arch == 'x86_64' || inputs.cibw_arch == 'aarch64') }}
+        uses: docker/setup-qemu-action@v4
+      
+      - name: Install Windows cross deps
+        if: ${{ startsWith(inputs.os, 'windows') && inputs.cibw_arch != 'AMD64' }}
+        uses: ChristopheLav/windows-sdk-install@v1
+        with:
+          version-sdk: 26100
+          features: 'OptionId.WindowsDesktopDebuggers'
+      
+      # Reminder: most configuration is in pyproject.toml so we can use TOML overrides
+      - name: Build wheels
+        uses: loong64/cibuildwheel@fd72855f862cec492d23c2957a5a1613da53ef7c  # v3.4.0
+        env:
+          # Will be tagged as not python specific by our setup.py. inputs.cibw_py_ver only controls the version used at build time.
+          # Could also use `*`, then cibuildwheel would build with the oldest supported version, and walk through the others but skip because a compatible wheel is around already.
+          CIBW_BUILD: "${{ inputs.cibw_py_ver }}-${{ inputs.cibw_target }}"
+          CIBW_ARCHS: "${{ inputs.cibw_arch }}"
+          TEST_PDFIUM: "${{ inputs.test_pdfium && 1 || 0 }}"
+        with:
+          output-dir: wheelhouse
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ./wheelhouse/*.whl
+          name: cibw-${{ inputs.cibw_target }}
+      
+      # For the rarer Linux architectures, Pillow and Numpy don't currently provide wheels on PyPI. However, Linux distributions do provide packages.
+      # Sadly, cibuildwheel isn't really suited for working with system python (cf. https://github.com/pypa/cibuildwheel/discussions/2553)
+      # Also, the need to use an older distribution for build (to achieve low glibc requirement) contradicts the desire for a more recent python software stack for testing.
+      # So our best bet is to do it by hand:
+      
+      - name: Post-test
+        # x86_64 and aarch64 (manylinux and musllinux) are already handled within cibuildwheel, but doesn't harm to test them again in a different container
+        if: ${{ contains(inputs.cibw_target, 'linux') }}
+        # q&d: suppress known test suite failures on s390x and musllinux_armv7l
+        continue-on-error: ${{ inputs.cibw_arch == 's390x' || inputs.cibw_target == 'musllinux_armv7l' }}
+        run: |
+          # get_container.py outputs the env vars CONTAINER, PREPARE_CMD, INIT_SHELL and DOCKER_FLAGS
+          eval "$(python3 ./utils/get_container.py $TARGET)"
+          # Just sharing the pypdfium2 dir among host and container is easier (and faster) than copying.
+          # Note, on RHEL/Fedora (rsp. hosts that use SELinux), you'll need to add --security-opt label=disable
+          docker run -i --rm -v "$PWD:/pypdfium2" -e PREPARE_CMD $DOCKER_FLAGS "$CONTAINER" $INIT_SHELL <<END
+          eval "\$PREPARE_CMD"
+          # alternatively: python3 -m pip config set global.break-system-packages true
+          python3 -m venv --system-site-packages testenv
+          VENV_PY=/testenv/bin/python3
+          cd /pypdfium2
+          \$VENV_PY -m pip install ./wheelhouse/*.whl
+          \$VENV_PY -m pytest tests/
+          END
+        env:
+          TARGET: ${{ inputs.cibw_target }}

@@ -1,0 +1,23 @@
+name: pytest
+
+on: [push, pull_request]
+
+jobs:
+  test-on-env:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11"]
+    runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: set up UV with ${{ matrix.python-version }} on ${{ matrix.os }}
+        uses: astral-sh/setup-uv@v6
+      - name: Install dependencies
+        run: |
+          uv sync --locked --all-extras --dev
+      - name: Test with pytest
+        run: |
+          uv run pytest

@@ -1,0 +1,185 @@
+name: Wheels
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'master' }}
+
+on:
+  push:
+    branches: [master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [master]
+    paths-ignore:
+      - 'docs/**'
+
+jobs:
+  build_wheels:
+    name: Wheels for ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # let other jobs in matrix complete if one fails
+      fail-fast: false
+      matrix:
+        include:
+        - name: linux-amd
+          os: ubuntu-24.04
+        - name: linux-arm
+          os: ubuntu-24.04-arm
+        - name: macos-intel
+          os: macos-15-intel
+        - name: macos-arm
+          os: macos-15
+        - name: windows-x64
+          os: windows-latest
+        - name: windows-x86
+          os: windows-latest
+        - name: windows-arm64
+          # https://github.com/actions/partner-runner-images#available-images
+          os: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # avoid leaking credentials in uploaded artifacts
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel~=3.3
+
+      - name: Build wheels
+        env:
+          CIBW_ARCHS_WINDOWS: ${{ matrix.name == 'windows-x86' && 'auto32' || 'native' }}
+        run: python -m cibuildwheel --output-dir wheelhouse
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.name }}
+          path: ./wheelhouse/*.whl
+
+  build_wheels_ppc:
+    name: Wheels for linux-ppc
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # avoid leaking credentials in uploaded artifacts
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/ppc64le
+
+      - name: Install cibuildwheel
+        run: python -m pip install -r requirements-wheel.txt
+
+      - name: Build wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_ARCHS: ppc64le
+          CIBW_ENVIRONMENT: LIBSSH2_VERSION=1.11.1 LIBGIT2_VERSION=1.9.2 LIBGIT2=/project/ci
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-linux-ppc
+          path: ./wheelhouse/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    outputs:
+      release_title: ${{ steps.parse_changelog.outputs.release_title }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # avoid leaking credentials in uploaded artifacts
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Build sdist
+        run: pipx run build --sdist --outdir dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: dist/*
+
+      - name: parse CHANGELOG for release notes
+        id: parse_changelog
+        run: python .github/workflows/parse_release_notes.py
+
+      - name: Upload Release Notes
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: ReleaseNotes.md
+
+
+  twine-check:
+    name: Twine check
+    # It is good to do this check on non-tagged commits.
+    # Note, pypa/gh-action-pypi-publish (see job below) does this automatically.
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    needs: [build_wheels, build_wheels_ppc, sdist]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      - name: check distribution files
+        run: pipx run twine check dist/*
+
+  pypi:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build_wheels, build_wheels_ppc, sdist]
+    permissions:
+      contents: write # to create GitHub Release
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        path: dist
+        pattern: wheels-*
+        merge-multiple: true
+
+    - name: Display structure of downloaded files
+      run: ls -lh dist
+
+    - uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        skip-existing: true
+
+    - uses: actions/download-artifact@v8
+      with:
+        name: release-notes
+    - name: Create GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        TAG: ${{ github.ref_name }}
+        REPO: ${{ github.repository }}
+        TITLE: ${{ needs.sdist.outputs.release_title }}
+      # https://cli.github.com/manual/gh_release_create
+      run: >-
+        gh release create ${TAG}
+        --verify-tag
+        --repo ${REPO}
+        --title "${TITLE}"
+        --notes-file ReleaseNotes.md

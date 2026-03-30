@@ -1,0 +1,214 @@
+name: Daily Integration Tests
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/cron.integration.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check New Version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(gh api repos/databendlabs/databend/releases --jq '.[0].tag_name')
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "Running integration tests with Databend version: **$version**" >> $GITHUB_STEP_SUMMARY
+
+  integration:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: integration
+      - name: Run Core Integration Tests
+        run: make -C tests test-core DATABEND_QUERY_VERSION=${{ needs.version.outputs.version }}
+      - name: Run Driver Integration Tests
+        run: make -C tests test-driver DATABEND_QUERY_VERSION=${{ needs.version.outputs.version }}
+      - name: Run BendSQL Integration Tests
+        run: make -C tests test-bendsql DATABEND_QUERY_VERSION=${{ needs.version.outputs.version }}
+
+  build-python:
+    name: build-python-${{ matrix.wheel }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        wheel: [py39-abi, cp38]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup
+        with:
+          cache-key: bindings-python-linux-x64
+          target: x86_64-unknown-linux-gnu
+      - name: Get opts
+        id: opts
+        shell: bash
+        run: |
+          base_args="--release --strip --out dist"
+          if [[ "${{ matrix.wheel }}" == "py39-abi" ]]; then
+            wheel_args="--features py39-abi --interpreter python3.9"
+          else
+            wheel_args="--no-default-features --features cp38 --interpreter python3.8"
+          fi
+          echo "BUILD_ARGS=${base_args} ${wheel_args}" >> $GITHUB_OUTPUT
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: bindings/python
+          target: x86_64-unknown-linux-gnu
+          manylinux: auto
+          sccache: "true"
+          args: ${{ steps.opts.outputs.BUILD_ARGS }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-python-${{ matrix.wheel }}
+          path: bindings/python/dist/*.whl
+
+  build-nodejs:
+    name: build-nodejs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup
+        with:
+          cache-key: bindings-nodejs-linux-x64
+          target: x86_64-unknown-linux-gnu
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Corepack
+        working-directory: bindings/nodejs
+        run: npm i -g --force corepack && corepack enable
+      - name: Install dependencies
+        working-directory: bindings/nodejs
+        run: pnpm install
+      - name: Build
+        working-directory: bindings/nodejs
+        shell: bash
+        env:
+          NAPI_TARGET: x86_64-unknown-linux-gnu
+        run: |
+          pnpm napi build --platform --target=$NAPI_TARGET --release --js generated.js
+          pnpm node ./scripts/header.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-nodejs
+          path: bindings/nodejs/*.node
+
+  integration-python:
+    needs: [version, build-python]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pyver: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.pyver }}
+      - name: Prepare
+        working-directory: tests
+        run: make up DATABEND_QUERY_VERSION=${{ needs.version.outputs.version }}
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bindings-python-*
+          path: bindings/python/artifacts
+          merge-multiple: true
+      - name: Install dependencies
+        working-directory: bindings/python
+        run: |
+          pip install behave
+          if [[ "${{ matrix.pyver }}" == "3.8" ]]; then
+            pip install artifacts/*cp38*.whl
+          else
+            pip install artifacts/*abi3*.whl
+          fi
+      - name: Test AsyncIO
+        working-directory: bindings/python
+        run: behave tests/asyncio
+      - name: Test Blocking
+        working-directory: bindings/python
+        run: behave tests/blocking
+      - name: Test Cursor
+        working-directory: bindings/python
+        run: behave tests/cursor
+
+  integration-nodejs:
+    needs: [version, build-nodejs]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ver: ["18", "20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.ver }}
+      - name: Corepack
+        working-directory: bindings/nodejs
+        run: npm i -g --force corepack && corepack enable
+      - name: Install dependencies
+        working-directory: bindings/nodejs
+        run: pnpm install
+      - name: Prepare
+        working-directory: tests
+        run: make up DATABEND_QUERY_VERSION=${{ needs.version.outputs.version }}
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-nodejs
+          path: bindings/nodejs
+      - name: Run Tests
+        working-directory: bindings/nodejs
+        run: pnpm run test
+
+
+  notify:
+    if: failure()
+    needs: [integration, integration-python, integration-nodejs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Notify Dev Team
+        uses: actions/github-script@v7
+        env:
+          WEBHOOK_URL: ${{ secrets.DEV_TEAM_WEBHOOK_URL }}
+        with:
+          script: |
+            const body = {
+              msg_type: 'text',
+              content: {
+                text: '⚠️ BendSQL Integration Tests Failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+              }
+            }
+            const response = await fetch(process.env.WEBHOOK_URL, {
+              method: 'POST',
+              body: JSON.stringify(body),
+              headers: {'Content-Type': 'application/json'}
+            });
+            const result = await response.json();
+            console.log(result);

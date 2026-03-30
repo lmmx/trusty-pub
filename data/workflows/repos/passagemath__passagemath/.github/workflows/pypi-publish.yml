@@ -1,0 +1,62 @@
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: 'Workflow run id'
+        required: true
+  workflow_call:
+    inputs:
+      run-id:
+        type: string
+        required: false
+      patterns:
+        type: string
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pattern: >-
+          ${{ fromJson(inputs.patterns
+                       || '["ubuntu-latest-manylinux-*-wheels",
+                            "ubuntu-latest-musllinux-*-wheels",
+                            "ubuntu-24.04-arm-manylinux-*-wheels",
+                            "ubuntu-24.04-arm-musllinux-*-wheels",
+                            "macos-15-intel-*-wheels",
+                            "macos-14-*-wheels",
+                            "windows-*-wheels",
+                            "noarch-wheels",
+                            "dist"]') }}
+    env:
+      CAN_DEPLOY: ${{ secrets.SAGEMATH_PYPI_API_TOKEN != '' }}
+    steps:
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ matrix.pattern }}
+          path: wheelhouse
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.inputs.run-id || inputs.run-id || github.run_id }}
+
+      - name: Remove wheels that are too large
+        run: |
+          mkdir -p too-large
+          find wheelhouse -size +99M -exec mv "{}" too-large/ \;
+          ls -l wheelhouse
+          ls -l too-large
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.SAGEMATH_PYPI_API_TOKEN }}
+          packages-dir: wheelhouse/
+          skip-existing: true
+          verbose: true
+        if: env.CAN_DEPLOY == 'true'

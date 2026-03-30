@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+  linting:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+    - name: Install dependencies
+      run: |
+        python -m pip install tox
+
+    - name: Run pre-commit
+      run: |
+        tox -e precom
+
+    - name: Run mypy
+      run: |
+        tox -e mypy
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        requests-version: ['"requests>=2.0,<3.0"']
+        urllib3-version: ['"urllib3<2"', '"urllib3>=2,<3.0"']
+
+
+    steps:
+    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+      with:
+        fetch-depth: 1
+
+    - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        make install-deps
+        pip install ${{ matrix.requests-version }} ${{ matrix.urllib3-version }}
+
+    - name: Run Pytest
+      run: |
+        # Run test
+        pytest . --asyncio-mode=auto --cov-report term-missing --cov-report xml --cov responses
+
+    - name: Code Coverage Report
+      if: success()
+      uses: codecov/codecov-action@ab904c41d6ece82784817410c45d8b8c02684457 # v3

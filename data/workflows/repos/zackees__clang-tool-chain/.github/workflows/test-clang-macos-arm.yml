@@ -1,0 +1,73 @@
+name: clang-macos-arm
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-clang-macos-arm:
+    name: Clang (macOS ARM64)
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Display platform information
+      run: |
+        echo "Platform: macOS ARM64"
+        uname -a
+        python --version
+
+    - name: Download and install toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      timeout-minutes: 20
+
+    - name: Verify installation
+      run: |
+        uv run clang-tool-chain info
+
+    - name: Test C compilation
+      run: |
+        cat > test.c << 'EOF'
+        #include <stdio.h>
+        int main() {
+            printf("Hello from macOS ARM64!\n");
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-c test.c -o test
+        ./test
+
+    - name: Test C++ compilation
+      run: |
+        cat > test.cpp << 'EOF'
+        #include <iostream>
+        int main() {
+            std::cout << "Hello C++ from macOS ARM64!" << std::endl;
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-cpp test.cpp -o test_cpp
+        ./test_cpp
+
+    - name: Run integration tests
+      run: |
+        uv run pytest tests/test_integration.py -v

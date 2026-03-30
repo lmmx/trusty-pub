@@ -1,0 +1,92 @@
+name: Full Test Suite
+description: Runs the full test suite across various OS/Python configurations.
+on: [push, pull_request, workflow_dispatch]
+
+concurrency:
+  group: ${{ github.workflow }}|${{ github.ref_name }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  runtest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-22.04, ubuntu-24.04, windows-2022, windows-2025]
+        python: ["3.9", "3.14"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          pip-install: --group dev
+
+      - name: Setup Ubuntu dependencies
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install libtirpc-dev
+
+      - name: Setup Windows dependencies
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          choco install --yes --no-progress dmd winflexbison3
+          # Environment variables to disable telemetry and enable MSVC caching.
+          echo "POWERSHELL_TELEMETRY_OPTOUT=1" >> $GITHUB_ENV
+          echo "PSDisableModuleAnalysisCacheCleanup=1" >> $GITHUB_ENV
+          echo "SCONS_CACHE_MSVC_CONFIG=1" >> $GITHUB_ENV
+          echo "VCPKG_DISABLE_METRICS=1" >> $GITHUB_ENV
+          echo "VSCMD_SKIP_SENDTELEMETRY=1" >> $GITHUB_ENV
+          # Populate the MSVC cache.
+          python testing/ci/windows_msvc_cache.py
+
+      - name: Setup excluded tests
+        run: |
+          touch .excludes
+          if [[ "${{matrix.os}}" == "macos"* ]]; then
+            echo "test/Docbook/basic/epub/epub_live.py" >> .excludes
+            echo "test/Docbook/basic/html/html_live.py" >> .excludes
+            echo "test/Docbook/basic/htmlchunked/htmlchunked_live.py" >> .excludes
+            echo "test/Docbook/basic/htmlhelp/htmlhelp_live.py" >> .excludes
+            echo "test/Libs/LIBLITERALPREFIX.py" >> .excludes
+            echo "test/Rpcgen/live.py" >> .excludes
+            echo "test/builderrors.py" >> .excludes
+            echo "test/ninja/ninja_handle_control_c_rebuild.py" >> .excludes
+            echo "test/ninja/shutdown_scons_daemon.py" >> .excludes
+            echo "test/scons-time/run/option/verbose.py" >> .excludes
+          elif [[ "${{matrix.os}}" == "windows"* ]]; then
+            echo "test/CPPDEFINES/pkg-config.py" >> .excludes
+            echo "test/packaging/msi/explicit-target.py" >> .excludes
+            echo "test/packaging/msi/file-placement.py" >> .excludes
+            echo "test/packaging/msi/package.py" >> .excludes
+            if [[ "${{matrix.os}}" == "windows-2022" ]]; then
+              echo "test/scons-time/run/config/python.py" >> .excludes
+              echo "test/scons-time/run/option/python.py" >> .excludes
+              echo "test/sconsign/script/no-SConsignFile.py" >> .excludes
+              echo "test/sconsign/script/SConsignFile.py" >> .excludes
+              echo "test/sconsign/script/Signatures.py" >> .excludes
+            fi
+          fi
+          cat .excludes
+
+      - name: Run tests
+        id: run-tests
+        run: |
+          python runtest.py SCons test testing --time --jobs=0 --exclude-list=.excludes
+
+      - name: Archive failed tests
+        uses: actions/upload-artifact@v7
+        if: always() && steps.run-tests.outcome == 'failure'
+        with:
+          name: ${{ matrix.os }}-${{ matrix.python }}-failed-tests
+          path: failed_tests.log

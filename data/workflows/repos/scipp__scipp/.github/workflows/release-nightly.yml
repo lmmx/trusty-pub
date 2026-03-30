@@ -1,0 +1,53 @@
+name: Nightly Release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 20 * * *'
+
+jobs:
+  build_wheels:
+    name: Wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15-intel, macos-15, windows-2022, ubuntu-24.04-arm]
+        build: [cp311, cp312, cp313, cp314, cp314t]
+        nightly: [true]
+    uses: ./.github/workflows/wheel.yml
+    with:
+      os: ${{ matrix.os }}
+      build: ${{ matrix.build }}
+      nightly: ${{ matrix.nightly }}
+
+  release_pypi:
+    name: Make Release on pypi.anaconda.org
+    needs: build_wheels
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List old dev wheels from pypi.anaconda.org
+        run: |
+          curl --silent "https://api.anaconda.org/package/scipp-nightly-wheels/scipp" | jq -r '.releases[] | select(.version | contains("dev")) | .full_name' > dev_wheels.txt
+          cat dev_wheels.txt
+      - name: Upload wheel to pypi.anaconda.org/scipp-nightly-wheels/simple
+        uses: scientific-python/upload-nightly-action@5748273c71e2d8d3a61f3a11a16421c8954f9ecf # 0.6.3
+        with:
+          artifacts_path: dist
+          anaconda_nightly_upload_organization: scipp-nightly-wheels
+          anaconda_nightly_upload_token: ${{secrets.ANACONDA_NIGHTLY_WHEEL_TOKEN}}
+      # The current implementation in this workflow has a bug, commenting out the delete step
+      # so we don't mistakenly delete the current nightly release. This will be fixed once we
+      # can start using the delete wheel action from scientific-python/upload-nightly-action
+      # upstream. It's okay to keep uploading wheels to pypi.anaconda.org/scipp-nightly-wheels
+      # for now, we can clean it up once the new action is released.
+      # - name: Delete old dev wheels from pypi.anaconda.org
+      #   # We use pixi exec to reuse the pixi already installed by the upload nightly action
+      #   run: |
+      #     while read -r package_name; do
+      #       echo "Removing $package_name"
+      #       pixi exec -s anaconda-client=1.12.3 anaconda --token "${{secrets.ANACONDA_NIGHTLY_WHEEL_TOKEN}}" remove -f "$package_name"
+      #     done < dev_wheels.txt

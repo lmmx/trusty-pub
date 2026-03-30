@@ -1,0 +1,77 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+      - "test-me-*"
+
+  pull_request:
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and Check Package
+        uses: hynek/build-and-inspect-python-package@v2.14.0
+        with:
+          # Disabling because this is failing currently, see #466.
+          attest-build-provenance-github: 'false'
+
+  test:
+
+    needs: [package]
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: [ubuntu-latest, windows-latest]
+        tox_env: ["py"]
+        include:
+          - python: "3.10"
+            os: ubuntu-latest
+            tox_env: "pytest6"
+          - python: "3.12"
+            os: ubuntu-latest
+            tox_env: "norewrite"
+          - python: "3.12"
+            os: windows-latest
+            tox_env: "norewrite"
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Download Package
+      uses: actions/download-artifact@v8
+      with:
+        name: Packages
+        path: dist
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python }}
+        allow-prereleases: true
+
+    - name: Install tox
+      run: |
+        python -m pip install --upgrade pip
+        pip install tox
+
+    - name: Test
+      shell: bash
+      run: |
+        tox run -e ${{ matrix.tox_env }} --installpkg `find dist/*.tar.gz`

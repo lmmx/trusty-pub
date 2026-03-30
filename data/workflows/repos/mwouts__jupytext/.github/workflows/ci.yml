@@ -1,0 +1,75 @@
+name: CI
+on:
+  workflow_dispatch:
+    inputs:
+      upload-build-artifacts:
+        type: boolean
+        required: false
+        default: false
+        description: Upload build artifacts
+  push:
+    paths-ignore:
+      - "CHANGELOG.md"
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: "0 11 * * 4"
+
+permissions:
+  # All nested workflows will inherit these permissions and so no need to declare
+  # in each step file
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    uses: ./.github/workflows/step_pre-commit.yml
+
+  static-analysis:
+    needs: [ pre-commit ]
+    uses: ./.github/workflows/step_static-analysis.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  test-pip:
+    needs: [ pre-commit ]
+    uses: ./.github/workflows/step_tests-pip.yml
+    with:
+      coverage: ${{ github.event_name != 'schedule' }}
+
+  coverage:
+    needs: [ test-pip ]
+    uses: ./.github/workflows/step_coverage.yml
+    if: github.event_name != 'schedule'
+
+  test-conda:
+    needs: [ pre-commit ]
+    uses: ./.github/workflows/step_tests-conda.yml
+    with:
+      coverage: ${{ github.event_name != 'schedule' }}
+
+  test-ui:
+    needs: [ test-pip ]
+    uses: ./.github/workflows/step_tests-ui.yml
+
+  build:
+    needs: [ test-pip, test-conda, test-ui ]
+    uses: ./.github/workflows/step_build.yml
+    with:
+      upload: ${{ inputs.upload-build-artifacts || false }}
+
+  pass:
+    name: Pass
+    needs: [ pre-commit, static-analysis, test-pip, coverage, test-conda, test-ui, build ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: coverage
+    if: always()

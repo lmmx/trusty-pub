@@ -1,0 +1,27 @@
+name: Publish Python Package to PyPI
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - '*.*.*' # Push events to tags following semantic versioning
+
+jobs:
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: '3.14'
+    - name: Build and publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+      run: |
+        uv build
+        uvx twine upload dist/*

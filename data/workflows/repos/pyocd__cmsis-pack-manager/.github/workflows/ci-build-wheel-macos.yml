@@ -1,0 +1,45 @@
+name: CI Build Wheel MacOS
+on: workflow_dispatch
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-13]
+    env:
+      CIBW_ARCHS_MACOS: universal2
+      CIBW_BUILD: "cp39-*"
+      CIBW_ENVIRONMENT: 'PATH="$PATH:/usr/share/rust/.cargo/bin:$HOME/.cargo/bin"'
+      CIBW_BUILD_VERBOSITY: 1
+      MACOSX_DEPLOYMENT_TARGET: 10.12
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.71.1
+          profile: minimal
+
+      - name: Install Rust *-apple-darwin targets
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+
+      - uses: actions/setup-python@v4
+        name: Install Python
+        with:
+          python-version: 3.9
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.23.0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifact-macos
+          path: ./wheelhouse/*.whl

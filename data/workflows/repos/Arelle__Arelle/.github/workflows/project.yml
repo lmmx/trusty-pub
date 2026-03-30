@@ -1,0 +1,25 @@
+name: Add to Project
+
+on:
+  issues:
+    types:
+      - opened
+      - transferred
+  pull_request_target:
+    types:
+      - opened
+
+permissions: {}
+
+env:
+  PROJECT_URL: ${{ vars.PROJECT_URL != '' && vars.PROJECT_URL || 'https://github.com/orgs/Arelle/projects/3' }}
+
+jobs:
+  add-to-project:
+    name: PR
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: ${{ env.PROJECT_URL }}
+          github-token: ${{ secrets.PROJECT_TOKEN }}

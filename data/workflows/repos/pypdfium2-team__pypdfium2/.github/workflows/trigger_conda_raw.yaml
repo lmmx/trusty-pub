@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 geisserml <geisserml@gmail.com>
+# SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
+
+name: Trigger conda_raw release
+on:
+  schedule:
+    # pdfium-binaries triggers conda on the first Monday of month at 4 o'clock UTC, so we'll want to rebuild after that, but before the next main release where we want to use the package
+    - cron: '0 4 8 * *'  # monthly, 8th day
+  workflow_dispatch:
+
+jobs:
+  
+  trigger:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: conda.yaml
+          inputs: |
+            {
+              "package": "raw",
+              "pdfium_ver": "latest",
+              "new_only": "true",
+              "test": "true",
+              "publish": "true",
+              "py_version": "3.12"
+            }

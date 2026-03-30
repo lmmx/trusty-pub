@@ -1,0 +1,156 @@
+name: CI
+permissions: read-all
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_PRERELEASE: allow # TODO(@jorenham): remove once scipy 1.17.0 is released
+# UV_LOCKED: 1  # TODO(@jorenham): re-enable after restoring `UV_PRERELEASE`
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: scientific-python/repo-review@v0.12.3
+        with:
+          plugins: sp-repo-review
+
+      - name: dprint
+        uses: dprint/check@v2.3
+
+      - name: typos
+        uses: crate-ci/typos@v1.44.0
+
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          python-version: "3.14"
+          activate-environment: true
+
+      - name: ruff check
+        run: uv run ruff check --output-format=github
+
+      - name: ruff format
+        run: uv run ruff format --check
+
+      # mypy_primer expects pyright to pass
+      - name: pyright
+        uses: jakebailey/pyright-action@v3.0.2
+
+  validate_stubs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v8.0.0
+        with:
+          python-version: "3.14"
+
+      - name: check version literals
+        run: uv run scripts/check_version_literals.py
+
+      - name: check for unstubbed modules
+        run: uv run scripts/unstubbed_modules.py
+
+      # avoid stubdefaulter checking the tests as if they were stubs
+      - name: exclude tests
+        run: rm -rf tests
+
+      - name: run stubdefaulter
+        run: uv run stubdefaulter --check --exit-zero --packages .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["3.11"]
+        np: ["1.26", "2.0", "2.1", "2.2", "2.3", "2.4"]
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      # NOTE: mypy ignores `uv run --with=...` (and `--isolated` does not help), so we
+      # manually (re)install the desired version directly in the environment.
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v8.0.0
+        with:
+          activate-environment: true
+          python-version: ${{ matrix.py }}
+
+      - name: install dependencies
+        run: uv pip install --exact --group type numpy==${{ matrix.np }}.* .
+
+      - name: ty check scipy-stubs
+        run: ty check --error-on-warning --output-format=github scipy-stubs
+
+      - name: pyrefly check scipy-stubs
+        run: pyrefly check scipy-stubs
+
+      - name: basedpyright scipy-stubs
+        run: basedpyright scipy-stubs
+
+      - name: mypy scipy-stubs
+        run: mypy --no-incremental --cache-dir=/dev/null scipy-stubs
+
+      - name: stubtest scipy
+        run: stubtest --ignore-disjoint-bases --allowlist=.mypyignore scipy
+
+  typetest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["3.11", "3.12", "3.13", "3.14"]
+        np: ["1.26", "2.0", "2.1", "2.2", "2.3", "2.4"]
+        exclude:
+          - py: "3.13"
+            np: "1.26"
+          - py: "3.13"
+            np: "2.0"
+          - py: "3.14"
+            np: "1.26"
+          - py: "3.14"
+            np: "2.0"
+          - py: "3.14"
+            np: "2.1"
+          - py: "3.14"
+            np: "2.2"
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          activate-environment: true
+          python-version: ${{ matrix.py }}
+
+      - name: install dependencies
+        run: uv pip install --exact --group type numpy==${{ matrix.np }}.* .
+
+      - name: pyrefly check tests
+        run: pyrefly check tests
+
+      - name: basedpyright tests
+        run: basedpyright tests
+
+      - name: mypy tests
+        run: mypy --no-incremental --cache-dir=/dev/null tests

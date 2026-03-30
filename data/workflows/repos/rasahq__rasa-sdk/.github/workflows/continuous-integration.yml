@@ -1,0 +1,281 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  pull_request:
+  workflow_dispatch:
+
+
+env:
+  IS_TAG_BUILD: ${{ startsWith(github.event.ref, 'refs/tags') }}
+  DEV_REPOSITORY: 329710836760.dkr.ecr.eu-west-1.amazonaws.com/rasa/rasa-sdk-dev
+  AWS_REGION: eu-west-1
+  # This tag is used to build the image without dev dependencies
+  DEV_IMAGE_TAG: pr${{ github.event.number }}
+  # This tag is used to build the image with dev dependencies
+  DEV_IMAGE_WITH_DEV_DEPS_TAG: pr${{ github.event.number }}-with-dev-deps
+
+# SECRETS
+# - PYPI_TOKEN: publishing token for amn41 account, needs to be maintainer of
+#               RasaHQ/rasa-sdk on pypi (account credentials in 1password)
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read # This is required for actions/checkout
+
+
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout git repository 🕝
+        uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3
+
+      - name: Set up Python 3.10 🐍
+        uses: actions/setup-python@d27e3f3d7c64b4bbf8e4abfb9b63b83e846e0435
+        with:
+          python-version: '3.10'
+
+      - name: Read Poetry Version 🔢
+        run: |
+          echo "POETRY_VERSION=$(scripts/poetry-version.sh)" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Install poetry 🦄
+        uses: Gr1N/setup-poetry@15821dc8a61bc630db542ae4baf6a7c19a994844
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+
+      - name: Load Poetry Cached Libraries ⬇
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57
+        with:
+          path: ~/.cache/pypoetry/virtualenvs
+          key: ${{ runner.os }}-poetry-3.10-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: ${{ runner.os }}-poetry-
+
+      - name: Checkout target branch to be able to diff
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          echo "DOCSTRING_DIFF_BRANCH=origin/${{ github.base_ref }}" >> $GITHUB_ENV
+
+          # Fetch entire history for current branch so that `make lint-docstrings`
+          # can calculate the proper diff between the branches
+          git fetch --unshallow origin "${{ github.ref }}"
+
+      - name: Install Dependencies 📦
+        run: make install
+
+      - name: Listing Dependencies 📦
+        run: poetry show
+
+      - name: Lint Code 🎎
+        run: |
+          # If it's not a pull request, $DOCSTRING_DIFF_BRANCH is unset.
+          # This will result in an empty diff, which effictively means that
+          # make lint-docstrings will be skipped for other events than `pull_request`
+          make lint BRANCH=$DOCSTRING_DIFF_BRANCH
+
+      - name: Check Types 📚
+        run: make types
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - name: Checkout git repository 🕝
+        uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3
+
+      - name: Set up Python ${{ matrix.python-version }} 🐍
+        uses: actions/setup-python@d27e3f3d7c64b4bbf8e4abfb9b63b83e846e0435
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Read Poetry Version 🔢
+        run: |
+          echo "POETRY_VERSION=$(scripts/poetry-version.sh)" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Install poetry 🦄
+        uses: Gr1N/setup-poetry@15821dc8a61bc630db542ae4baf6a7c19a994844
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+
+      - name: Load Poetry Cached Libraries ⬇
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57
+        with:
+          path: ~/.cache/pypoetry/virtualenvs
+          key: ${{ runner.os }}-poetry-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: ${{ runner.os }}-poetry-
+
+      - name: Install Dependencies 📦
+        run: make install
+
+      - name: Test Code 🔍
+        run: make test
+
+      # TODO: Re-enable (if still required) when coveralls.io availability is restored.
+      # - name: Send Coverage Report 📊
+      #   if: matrix.python-version == '3.10'
+      #   env:
+      #     COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     COVERALLS_SERVICE_NAME: github
+      #   run: poetry run coveralls
+
+  docker_linter:
+    name: Lint Dockerfile
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3
+      - name: Lint Dockerfile
+        uses: brpaz/hadolint-action@1623ba61710b974b55ba455930e6f2c8ef919778
+        with:
+          dockerfile: "Dockerfile"
+
+  rasa-sdk-dev-docker-image:
+    name: Build dev Docker image
+    if: "!startsWith(github.ref, 'refs/heads/prepare-release-')"
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Authenticate to AWS ECR
+        uses: ./.github/actions/auth-aws-ecr
+        with:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ARN_ROLE_TO_ASSUME: ${{ secrets.AWS_ASSUME_ROLE_SESSION_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@4574d27a4764455b42196d70a065bc6853246a25 # v3.4.0
+        with:
+          platforms: linux/amd64,linux/arm64
+          # The latest version will lead to segmentation fault.
+          image: tonistiigi/binfmt:qemu-v7.0.0-28
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca  # v3.9.0
+
+      - name: Build and push docker image to AWS
+        run: |
+          IMAGE_NAME=${{ env.DEV_REPOSITORY }} \
+          IMAGE_TAG=${{ env.DEV_IMAGE_TAG }} \
+          make build-and-push-multi-platform-docker
+
+  rasa-sdk-with-dev-deps-docker-image:
+    name: Build dev Docker image with dev dependencies
+    if: "!startsWith(github.ref, 'refs/heads/prepare-release-')"
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Authenticate to AWS ECR
+        uses: ./.github/actions/auth-aws-ecr
+        with:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ARN_ROLE_TO_ASSUME: ${{ secrets.AWS_ASSUME_ROLE_SESSION_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@4574d27a4764455b42196d70a065bc6853246a25 # v3.4.0
+        with:
+          platforms: linux/amd64,linux/arm64
+          # The latest version will lead to segmentation fault.
+          image: tonistiigi/binfmt:qemu-v7.0.0-28
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca  # v3.9.0
+
+      - name: Build and push docker image to AWS
+        run: |
+          IMAGE_WITH_DEV_DEPS=${{ env.DEV_REPOSITORY }} \
+          IMAGE_TAG=${{ env.DEV_IMAGE_WITH_DEV_DEPS_TAG }} \
+          make build-and-push-multi-platform-docker-with-dev-deps
+
+  grpc_standalone_integration_tests:
+    name: Run gRPC integration tests using standalone server
+    if: "!startsWith(github.ref, 'refs/heads/prepare-release-')"
+    runs-on: ubuntu-24.04
+    needs: [rasa-sdk-with-dev-deps-docker-image]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Authenticate to AWS ECR
+        uses: ./.github/actions/auth-aws-ecr
+        with:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ARN_ROLE_TO_ASSUME: ${{ secrets.AWS_ASSUME_ROLE_SESSION_TOKEN }}
+
+      - name: Docker version
+        run: docker --version && docker compose version
+
+      - name: gRPC Server Integration Testing - Run tests on gRPC server with and without TLS 🩺
+        run: |
+          make run-grpc-standalone-integration-tests
+        env:
+          IMAGE_WITH_DEV_DEPS: ${{ env.DEV_REPOSITORY }}
+          IMAGE_TAG: ${{ env.DEV_IMAGE_WITH_DEV_DEPS_TAG }}
+
+
+  grpc_docker_integration_tests:
+    name: Run gRPC integration tests using Docker containers
+    if: "!startsWith(github.ref, 'refs/heads/prepare-release-')"
+    runs-on: ubuntu-24.04
+    needs: [rasa-sdk-dev-docker-image, rasa-sdk-with-dev-deps-docker-image]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Authenticate to AWS ECR
+        uses: ./.github/actions/auth-aws-ecr
+        with:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ARN_ROLE_TO_ASSUME: ${{ secrets.AWS_ASSUME_ROLE_SESSION_TOKEN }}
+
+      - name: Docker version
+        run: docker --version && docker compose version
+
+      - name: gRPC Server Integration Testing - Run env docker containers
+        run: |
+          make start-grpc-integration-test-env
+        env:
+          IMAGE_NAME: ${{ env.DEV_REPOSITORY }}
+          IMAGE_TAG: ${{ env.DEV_IMAGE_TAG }}
+
+      - name: gRPC Server Integration Testing - Run tests on gRPC server with and without TLS 🩺
+        run: |
+          make run-grpc-integration-tests
+        env:
+          IMAGE_WITH_DEV_DEPS: ${{ env.DEV_REPOSITORY }}
+          IMAGE_TAG: ${{ env.DEV_IMAGE_WITH_DEV_DEPS_TAG }}
+
+      - name: gRPC Server Integration Testing - Stop env docker containers
+        run: |
+          make stop-grpc-integration-test-env
+        env:
+          IMAGE_NAME: ${{ env.DEV_REPOSITORY }}
+          IMAGE_TAG: ${{ env.DEV_IMAGE_TAG }}
+
+      - name: Show container logs
+        if: always()
+        uses: ./.github/actions/debug-grpc
+        with:
+          COMPOSE_FILE_PATH: integration_tests/grpc_server/setup/docker-compose.yml
+          RASA_SDK_REPOSITORY: ${{ env.DEV_REPOSITORY }}
+          RASA_SDK_IMAGE_TAG: ${{ env.DEV_IMAGE_TAG }}

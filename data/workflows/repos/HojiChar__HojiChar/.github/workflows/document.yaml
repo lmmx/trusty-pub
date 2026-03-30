@@ -1,0 +1,46 @@
+name: Deploy documents
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: write-all
+
+jobs:
+  GenenerateDocs:
+    name: Deploy documents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-extras --group docs
+      - name: Document generation
+        run: |
+          uv run pdoc -o docs hojichar
+
+      - name: Check if docs branch exists
+        id: check_docs_branch
+        run: |
+          git remote set-url origin https://github-actions:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}
+          git fetch origin
+          if ! git show-ref --quiet refs/remotes/origin/docs; then
+            echo "Create docs branch"; \
+            exit 1; \
+          fi
+
+      - name: Push new docs
+        run: |
+          git remote set-url origin https://github-actions:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}
+          git config --global user.name "${GITHUB_ACTOR}"
+          git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          if (git diff --shortstat origin/docs | grep '[0-9]'); then \
+            git add .; \
+            git commit -m "Generating docs via GitHub Actions"; \
+            git push origin --force HEAD:docs; \
+          fi

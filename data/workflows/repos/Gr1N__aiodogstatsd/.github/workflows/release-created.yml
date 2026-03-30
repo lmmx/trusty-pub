@@ -1,0 +1,55 @@
+name: release-created
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: "3.10"
+      - uses: Gr1N/setup-poetry@v7
+        with:
+          poetry-version: 1.1.12
+      - run: make install-deps
+      - run: make docs-build
+      - uses: peaceiris/actions-gh-pages@v2
+        env:
+          PERSONAL_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          PUBLISH_BRANCH: gh-pages
+          PUBLISH_DIR: ./site
+
+  build-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: "3.10"
+      - uses: Gr1N/setup-poetry@v7
+        with:
+          poetry-version: 1.1.12
+      - run: make install-deps
+      - run: make publish
+        env:
+          PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          PYPI_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+
+  build-notify:
+    runs-on: ubuntu-latest
+
+    needs: [build-docs, build-package]
+
+    steps:
+      - uses: appleboy/telegram-action@0.0.7
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: ${{ github.repository }} publish ${{ github.ref }} succeeded

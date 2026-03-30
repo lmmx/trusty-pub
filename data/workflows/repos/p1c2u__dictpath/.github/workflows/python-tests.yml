@@ -1,0 +1,72 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: CI / Tests
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  test:
+    name: "py${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Get full Python version
+        id: full-python-version
+        shell: bash
+        run: |
+          version="$(python -c 'import sys; print("-".join(map(str, sys.version_info)))')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up poetry
+        uses: Gr1N/setup-poetry@v9
+        with:
+          poetry-version: "2.2.1"
+
+      - name: Configure poetry
+        run: poetry config virtualenvs.in-project true
+
+      - name: Set up cache
+        uses: actions/cache@v5
+        id: cache
+        with:
+          path: .venv
+          key: venv-${{ github.event_name }}-${{ runner.os }}-${{ steps.full-python-version.outputs.version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Ensure cache is healthy
+        if: steps.cache.outputs.cache-hit == 'true'
+        shell: bash 
+        run: timeout 10s poetry run pip --version || rm -rf .venv
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Format check (black)
+        run: poetry run black --check pathable tests
+
+      - name: Import order check (isort)
+        run: poetry run isort --check-only --filter-files pathable tests
+
+      - name: Test
+        env:
+          PYTEST_ADDOPTS: "--color=yes"
+        run: poetry run pytest
+
+      - name: Static type check
+        run: poetry run mypy
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5

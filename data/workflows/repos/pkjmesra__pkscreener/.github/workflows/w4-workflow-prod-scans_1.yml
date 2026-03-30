@@ -1,0 +1,381 @@
+# """
+#     The MIT License (MIT)
+
+#     Copyright (c) 2023 pkjmesra
+
+#     Permission is hereby granted, free of charge, to any person obtaining a copy
+#     of this software and associated documentation files (the "Software"), to deal
+#     in the Software without restriction, including without limitation the rights
+#     to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#     copies of the Software, and to permit persons to whom the Software is
+#     furnished to do so, subject to the following conditions:
+
+#     The above copyright notice and this permission notice shall be included in all
+#     copies or substantial portions of the Software.
+
+#     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#     SOFTWARE.
+
+# """
+name: 4. Next day Nifty/Market AI prediction
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Run Details'
+        required: false
+        default: 'PKScreener - Scan Alerts'
+      targetPythonVersion:
+        description: 'Target Python version: 3.9 , 3.10, 3.11,3.12,3.13 ?'
+        required: false
+        type: string
+        default: '3.12'
+      runson:
+        description: 'Runner OS. e.g: ubuntu-latest, windows-latest or macos-latest'
+        required: false
+        default: 'ubuntu-latest'
+  schedule:
+  - cron: '55 9 * * 0-6'
+
+jobs:
+
+  NIFTY_Prediction_Alert:
+
+    runs-on: ${{ inputs.runson || 'ubuntu-latest' }} #ubuntu-latest #windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # repository: pkjmesra/PKScreener
+        ref: main
+        # token: ${{secrets.GITHUB_TOKEN}}
+    
+    - name: setup git config
+      run: |
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+
+    - name: Set up Python 
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.targetPythonVersion || 3.12 }}
+
+    # ============================================================================
+    # CACHING STRATEGY 1: Global pip cache (fastest)
+    # ============================================================================
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      id: pip-cache
+      with:
+        # This path varies by OS, but actions/cache handles it
+        path: |
+          ~/.cache/pip
+          ~\AppData\Local\pip\Cache
+        # Key includes Python version and requirements files
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/requirements-dev.txt', '**/pyproject.toml', '**/setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    # ============================================================================
+    # CACHING STRATEGY 2: Virtual environment (most comprehensive)
+    # ============================================================================
+    - name: Cache Python virtual environment
+      id: venv-cache
+      uses: actions/cache@v4
+      with:
+        path: .venv
+        key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt', '**/requirements-dev.txt', '**/pyproject.toml', '**/setup.py') }}-${{ inputs.targetPythonVersion }}
+        restore-keys: |
+          ${{ runner.os }}-venv-
+
+    # ============================================================================
+    # CACHING STRATEGY 3: TA-Lib compiled libraries (Linux only)
+    # ============================================================================
+    - name: Load Cache for Linux TA-Lib
+      if: startsWith(runner.os, 'Linux')
+      uses: actions/cache@v4
+      with:
+        path: |
+          /usr/include/ta-lib
+          /usr/bin/ta-lib-config
+          /usr/lib/libta_lib.la
+          /usr/lib/libta_lib.a
+        key: ${{ runner.os }}-talib
+        restore-keys: |
+          ${{ runner.os }}-talib
+
+    # ============================================================================
+    # INSTALLATION STEPS (using caches when available)
+    # ============================================================================
+    
+    # Create virtual environment if cache miss
+    - name: Create virtual environment (if needed)
+      if: steps.venv-cache.outputs.cache-hit != 'true'
+      run: |
+        python -m venv .venv
+
+    # Activate virtual environment for all subsequent Python steps
+    - name: Activate virtual environment
+      run: |
+        echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+        echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> $GITHUB_ENV
+        echo "PATH=${{ github.workspace }}/.venv/bin:$PATH" >> $GITHUB_ENV
+
+    # Upgrade pip (always do this, it's fast)
+    - name: Upgrade pip
+      run: |
+        python -m pip install --upgrade pip
+
+    - name: Install TA-Lib for Windows
+      if: ${{ startsWith(runner.os, 'Windows') }}
+      shell: bash
+      run: |
+        cd .github/dependencies/
+        if [[ "${{ inputs.targetPythonVersion }}" == "" ]] || [[ "${{ inputs.targetPythonVersion }}" == "3.12" ]]; then
+          pip install ta_lib-0.6.0-cp312-cp312-win_amd64.whl
+        elif [[ "${{ inputs.targetPythonVersion }}" == "3.9" ]]; then
+          pip install TA_Lib-0.4.19-cp39-cp39-win_amd64.whl
+        elif [[ "${{ inputs.targetPythonVersion }}" == "3.11" ]]; then
+          pip install TA_Lib-0.4.29-cp311-cp311-win_amd64.whl
+        fi
+
+    - name: Install TA-Lib for Linux
+      if: ${{ startsWith(runner.os, 'Linux') }}
+      run: |
+        cd .github/dependencies/
+        sudo dpkg -i ta-lib_0.6.4_amd64.deb
+        cd /home/runner/work/PKScreener/PKScreener/
+        pip install ta-lib
+
+    # Install Python dependencies (will use pip cache if available)
+    - name: Install Python Dependencies
+      run: |
+        # Install from requirements first (cached packages will be used)
+        pip install -r requirements.txt
+        # Install the package itself
+        pip install -e .
+        # Install TensorFlow and Keras (these are large, benefit greatly from cache)
+        pip install tensorflow==2.16.1
+        pip install keras==3.6.0
+
+    # ============================================================================
+    # POST-CACHE: Save virtual environment if it was just created
+    # ============================================================================
+    - name: Save virtual environment to cache
+      if: steps.venv-cache.outputs.cache-hit != 'true'
+      run: |
+        # The cache action will automatically save after this step
+        echo "Virtual environment created and will be cached for future runs"
+
+    - name: Configure env.dev file
+      shell: bash
+      env:
+        CHAT_ID_PROD : ${{secrets.CHAT_ID_PROD}}
+        CHAT_ID_DEV : ${{secrets.CHAT_ID_DEV}}
+        TOKEN_DEV : ${{secrets.TOKEN_DEV}}
+        CHAT_IDADMIN_DEV : ${{secrets.CHAT_IDADMIN_DEV}}
+        CHAT_ID: ${{ secrets.CHAT_ID }}
+        TOKEN: ${{ secrets.TOKEN }}
+        chat_idADMIN: ${{ secrets.chat_idADMIN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CI_PAT: ${{ secrets.CI_PAT }}
+        TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+        TDU: ${{ secrets.TDU }}
+        TAT: ${{ secrets.TAT }}
+        MCU: ${{ secrets.MCU }}
+        MCAP: ${{ secrets.MCAP }}
+        MCL: ${{ secrets.MCL }}
+        MS: ${{ secrets.MS }}
+        PKG: ${{ secrets.PKG }}
+        REPO_URL: ${{ secrets.REPO_URL }}
+        KTOKEN: ${{ secrets.KTOKEN }}
+        KUSER: ${{ secrets.KUSER }}
+        KPWD: ${{ secrets.KPWD }}
+        KTOTP: ${{ secrets.KTOTP }}
+        DB_TYPE: "local"
+        DB_TICKS: ${{ secrets.DB_TICKS }}
+        TBTOKEN: ${{ secrets.TBTOKEN }}
+        BBTOKEN: ${{ secrets.BBTOKEN }}
+        Tel_API_ID: ${{ secrets.Tel_API_ID }}
+        Tel_API_Hash: ${{ secrets.Tel_API_Hash }}
+        Tel_Phone_Number: ${{ secrets.Tel_Phone_Number }}
+        TEL_SESSION_DATA: ${{ secrets.TEL_SESSION_DATA }}
+        SUBSCRIPTION_ENABLED: ${{ secrets.SUBSCRIPTION_ENABLED }}
+      run: |
+        # Quote all values to handle spaces properly
+        cat > .env.dev << EOF
+        CHAT_ID_PROD='$CHAT_ID_PROD'
+        CHAT_ID_DEV='$CHAT_ID_DEV'
+        TOKEN_DEV='$TOKEN_DEV'
+        CHAT_IDADMIN_DEV='$CHAT_IDADMIN_DEV'
+        CHAT_ID='$CHAT_ID'
+        TOKEN='$TOKEN'
+        chat_idADMIN='$chat_idADMIN'
+        GITHUB_TOKEN='$GITHUB_TOKEN'
+        CI_PAT='$CI_PAT'
+        TURSO_TOKEN='$TURSO_TOKEN'
+        TDU='$TDU'
+        TAT='$TAT'
+        MCU='$MCU'
+        MCAP='$MCAP'
+        MCL='$MCL'
+        MS='$MS'
+        PKG='$PKG'
+        REPO_URL='$REPO_URL'
+        KTOKEN='$KTOKEN'
+        KUSER='$KUSER'
+        KPWD='$KPWD'
+        KTOTP='$KTOTP'
+        DB_TYPE='$DB_TYPE'
+        DB_TICKS='$DB_TICKS'
+        TBTOKEN='$TBTOKEN'
+        BBTOKEN='$BBTOKEN'
+        Tel_API_ID='$Tel_API_ID'
+        Tel_API_Hash='$Tel_API_Hash'
+        Tel_Phone_Number='$Tel_Phone_Number'
+        TEL_SESSION_DATA='$TEL_SESSION_DATA'
+        SUBSCRIPTION_ENABLED='$SUBSCRIPTION_ENABLED'
+        EOF
+        
+        echo "Created .env.dev file with secrets (values quoted)"
+        cp .env.dev /home/runner/work/PKScreener/PKScreener/pkscreener/.env.dev
+
+    - name: Environment setup to check the market status
+      shell: bash
+      id: marketsetter
+      run: |
+        python3 .github/workflows/workflowtriggers.py
+
+    - name: Run Scan on Ubuntu from src
+      shell: bash
+      if : ${{ steps.marketsetter.outputs.MARKET_STATUS == 'Open' || steps.marketsetter.outputs.MARKET_TRADED_TODAY == '1' }}
+      timeout-minutes: 10
+      env:
+        RUNNER : "GitHub_Actions"
+        GSHEET_SERVICE_ACCOUNT_DEV: ${{secrets.GSHEET_SERVICE_ACCOUNT_DEV}}
+        GSHEET_VIEWONLY_LINK: ${{secrets.GSHEET_VIEWONLY_LINK}}
+      run: |
+        cd /home/runner/work/PKScreener/PKScreener/
+        python3 pkscreener/pkscreenercli.py  -a Y -l -o X:N -e
+
+  HOLIDAYS_UPDATE:
+    runs-on: ${{ inputs.runson || 'ubuntu-latest' }} #ubuntu-latest #windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: pkjmesra/PKScreener
+          ref: main
+          token: ${{secrets.GITHUB_TOKEN}}
+      
+      - name: setup git config
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+      - name: Set up Python 
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.targetPythonVersion || 3.11 }}
+
+      # ============================================================================
+      # CACHING for HOLIDAYS job
+      # ============================================================================
+      - name: Cache pip packages (Holidays job)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-holiday-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-holiday-pip-
+
+      - name: Install Python Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Configure env.dev file
+        shell: bash
+        env:
+          CHAT_ID_DEV : ${{secrets.CHAT_ID_DEV}}
+          TOKEN_DEV : ${{secrets.TOKEN_DEV}}
+          CHAT_IDADMIN_DEV : ${{secrets.CHAT_IDADMIN_DEV}}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TOKEN: ${{ secrets.TOKEN }}
+          chat_idADMIN: ${{ secrets.chat_idADMIN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_PAT: ${{ secrets.CI_PAT }}
+          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+          TDU: ${{ secrets.TDU }}
+          TAT: ${{ secrets.TAT }}
+          MCU: ${{ secrets.MCU }}
+          MCAP: ${{ secrets.MCAP }}
+          MCL: ${{ secrets.MCL }}
+          MS: ${{ secrets.MS }}
+          PKG: ${{ secrets.PKG }}
+          REPO_URL: ${{ secrets.REPO_URL }}
+          KTOKEN: ${{ secrets.KTOKEN }}
+          KUSER: ${{ secrets.KUSER }}
+          KPWD: ${{ secrets.KPWD }}
+          KTOTP: ${{ secrets.KTOTP }}
+          DB_TYPE: "local"
+          DB_TICKS: ${{ secrets.DB_TICKS }}
+          TBTOKEN: ${{ secrets.TBTOKEN }}
+          BBTOKEN: ${{ secrets.BBTOKEN }}
+          Tel_API_ID: ${{ secrets.Tel_API_ID }}
+          Tel_API_Hash: ${{ secrets.Tel_API_Hash }}
+          Tel_Phone_Number: ${{ secrets.Tel_Phone_Number }}
+          TEL_SESSION_DATA: ${{ secrets.TEL_SESSION_DATA }}
+          SUBSCRIPTION_ENABLED: ${{ secrets.SUBSCRIPTION_ENABLED }}
+        run: |
+          # Quote all values to handle spaces properly
+          cat > .env.dev << EOF
+          CHAT_ID_DEV='$CHAT_ID_DEV'
+          TOKEN_DEV='$TOKEN_DEV'
+          CHAT_IDADMIN_DEV='$CHAT_IDADMIN_DEV'
+          CHAT_ID='$CHAT_ID'
+          TOKEN='$TOKEN'
+          chat_idADMIN='$chat_idADMIN'
+          GITHUB_TOKEN='$GITHUB_TOKEN'
+          CI_PAT='$CI_PAT'
+          TURSO_TOKEN='$TURSO_TOKEN'
+          TDU='$TDU'
+          TAT='$TAT'
+          MCU='$MCU'
+          MCAP='$MCAP'
+          MCL='$MCL'
+          MS='$MS'
+          PKG='$PKG'
+          REPO_URL='$REPO_URL'
+          KTOKEN='$KTOKEN'
+          KUSER='$KUSER'
+          KPWD='$KPWD'
+          KTOTP='$KTOTP'
+          DB_TYPE='$DB_TYPE'
+          DB_TICKS='$DB_TICKS'
+          TBTOKEN='$TBTOKEN'
+          BBTOKEN='$BBTOKEN'
+          Tel_API_ID='$Tel_API_ID'
+          Tel_API_Hash='$Tel_API_Hash'
+          Tel_Phone_Number='$Tel_Phone_Number'
+          TEL_SESSION_DATA='$TEL_SESSION_DATA'
+          SUBSCRIPTION_ENABLED='$SUBSCRIPTION_ENABLED'
+          EOF
+          
+          echo "Created .env.dev file with secrets (values quoted)"
+          cp .env.dev /home/runner/work/PKScreener/PKScreener/pkscreener/.env.dev
+
+      - name: Update holidays
+        shell: bash
+        timeout-minutes: 5
+        env:
+          RUNNER : "GitHub_Actions"
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: |
+          python3 .github/workflows/workflowtriggers.py --updateholidays

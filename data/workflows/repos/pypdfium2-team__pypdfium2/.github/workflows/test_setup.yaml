@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: 2026 geisserml <geisserml@gmail.com>
+# SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
+
+name: Test Setup
+on:
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  
+  test_setup:
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['ubuntu-latest', 'ubuntu-24.04-arm', 'macos-15-intel', 'macos-latest', 'windows-latest', 'windows-11-arm']
+        py: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        exclude:
+          # not supported by setup-python action
+          - os: windows-11-arm
+            py: '3.9'
+          - os: windows-11-arm
+            py: '3.10'
+    
+    runs-on: ${{ matrix.os }}
+    permissions: {}
+    
+    steps:
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.py }}
+      
+      - name: Check out pypdfium2 repository
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          fetch-depth: 0  # for git describe in "Build docs" step
+          persist-credentials: false
+      
+      # TODO(consider) run test suite after each way of installing?
+      
+      - name: Setup (default)
+        run: python3 -m pip install -v .
+      
+      - name: Setup (editable)
+        run: python3 -m pip install -v -e .
+      
+      - name: Install/update deps for non-isolated setup
+        run: python3 -m pip install -U -r req/setup.txt -r req/test.txt -r req/docs.txt
+      
+      - name: Setup (default, no isolation)
+        run: python3 -m pip install -v --no-build-isolation .
+      
+      - name: Setup (editable, no isolation)
+        run: python3 -m pip install -v --no-build-isolation -e .
+      
+      - name: Build docs
+        run: python3 -m sphinx -b html docs/source docs/build/html
+      
+      - name: Run test suite
+        run: python3 -m pytest tests/

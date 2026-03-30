@@ -1,0 +1,19 @@
+# Run full tests (many OSes, many python versions)
+name: Full Tests 🔬
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  tests:
+    uses: ./.github/workflows/build-and-run-tests.yml
+    with:
+      test-mode: full
+    permissions:
+      contents: read
+      security-events: write
+
+# Disable all permissions by default at workflow level
+permissions: {}

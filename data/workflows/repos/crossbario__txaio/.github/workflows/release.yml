@@ -1,0 +1,364 @@
+# GitHub Actions workflow for building and publishing txaio releases.
+# This follows the autobahn-python/zlmdb/crossbar model using workflow_run triggers.
+
+name: release
+
+on:
+  # Auto-trigger after main workflow completes (NOT direct push/pr triggers)
+  workflow_run:
+    workflows: ["main"]
+    types: [completed]
+
+  # Manual dispatch for debugging
+  workflow_dispatch:
+
+permissions:
+  id-token: write      # Required for PyPI trusted publishing (OIDC)
+  contents: write      # Required for creating GitHub releases
+  pull-requests: read  # Required for identifiers workflow
+
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
+
+jobs:
+  check-main-workflow:
+    name: Check if main workflow completed successfully
+    runs-on: ubuntu-latest
+    outputs:
+      main_run_id: ${{ steps.check.outputs.main_run_id }}
+      should_proceed: ${{ steps.check.outputs.should_proceed }}
+
+    steps:
+      - name: Check main workflow completion
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitSha = context.payload.workflow_run?.head_sha || context.sha;
+            const triggeredBy = context.payload.workflow_run?.name || 'manual (workflow_dispatch)';
+
+            console.log('─────────────────────────────────────────────────');
+            console.log('🔍 Checking main workflow completion status');
+            console.log('─────────────────────────────────────────────────');
+            console.log(`Event: ${context.eventName}`);
+            console.log(`Commit SHA: ${commitSha}`);
+            console.log(`Triggered by: ${triggeredBy}`);
+            console.log('');
+
+            // Get workflow runs for this commit
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: commitSha,
+              per_page: 100
+            });
+
+            // Find latest main workflow run
+            const mainRun = runs.workflow_runs
+              .filter(run => run.name === 'main')
+              .sort((a, b) => b.id - a.id)[0];
+
+            const mainComplete = mainRun && mainRun.status === 'completed' && mainRun.conclusion === 'success';
+            const status = mainRun ? `${mainRun.status}/${mainRun.conclusion}` : 'not found';
+
+            console.log(`Main workflow: ${status}`);
+            console.log('');
+
+            if (!mainComplete) {
+              console.log('⏳ Main workflow not complete yet - exiting early');
+              console.log('   This is normal! Release will proceed once main workflow finishes.');
+            } else {
+              console.log('✅ Main workflow complete - proceeding with release!');
+            }
+            console.log('─────────────────────────────────────────────────');
+
+            core.setOutput('should_proceed', mainComplete ? 'true' : 'false');
+            core.setOutput('main_run_id', mainRun?.id || '');
+
+  identifiers:
+    name: Identifiers
+    needs: check-main-workflow
+    if: needs.check-main-workflow.outputs.should_proceed == 'true'
+    # GitHub needs to know where .cicd/workflows/identifiers.yml lives at parse time,
+    # and submodules aren't included in that context! thus the following does NOT work:
+    # uses: ./.cicd/workflows/identifiers.yml
+    # we MUST reference the remote repo directly:
+    uses: wamp-proto/wamp-cicd/.github/workflows/identifiers.yml@main
+    # IMPORTANT: we still need .cicd as a Git submodule in the using repo though!
+    # because e.g. identifiers.yml wants to access scripts/sanitize.sh !
+
+  # Development/Nightly GitHub releases (for untagged master builds)
+  release-development:
+    name: Development/Nightly GitHub Release
+    needs: [check-main-workflow, identifiers]
+    runs-on: ubuntu-latest
+
+    # Only create releases for development/nightly builds (not stable tags)
+    if: |
+      needs.check-main-workflow.outputs.should_proceed == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')) &&
+      (needs.identifiers.outputs.release_type == 'development' || needs.identifiers.outputs.release_type == 'nightly')
+
+    env:
+      RELEASE_TYPE: ${{ needs.identifiers.outputs.release_type }}
+      RELEASE_NAME: ${{ needs.identifiers.outputs.release_name }}
+
+    permissions:
+      contents: write  # Required for creating releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Just
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Install uv
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.cargo/env
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Setup uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: uv-cache-ubuntu-release-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            uv-cache-ubuntu-release-
+
+      - name: Build wheel package
+        run: just build cpy311
+
+      - name: Build source distribution
+        run: just build-sourcedist cpy311
+
+      - name: Build documentation
+        run: |
+          just create cpy314
+          just install-tools cpy314
+          just docs cpy314
+
+      - name: Create documentation archive
+        run: |
+          cd docs/_build/html
+          tar -czf ../../../dist/txaio-docs.tar.gz *
+          cd ../../..
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > CHECKSUMS-ALL.sha256
+          cat CHECKSUMS-ALL.sha256
+
+      - name: List built packages
+        run: |
+          echo "Built packages:"
+          ls -lh dist/
+
+      - name: Create development GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.identifiers.outputs.release_name }}
+          name: Development Build ${{ needs.identifiers.outputs.release_name }}
+          body: |
+            ## txaio Development Build
+
+            **Release:** ${{ needs.identifiers.outputs.release_name }}
+            **Type:** ${{ needs.identifiers.outputs.release_type }}
+            **Branch:** ${{ needs.identifiers.outputs.base_branch }}
+            **Commit:** ${{ needs.identifiers.outputs.head_sha }}
+
+            This is an automated development/nightly build for testing purposes.
+
+            **Installation:**
+            ```bash
+            pip install https://github.com/crossbario/txaio/releases/download/${{ needs.identifiers.outputs.release_name }}/txaio-*.whl
+            ```
+
+            **Files:**
+            - Universal wheel (py3-none-any)
+            - Source distribution (.tar.gz)
+            - Documentation archive
+            - SHA256 checksums (CHECKSUMS-ALL.sha256)
+
+            ⚠️  This is a development build - for production use, install from PyPI.
+          files: dist/*
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Production releases (for tagged stable builds) - GitHub + PyPI
+  release-production:
+    name: Production Release (GitHub + PyPI)
+    needs: [check-main-workflow, identifiers]
+    runs-on: ubuntu-latest
+
+    # Only publish to PyPI for stable releases (explicit tag check)
+    if: |
+      needs.check-main-workflow.outputs.should_proceed == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')) &&
+      needs.identifiers.outputs.release_type == 'stable'
+
+    env:
+      RELEASE_TYPE: ${{ needs.identifiers.outputs.release_type }}
+      RELEASE_NAME: ${{ needs.identifiers.outputs.release_name }}
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/txaio
+
+    permissions:
+      id-token: write  # For trusted publishing
+      contents: write  # For GitHub releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Just
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Install uv
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.cargo/env
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Setup uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key: uv-cache-ubuntu-release-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            uv-cache-ubuntu-release-
+
+      - name: Build wheel package
+        run: just build cpy311
+
+      - name: Build source distribution
+        run: just build-sourcedist cpy311
+
+      - name: Build documentation
+        run: |
+          just create cpy314
+          just install-tools cpy314
+          just docs cpy314
+
+      - name: Create documentation archive
+        run: |
+          cd docs/_build/html
+          tar -czf ../../../dist/txaio-docs.tar.gz *
+          cd ../../..
+
+      - name: Generate checksums (for GitHub release)
+        run: |
+          cd dist
+          sha256sum * > CHECKSUMS-ALL.sha256
+          cat CHECKSUMS-ALL.sha256
+
+      - name: List built packages
+        run: |
+          echo "Built packages:"
+          ls -lh dist/
+
+      - name: Get version
+        id: get_version
+        run: |
+          VERSION="${RELEASE_NAME#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      # IMPORTANT: tag_name MUST be explicitly specified here!
+      #
+      # When this workflow runs via workflow_run trigger (after the main workflow
+      # completes), github.ref is "refs/heads/master" (a branch), NOT the tag.
+      # This is because workflow_run context inherits from the triggering workflow's
+      # context, and even though the main workflow was triggered by a tag push,
+      # the github.ref in the workflow_run context points to the default branch.
+      #
+      # The softprops/action-gh-release action defaults to using github.ref for
+      # the tag name when tag_name is not specified. Since github.ref is a branch
+      # (not a tag), the action fails with: "GitHub Releases requires a tag"
+      #
+      # Solution: Explicitly pass tag_name using the version extracted from
+      # the identifiers workflow, which correctly detected the tag via
+      # `git describe --tags --exact-match` on the head_sha.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: v${{ steps.get_version.outputs.version }}
+          body: |
+            ## txaio v${{ steps.get_version.outputs.version }}
+
+            txaio - Compatibility API for Twisted and asyncio
+
+            **Installation:**
+            ```bash
+            pip install txaio==${{ steps.get_version.outputs.version }}
+            ```
+
+            **Links:**
+            - 📦 PyPI: https://pypi.org/project/txaio/${{ steps.get_version.outputs.version }}/
+            - 📖 Docs: https://txaio.readthedocs.io/
+            - 💻 Source: https://github.com/crossbario/txaio/tree/v${{ steps.get_version.outputs.version }}
+
+            See [CHANGELOG](https://github.com/crossbario/txaio/blob/master/docs/changelog.rst) for details.
+          files: dist/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove non-PyPI files before upload
+        run: |
+          echo "======================================================================"
+          echo "Removing files that PyPI doesn't accept"
+          echo "======================================================================"
+          rm -f dist/CHECKSUMS*.sha256 dist/*-docs.tar.gz
+          echo ""
+          echo "Files to upload to PyPI:"
+          ls -lh dist/
+          echo "======================================================================"
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          verify-metadata: true
+          skip-existing: false
+          print-hash: true
+          attestations: true
+
+      - name: Trigger RTD build
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          if [ -n "$RTD_TOKEN" ]; then
+            echo "Triggering Read the Docs build for txaio..."
+            curl -X POST \
+              -H "Authorization: Token $RTD_TOKEN" \
+              "https://readthedocs.org/api/v3/projects/txaio/versions/latest/builds/"
+          else
+            echo "RTD_TOKEN not configured, skipping RTD build trigger"
+          fi

@@ -1,0 +1,66 @@
+name: Build micro
+
+on:
+  - workflow_dispatch
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          git submodule update --init -- micro/micro
+          cd micro/micro && git fetch --tags
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "stable"
+
+      - run: uv run build_wheel.py
+        working-directory: ./micro
+      - run: uv build --sdist
+        working-directory: ./micro
+
+      - run: |
+          pip install --no-index -f micro/dist/ micro-editor
+          micro -version
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: micro/dist
+
+      - run: ls micro/dist
+
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    needs: [build]
+    environment: publish
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: artifact
+          path: dist
+
+      - uses: actions/attest@v4
+        with:
+          subject-path: dist/*
+
+      - run: ls -R dist
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true

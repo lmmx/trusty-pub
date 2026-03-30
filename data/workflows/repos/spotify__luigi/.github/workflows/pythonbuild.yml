@@ -1,0 +1,218 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        include:
+          - tox-env: py310-core
+          - tox-env: py311-core
+          - tox-env: py312-core
+          - tox-env: py313-core
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install dependencies
+        run: |
+          uv tool install --python-preference only-managed --python 3.12 tox --with tox-uv
+      - name: Build
+        env:
+          TOXENV: ${{ matrix.tox-env }}
+        run: uvx --with tox-uv tox run
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  mysql:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        include:
+          - tox-env: py310-mysql
+          - tox-env: py311-mysql
+          - tox-env: py312-mysql
+          - tox-env: py313-mysql
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install dependencies
+        run: |
+          uv tool install --python-preference only-managed --python 3.12 tox --with tox-uv
+      - name: Setup MySQL DB
+        run: |
+          sudo /etc/init.d/mysql start
+          mysql -e 'create database IF NOT EXISTS luigi_test;' -uroot -proot || true
+          mysql -e 'create user 'travis'@'localhost';' -uroot -proot || true
+          mysql -e 'grant all privileges ON *.* TO 'travis'@'localhost';' -uroot -proot || true
+      - name: Build
+        env:
+          TOXENV: ${{ matrix.tox-env }}
+        run: uvx --with tox-uv tox run
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  postgres:
+    runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+        - 5432:5432
+        # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    strategy:
+      matrix:
+        include:
+          - tox-env: py310-postgres
+          - tox-env: py311-postgres
+          - tox-env: py312-postgres
+          - tox-env: py313-postgres
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install dependencies
+        run: |
+          uv tool install --python-preference only-managed --python 3.12 tox --with tox-uv
+      - name: Create PSQL database
+        run: |
+          PGPASSWORD=postgres psql -h localhost -p 5432 -c 'create database spotify;' -U postgres
+      - name: Build
+        env:
+          TOXENV: ${{ matrix.tox-env }}
+        run: uvx --with tox-uv tox run
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  base:
+    runs-on: ubuntu-22.04
+    env:
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: accesskey
+      AWS_SECRET_ACCESS_KEY: secretkey
+
+    strategy:
+      matrix:
+        include:
+          - tox-env: py310-aws
+          - tox-env: py311-aws
+          - tox-env: py312-aws
+          - tox-env: py313-aws
+
+          - tox-env: py310-unixsocket
+            OVERRIDE_SKIP_CI_TESTS: True
+          - tox-env: py311-unixsocket
+            OVERRIDE_SKIP_CI_TESTS: True
+          - tox-env: py312-unixsocket
+            OVERRIDE_SKIP_CI_TESTS: True
+          - tox-env: py313-unixsocket
+            OVERRIDE_SKIP_CI_TESTS: True
+
+          - tox-env: py310-apache
+          - tox-env: py311-apache
+          - tox-env: py312-apache
+          - tox-env: py313-apache
+
+          - tox-env: py310-azureblob
+          - tox-env: py311-azureblob
+          - tox-env: py312-azureblob
+          - tox-env: py313-azureblob
+
+          - tox-env: py310-contrib
+          - tox-env: py311-contrib
+          - tox-env: py312-contrib
+          - tox-env: py313-contrib
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install dependencies
+        run: |
+          uv tool install --python-preference only-managed --python 3.12 tox --with tox-uv
+      - name: Build
+        env:
+          TOXENV: ${{ matrix.tox-env }}
+          OVERRIDE_SKIP_CI_TESTS: ${{ matrix.OVERRIDE_SKIP_CI_TESTS }}
+        run: uvx --with tox-uv tox run
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  others:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        include:
+          - tox-env: lint
+          - tox-env: docs
+          - tox-env: typecheck
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install dependencies
+        run: |
+          uv tool install --python-preference only-managed --python 3.12 tox --with tox-uv
+      - name: Build
+        env:
+          TOXENV: ${{ matrix.tox-env }}
+          OVERRIDE_SKIP_CI_TESTS: ${{ matrix.OVERRIDE_SKIP_CI_TESTS }}
+        run: uvx --with tox-uv tox run

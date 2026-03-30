@@ -1,0 +1,19 @@
+name: CI - Docs
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  push:
+    branches:
+      - "**"
+      - "!gh-pages"
+
+env:
+  UV_FROZEN: "1"
+  GOOGLE_ANALYTICS_KEY: ${{ secrets.GOOGLE_ANALYTICS_KEY }}
+
+jobs:
+  build-docs:
+    uses: ./.github/workflows/generate-docs.yml
+    with:
+      deploy: false

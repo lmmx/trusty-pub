@@ -1,0 +1,41 @@
+name: Build Windows Installer
+
+on:
+    push:
+        tags:
+            - "v*.*.*"
+jobs:
+  windows_installer:
+    name: Build the Inno Setup Installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./_build-exe.ps1
+      - name: Compile CPU Installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: _setup-cpu.iss
+          options: /O+
+      - name: Compile GPU Installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: _setup-gpu.iss
+          options: /O+
+      - name: Upload CPU installer to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+            repo_token: ${{ secrets.GITHUB_TOKEN }}
+            file: dist/rembg-cli-cpu-installer.exe
+            asset_name: rembg-cli-cpu-installer.exe
+            tag: ${{ github.ref }}
+            overwrite: true
+      - name: Upload GPU installer to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+            repo_token: ${{ secrets.GITHUB_TOKEN }}
+            file: dist/rembg-cli-gpu-installer.exe
+            asset_name: rembg-cli-gpu-installer.exe
+            tag: ${{ github.ref }}
+            overwrite: true

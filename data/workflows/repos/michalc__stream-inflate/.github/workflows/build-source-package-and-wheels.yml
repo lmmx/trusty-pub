@@ -1,0 +1,208 @@
+name: Build source package and wheels
+
+on:
+  workflow_call:
+    inputs:
+      github-ref-name:
+        required: true
+        type: string
+
+jobs:
+  build-source:
+    name: Build source package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update version in pyproject.toml and setup.py from current git tag
+        run: |
+          sed -i "s/0\\.0\\.0\\.dev0/${{ inputs.github-ref-name }}/g" pyproject.toml
+          sed -i "s/0\\.0\\.0\\.dev0/${{ inputs.github-ref-name }}/g" setup.py
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: 3.13
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source
+          path: ./dist
+
+  build-linux:
+    name: Build Linux wheels
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - "manylinux2014_x86_64"
+          - "musllinux_1_1_x86_64"
+          - "musllinux_1_2_x86_64"
+          - "manylinux2014_aarch64"
+          - "musllinux_1_1_aarch64"
+          - "musllinux_1_2_aarch64"
+          - "musllinux_1_2_armv7l"
+        folder:
+          - "cp37-cp37m"
+          - "cp38-cp38"
+          - "cp39-cp39"
+          - "cp310-cp310"
+          - "cp311-cp311"
+          - "cp312-cp312"
+          - "cp313-cp313"
+          - "cp314-cp314"
+        exclude:
+          - image: "musllinux_1_1_x86_64"
+            folder: "cp314-cp314"
+          - image: "musllinux_1_1_aarch64"
+            folder: "cp314-cp314"
+
+    env:
+      # From https://github.com/uktrade/stream-unzip/blob/main/.github/workflows/build-source-package-and-wheels.yml
+      # 2024.10.26-1 supports 3.7 to 3.13 for musl 1.1 and is the last musl 1.1 version
+      # 2025.05.03-1 supports 3.7 to 3.13 for musl 1.2 and manylinux
+      # 2026.03.01-1 is the latest version at the time of writing
+      TAG: ${{ case(startsWith(matrix.image, 'musllinux_1_1_'), '2024.10.26-1', matrix.folder == 'cp314-cp314', '2026.03.01-1', '2025.05.03-1') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update version in pyproject.toml and setup.py from current git tag
+        run: |
+          sed -i "s/0\\.0\\.0\\.dev0/${{ inputs.github-ref-name }}/g" pyproject.toml
+          sed -i "s/0\\.0\\.0\\.dev0/${{ inputs.github-ref-name }}/g" setup.py
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,arm
+
+      - name: Build packages
+        run: >-
+          docker run --rm -v ${{ github.workspace }}:/app quay.io/pypa/${{ matrix.image }}:$TAG bash -c '
+            cd /app &&
+            /opt/python/${{ matrix.folder }}/bin/python -m build --wheel
+            auditwheel repair $(ls dist/*.whl) &&
+            rm dist/*.whl &&
+            cp wheelhouse/*.whl dist
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.image }}-$${{ matrix.folder }}
+          path: ./dist
+
+  build-macos:
+    name: Build macOS wheels
+    strategy:
+      matrix:
+        os:
+          - "macos-14"  # ARM
+          - "macos-15"  # ARM
+        python-version:
+          - "3.7.7"
+          - "3.8.10"
+          - "3.9.13"
+          - "3.10.11"
+          - "3.11.9"
+          - "3.12.6"
+          - "3.13.0"
+          - "3.14.0"
+        exclude:
+          - python-version: "3.6.7"
+            os: "macos-14"
+          - python-version: "3.7.7"
+            os: "macos-14"
+          - python-version: "3.7.7"
+            os: "macos-15"
+    runs-on: '${{ matrix.os }}'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '${{ matrix.python-version }}'
+
+      - name: Update version in pyproject.toml and setup.py from current git tag
+        run: |
+          sed -i "" "s/0\\.0\\.0\\.dev0/${{ inputs.github-ref-name }}/g" pyproject.toml
+          sed -i "" "s/0\\.0\\.0\\.dev0/${{ inputs.github-ref-name }}/g" setup.py
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build --wheel
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.python-version }}
+          path: ./dist
+
+  build-ios:
+    name: Build iOS wheels
+    runs-on: 'macos-14'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+
+      - name: Update version in pyproject.toml and setup.py from current git tag
+        run: |
+          sed -i "" "s/0\\.0\\.0\\.dev0/${{ inputs.github-ref-name }}/g" pyproject.toml
+          sed -i "" "s/0\\.0\\.0\\.dev0/${{ inputs.github-ref-name }}/g" setup.py
+
+      - name: Install cibuildwheel
+        # iOS support not yet released to PyPI
+        run: python -m pip install git+https://github.com/pypa/cibuildwheel.git@e91560e8a14470ff35488e414aa7aa1de5aec2d8
+
+      - name: Build wheels
+        run: python -m cibuildwheel --output-dir dist
+        env:
+          CIBW_PLATFORM: 'ios'
+          CIBW_ARCHS: 'all'
+          CIBW_BUILD: 'cp*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: ./dist
+
+  build-windows:
+    name: Build Windows wheels
+    strategy:
+      matrix:
+        os:
+          - "windows-2022"
+        python-version:
+          - "3.7.7"
+          - "3.8.0"
+          - "3.9.0"
+          - "3.10.0"
+          - "3.11.0"
+          - "3.12.0"
+          - "3.13.0"
+          - "3.14.0"
+    runs-on: '${{ matrix.os }}'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '${{ matrix.python-version }}'
+
+      - name: Update version in pyproject.toml and setup.py from current git tag
+        run: |
+          (Get-Content pyproject.toml).Replace('0.0.0.dev0', '${{ inputs.github-ref-name }}') | Set-Content pyproject.toml
+          (Get-Content setup.py).Replace('0.0.0.dev0', '${{ inputs.github-ref-name }}') | Set-Content setup.py
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build --wheel
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.python-version }}
+          path: ./dist

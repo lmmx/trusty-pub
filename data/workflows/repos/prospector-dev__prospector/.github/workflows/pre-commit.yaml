@@ -1,0 +1,26 @@
+name: pre-commit
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6.2.0
+      - run: pip install poetry
+      - run: poetry install --all-extras --all-groups
+
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |-
+            pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+            pre-commit-
+      - name: Check pre-commit
+        run: poetry run pre-commit run prospector --all-files

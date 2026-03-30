@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches-ignore:
+      - "dependabot/**"
+  pull_request:
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: astral-sh/ruff-action@v3
+
+  Windows:
+    name: 'Windows (${{ matrix.python }})'
+    runs-on: 'windows-latest'
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Python ${{ matrix.python }}'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '${{ matrix.python }}'
+          allow-prereleases: true
+      - name: Run tests
+        run: ./ci.sh
+        shell: bash
+        env:
+          # Should match 'name:' up above
+          JOB_NAME: 'Windows (${{ matrix.python }})'
+
+  Ubuntu:
+    name: 'Ubuntu (${{ matrix.python }}${{ matrix.extra_name }})'
+    timeout-minutes: 10
+    runs-on: 'ubuntu-latest'
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14', 'pypy-3.11']
+        check_formatting: ['0']
+        check_docs: ['0']
+        extra_name: ['']
+        include:
+          - python: '3.x'
+            check_formatting: '1'
+            extra_name: ', check formatting'
+          - python: '3.12'  # sphinx-build: cgi module was removed in 3.13
+            check_docs: '1'
+            extra_name: ', check docs'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: '${{ matrix.python }}'
+          allow-prereleases: true
+      - name: Run tests
+        run: ./ci.sh
+        env:
+          CHECK_FORMATTING: '${{ matrix.check_formatting }}'
+          CHECK_DOCS: '${{ matrix.check_docs }}'
+          # Should match 'name:' up above
+          JOB_NAME: 'Ubuntu (${{ matrix.python }}${{ matrix.extra_name }})'
+
+  macOS:
+    name: 'macOS (${{ matrix.python }})'
+    timeout-minutes: 10
+    runs-on: 'macos-latest'
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: '${{ matrix.python }}'
+          allow-prereleases: true
+      - name: Run tests
+        run: ./ci.sh
+        env:
+          # Should match 'name:' up above
+          JOB_NAME: 'macOS (${{ matrix.python }})'

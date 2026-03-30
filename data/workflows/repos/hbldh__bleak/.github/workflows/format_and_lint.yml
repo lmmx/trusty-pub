@@ -1,0 +1,31 @@
+name: Format and Lint
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+
+jobs:
+  format_and_lint:
+    name: "Format and lint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - name: Check import sort with isort
+        run: uv run isort {.,docs} --check --diff
+
+      - name: Check code formatting with black
+        run: uv run black . --check --diff
+
+      - name: Lint with flake8
+        run: uv run flake8 . --count --show-source --statistics
+
+      - name: Build docs
+        run: uv run make -C docs html

@@ -1,0 +1,94 @@
+name: Python
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: Run pre-commit on Python code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Use ruff-action so we get annotations in the Github UI
+      - uses: astral-sh/ruff-action@v3
+
+      - name: Cache pre-commit virtualenvs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-3|${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: run pre-commit
+        run: |
+          python -m pip install pre-commit
+          pre-commit run --all-files
+
+  test-python:
+    name: Build and test Python
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          version: "0.10.x"
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Build rust submodules
+        run: |
+          uv run --python ${{ matrix.python-version }} maturin develop -m obstore/Cargo.toml
+
+      - name: Run python tests
+        if: "!endsWith(matrix.python-version, 't')"
+        run: |
+          uv run --python ${{ matrix.python-version }} pytest tests
+
+      - name: Run python tests with --parallel-threads=2
+        if: "endsWith(matrix.python-version, 't')"
+        run: |
+          uv run --python ${{ matrix.python-version }} pytest tests --parallel-threads=2
+
+      # Ensure docs build without warnings
+      - name: Check docs
+        if: "${{ matrix.python-version == 3.11 }}"
+        run: uv run --group docs mkdocs build --strict
+
+      - name: Add venv to PATH (for pyright action)
+        run: echo "$PWD/.venv/bin" >> $GITHUB_PATH
+
+      - name: Run pyright
+        uses: jakebailey/pyright-action@v2.3.3
+        with:
+          # Restore pylance-version: latest-release
+          # once it uses >1.1.405
+          # https://github.com/microsoft/pyright/issues/10906
+          version: 1.1.406
+          # pylance-version: latest-release

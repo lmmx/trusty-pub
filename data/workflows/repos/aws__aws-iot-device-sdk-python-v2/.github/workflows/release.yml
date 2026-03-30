@@ -1,0 +1,84 @@
+name: Release
+
+env:
+  GITHUB_TOKEN: ${{ secrets.TAG_PR_TOKEN }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        type: choice
+        description: "Release type:"
+        required: true
+        options:
+          - bug fix (PATCH)
+          - new feature (MINOR)
+      release_title:
+        description: "The title of the release"
+        required: true
+
+jobs:
+  update-version:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # allow push
+      pull-requests: write # allow making PR
+      id-token: write # This is required for requesting the JWT
+
+    steps:
+    - name: Checkout Sources
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Make new release
+      env:
+        Title: ${{ github.event.inputs.release_title }}
+      run: |
+        # Escape special characters
+        Title=$(echo ${Title//[\"]\\\"})
+        Title=$(echo ${Title//[\']\\\'})
+        Title=$(echo ${Title//[\$]})
+
+        ./utils/publish-release.sh "${{ github.event.inputs.release_type }}" "$Title"
+
+    - name: Generate documentation
+      run: |
+        python3 -m pip install sphinx
+        python3 -m pip install --verbose .
+        ./make-docs.py
+
+    - name: Commit documentation
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add --force docs/
+        current_version=$(git describe --tags --abbrev=0)
+        git commit --message="Update Docs: ${current_version}"
+
+    - name: Push generated documentation to docs branch
+      uses: ad-m/github-push-action@v0.6.0
+      with:
+        github_token: ${{ github.token }}
+        branch: docs
+        # Force push so that `docs` branch always looks like `main`,
+        # but with 1 additional "update docs" commit.
+        # This seems simpler than trying to cleanly merge `main` into
+        # `docs` each time.
+        force: true
+
+    - name: configure AWS credentials (Release)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::180635532705:role/CI_V2_RELEASE_S3_ROLE
+        aws-region: us-east-1
+
+    - name: "Create VERSION file and trigger release"
+      run: |
+        version=$(git describe --tags --abbrev=0)
+        version_without_v=$(echo ${version} | cut -f2 -dv)
+        echo "${version_without_v}" > VERSION
+
+        zip VERSION.zip VERSION
+        export S3_URL=$(aws secretsmanager get-secret-value --secret-id ci/python_v2_version --query "SecretString" | cut -f2 -d\")
+        aws s3 cp VERSION.zip $S3_URL

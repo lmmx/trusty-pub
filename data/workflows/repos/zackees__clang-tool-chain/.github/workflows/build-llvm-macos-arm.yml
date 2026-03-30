@@ -1,0 +1,114 @@
+name: Build LLVM macOS ARM64 Archive
+
+# IMPORTANT: This workflow uses macOS ARM64 runners
+# Total runtime: ~30-45 minutes
+# Estimated cost: ~$0.20-0.40 USD per run (based on GitHub Actions pricing)
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_version:
+        description: 'LLVM version to build (e.g., 21.1.6)'
+        required: true
+        default: '21.1.6'
+      upload_to_repo:
+        description: 'Upload artifacts to downloads-bins repository (requires write access)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+# Prevent accidental concurrent runs
+concurrency:
+  group: llvm-macos-arm-build
+  cancel-in-progress: false
+
+jobs:
+  build-llvm-macos-arm64:
+    runs-on: macos-14  # Apple Silicon Mac (ARM64)
+    timeout-minutes: 90  # 1.5 hours max
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install zstandard
+
+      - name: Build LLVM ${{ github.event.inputs.llvm_version }} for ARM64
+        run: |
+          cd downloads-bins/tools
+          python3 fetch_and_archive.py \
+            --platform darwin \
+            --arch arm64 \
+            --version ${{ github.event.inputs.llvm_version }}
+
+      - name: Display build results
+        run: |
+          echo "=== Build Complete ==="
+          cd downloads-bins/assets/clang/darwin/arm64
+          ls -lh llvm-*-darwin-arm64.tar.zst* 2>/dev/null || echo "Archive not found"
+          echo ""
+          echo "=== Checksums ==="
+          cat llvm-*-darwin-arm64.tar.zst.sha256 2>/dev/null || echo "SHA256 not found"
+
+      - name: Upload macOS ARM64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-darwin-arm64-${{ github.event.inputs.llvm_version }}
+          path: |
+            downloads-bins/assets/clang/darwin/arm64/llvm-*.tar.zst
+            downloads-bins/assets/clang/darwin/arm64/llvm-*.tar.zst.sha256
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          echo "# LLVM Archive Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**LLVM Version:** ${{ github.event.inputs.llvm_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** macOS ARM64 (Apple Silicon)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          ARCHIVE=$(ls downloads-bins/assets/clang/darwin/arm64/llvm-*.tar.zst 2>/dev/null | head -1)
+          if [ -f "$ARCHIVE" ]; then
+            SIZE=$(ls -lh "$ARCHIVE" | awk '{print $5}')
+            echo "✅ **Build Status:** Success" >> $GITHUB_STEP_SUMMARY
+            echo "📦 **Archive Size:** $SIZE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## SHA256 Checksum" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            cat downloads-bins/assets/clang/darwin/arm64/llvm-*.tar.zst.sha256 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Build Status:** Failed - Archive not found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download the artifact from this workflow run" >> $GITHUB_STEP_SUMMARY
+          echo "2. Extract and verify the archive locally" >> $GITHUB_STEP_SUMMARY
+          echo "3. Upload to downloads-bins repository:" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "   cd downloads-bins/assets/clang/darwin/arm64/" >> $GITHUB_STEP_SUMMARY
+          echo "   # Copy archive and checksum from download" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "4. Update manifest.json:" >> $GITHUB_STEP_SUMMARY
+          echo "   - Set \"latest\": \"${{ github.event.inputs.llvm_version }}\"" >> $GITHUB_STEP_SUMMARY
+          echo "   - Add new version entry with SHA256 checksum" >> $GITHUB_STEP_SUMMARY
+          echo "   - Set href to GitHub raw URL" >> $GITHUB_STEP_SUMMARY
+          echo "5. Commit to downloads-bins submodule" >> $GITHUB_STEP_SUMMARY
+          echo "6. Update main repository submodule reference" >> $GITHUB_STEP_SUMMARY
+          echo "7. Test with:" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "   clang-tool-chain purge --yes" >> $GITHUB_STEP_SUMMARY
+          echo "   clang-tool-chain install clang" >> $GITHUB_STEP_SUMMARY
+          echo "   clang-tool-chain-cpp --version" >> $GITHUB_STEP_SUMMARY
+          echo "   \`\`\`" >> $GITHUB_STEP_SUMMARY

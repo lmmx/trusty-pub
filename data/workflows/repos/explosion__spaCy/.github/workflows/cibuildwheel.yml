@@ -1,0 +1,107 @@
+name: Build
+
+on:
+  push:
+    tags:
+      # ytf did they invent their own syntax that's almost regex?
+      # ** matches 'zero or more of any character'
+      - 'release-v[0-9]+.[0-9]+.[0-9]+**'
+      - 'prerelease-v[0-9]+.[0-9]+.[0-9]+**'
+
+permissions: {}
+
+jobs:
+  build_wheels:
+    uses: explosion/gha-cibuildwheel/.github/workflows/cibuildwheel.yml@2c98f757f13d112cf73fcf4b627249f1fffb5aae  # main
+    permissions:
+      contents: write
+      actions: read
+    with:
+      wheel-name-pattern: "spacy-*.whl"
+      pure-python: false
+    secrets:
+      gh-token: ${{ secrets.GITHUB_TOKEN }}
+
+  smoke_test:
+    name: Smoke test
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - uses: robinraju/release-downloader@daf26c55d821e836577a15f77d86ddc078948b05  # v1
+        with:
+          tag: ${{ github.ref_name }}
+          fileName: "spacy-*cp312*manylinux*x86_64*.whl"
+          out-file-path: "dist"
+
+      - name: Install from wheel
+        run: |
+          WHEEL=$(ls dist/spacy-*cp312*manylinux*x86_64*.whl | head -1)
+          pip install "$WHEEL"
+
+      - name: Test import
+        run: python -c "import spacy; print('spacy==' + spacy.__version__)"
+
+      - name: Download and load model
+        run: |
+          python -m spacy download en_core_web_sm
+          python -c "
+          import spacy
+          nlp = spacy.load('en_core_web_sm')
+          doc = nlp('Apple is looking at buying U.K. startup for \$1 billion')
+          assert len(doc.ents) > 0, 'No entities found'
+          print('Model load OK:', nlp.meta['name'], '@', nlp.meta['version'])
+          print('Entities:', [(ent.text, ent.label_) for ent in doc.ents])
+          "
+
+  upgrade_test:
+    name: Upgrade test
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install previous spaCy version
+        run: |
+          pip install "spacy>=3.8.0,<${{ github.ref_name }}" || pip install "spacy<4"
+          python -m spacy download en_core_web_sm
+          python -c "
+          import spacy
+          nlp = spacy.load('en_core_web_sm')
+          print('Pre-upgrade:', spacy.__version__, nlp.meta['name'], '@', nlp.meta['version'])
+          "
+
+      - uses: robinraju/release-downloader@daf26c55d821e836577a15f77d86ddc078948b05  # v1
+        with:
+          tag: ${{ github.ref_name }}
+          fileName: "spacy-*cp312*manylinux*x86_64*.whl"
+          out-file-path: "dist"
+
+      - name: Upgrade to new version
+        run: |
+          WHEEL=$(ls dist/spacy-*cp312*manylinux*x86_64*.whl | head -1)
+          pip install "$WHEEL"
+
+      - name: Test model still loads after upgrade
+        run: |
+          python -c "
+          import spacy
+          nlp = spacy.load('en_core_web_sm')
+          doc = nlp('Apple is looking at buying U.K. startup for \$1 billion')
+          assert len(doc.ents) > 0, 'No entities found after upgrade'
+          print('Post-upgrade:', spacy.__version__, nlp.meta['name'], '@', nlp.meta['version'])
+          print('Entities:', [(ent.text, ent.label_) for ent in doc.ents])
+          "

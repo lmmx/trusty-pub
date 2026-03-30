@@ -1,0 +1,37 @@
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    branches:
+      - '*'
+      - '**/*'
+
+name: Test Action
+
+jobs:
+  testing:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [ "3.10", "3.11", "3.12", "3.13", "3.14" ]
+        os: [ "ubuntu-latest" ]
+    name: CI
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup PDM
+        uses: pdm-project/setup-pdm@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: true
+
+      - name: Install dependencies
+        run: pdm install -v && pdm info
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test

@@ -1,0 +1,19 @@
+name: Clear Actions Cache
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  clear-cache:
+    name: Clean Cache
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Clear cache
+        run: |
+          gh cache delete --all --repo "$GITHUB_REPOSITORY"
+          echo "cache cleared"

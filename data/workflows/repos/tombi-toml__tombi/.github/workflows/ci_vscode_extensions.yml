@@ -1,0 +1,65 @@
+name: CI VSCode Extensions
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - id: filter
+        uses: ./.github/actions/relevant-changes
+        with:
+          base-sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          head-sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          paths: |
+            .node-version
+            .npmrc
+            .github/actions/relevant-changes/**
+            biome.json
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+            editors/vscode/**
+            .github/workflows/ci_vscode_extensions.yml
+
+  ci-vscode-extensions:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'pnpm'
+      - run: pnpm install && pnpm run build
+        working-directory: ./editors/vscode
+      - run: pnpm run format:check
+        working-directory: ./editors/vscode
+      - run: pnpm run lint:check
+        working-directory: ./editors/vscode
+      - run: pnpm run typecheck
+        working-directory: ./editors/vscode
+      - run: pnpm run test
+        working-directory: ./editors/vscode

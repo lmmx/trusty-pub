@@ -1,0 +1,53 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  success-all-test:
+    uses: ./.github/workflows/ci.yml
+    secrets:
+      JINA_AUTH_TOKEN: "${{ secrets.JINA_AUTH_TOKEN }}"
+
+  prerelease:
+    needs: [success-all-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2.5.0
+        with:
+          fetch-depth: 100
+      - name: Pre-release (.devN)
+        run: |
+          git fetch --depth=1 origin +refs/tags/*:refs/tags/*
+          pip install poetry==1.7.1
+          ./scripts/release.sh
+        env:
+          PYPI_USERNAME: ${{ secrets.TWINE_USERNAME }}
+          PYPI_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+          JINA_SLACK_WEBHOOK: ${{ secrets.JINA_SLACK_WEBHOOK }}
+
+  check-readme-modification:
+    runs-on: ubuntu-latest
+    outputs:
+      readme_changed: ${{ steps.step_output.outputs.readme_changed }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Check if README is modified
+        id: step_output
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -q "README.md"; then
+            echo "readme_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "readme_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  publish-docarray-org:
+    needs: check-readme-modification
+    if: needs.check-readme-modification.outputs.readme_changed == 'true'
+    uses: ./.github/workflows/publish-docarray-org.yml
+    secrets: inherit

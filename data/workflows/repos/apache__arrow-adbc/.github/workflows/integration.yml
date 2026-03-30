@@ -1,0 +1,376 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Integration
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "c/**"
+      - "ci/**"
+      - "go/**"
+      - "python/**"
+      - ".github/workflows/integration.yml"
+  push:
+    branches-ignore:
+      - 'dependabot/**'
+    paths:
+      - "c/**"
+      - "ci/**"
+      - "go/**"
+      - "python/**"
+      - ".github/workflows/integration.yml"
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Increment this to reset cache manually
+  CACHE_NUMBER: "0"
+
+defaults:
+  run:
+    shell: bash -l -eo pipefail {0}
+
+jobs:
+  duckdb:
+    name: "DuckDB Integration Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get Date
+        id: get-date
+        run: |
+          echo "today=$(/bin/date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
+      - name: Cache Conda
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/conda_pkgs_dir
+          key: conda-${{ runner.os }}-${{ steps.get-date.outputs.today }}-${{ env.CACHE_NUMBER }}-${{ hashFiles('ci/**') }}
+      - uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
+        with:
+          miniforge-version: latest
+          use-only-tar-bz2: false
+          use-mamba: true
+      - name: Install Dependencies
+        run: |
+          ./ci/scripts/remamba.sh install -c conda-forge \
+            --file ci/conda_env_cpp.txt
+      - name: Work around ASAN issue (GH-1617)
+        run: |
+          sudo sysctl vm.mmap_rnd_bits=28
+      - name: Build DuckDB Integration Tests
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_MANAGER: "1"
+          BUILD_INTEGRATION_DUCKDB: "1"
+          ADBC_USE_ASAN: "OFF"
+          ADBC_USE_UBSAN: "OFF"
+          # Make seems to have issues with the nested DuckDB build
+          ADBC_CMAKE_ARGS: "-GNinja"
+        run: |
+          ./ci/scripts/cpp_build.sh "$(pwd)" "$(pwd)/build"
+      - name: Run DuckDB Integration Tests
+        env:
+          BUILD_ALL: "0"
+          BUILD_INTEGRATION_DUCKDB: "1"
+        run: |
+          ./ci/scripts/cpp_test.sh "$(pwd)/build"
+
+  flightsql:
+    name: "FlightSQL Integration Tests (Dremio, SQLite, and GizmoSQL)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get required Go version
+        run: |
+          (. .env && echo "GO_VERSION=${GO}") >> $GITHUB_ENV
+      - name: Get Date
+        id: get-date
+        run: |
+          echo "today=$(/bin/date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
+      - name: Cache Conda
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/conda_pkgs_dir
+          key: conda-${{ runner.os }}-${{ steps.get-date.outputs.today }}-${{ env.CACHE_NUMBER }}-${{ hashFiles('ci/**') }}
+      - uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
+        with:
+          miniforge-version: latest
+          use-only-tar-bz2: false
+          use-mamba: true
+      - name: Install Dependencies
+        run: |
+          ./ci/scripts/remamba.sh install -c conda-forge \
+            --file ci/conda_env_cpp.txt \
+            --file ci/conda_env_python.txt
+          pip install pytest-error-for-skips
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          check-latest: true
+          cache: true
+          cache-dependency-path: go/adbc/go.sum
+      - name: Work around ASAN issue (GH-1617)
+        run: |
+          sudo sysctl vm.mmap_rnd_bits=28
+      - name: Start SQLite server, Dremio, and GizmoSQL
+        run: |
+          docker compose up --detach flightsql-test flightsql-sqlite-test dremio dremio-init gizmosql-test
+          pip install python-dotenv[cli]
+          python -m dotenv -f .env list --format simple | tee -a $GITHUB_ENV
+
+      - name: Build FlightSQL Driver
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_FLIGHTSQL: "1"
+          BUILD_DRIVER_MANAGER: "1"
+        run: |
+          ./ci/scripts/cpp_build.sh "$(pwd)" "$(pwd)/build"
+          ./ci/scripts/python_build.sh "$(pwd)" "$(pwd)/build"
+      - name: Test FlightSQL Driver against Dremio and SQLite
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_FLIGHTSQL: "1"
+        run: |
+          ./ci/scripts/cpp_build.sh "$(pwd)" "$(pwd)/build"
+          ./ci/scripts/cpp_test.sh "$(pwd)/build"
+      - name: Test Python Flight SQL driver against Dremio and GizmoSQL
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_FLIGHTSQL: "1"
+          PYTEST_ADDOPTS: "--error-for-skips"
+        run: |
+          ./ci/scripts/python_test.sh "$(pwd)" "$(pwd)/build"
+      - name: Stop SQLite server, Dremio, and GizmoSQL
+        run: |
+          docker compose down
+
+  postgresql:
+    name: "PostgreSQL Integration Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free up disk space
+        run: |
+          # Preinstalled tools use a lot of disk space, free up some space
+          # https://github.com/actions/runner-images/issues/2840
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get Date
+        id: get-date
+        run: |
+          echo "today=$(/bin/date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
+      - name: Cache Conda
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/conda_pkgs_dir
+          key: conda-${{ runner.os }}-${{ steps.get-date.outputs.today }}-${{ env.CACHE_NUMBER }}-${{ hashFiles('ci/**') }}
+      - uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
+        with:
+          miniforge-version: latest
+          use-only-tar-bz2: false
+          use-mamba: true
+      - name: Install Dependencies
+        run: |
+          ./ci/scripts/remamba.sh install -c conda-forge \
+            --file ci/conda_env_cpp.txt \
+            --file ci/conda_env_python.txt
+          pip install pytest-error-for-skips
+      - name: Work around ASAN issue (GH-1617)
+        run: |
+          sudo sysctl vm.mmap_rnd_bits=28
+      - name: Build PostgreSQL Driver
+        env:
+          BUILD_ALL: "OFF"
+          BUILD_DRIVER_MANAGER: "ON"
+          BUILD_DRIVER_POSTGRESQL: "ON"
+        run: |
+          ./ci/scripts/cpp_build.sh "$(pwd)" "$(pwd)/build"
+          ./ci/scripts/python_build.sh "$(pwd)" "$(pwd)/build"
+      - name: Configure Integration Env Vars
+        run: |
+          pip install python-dotenv[cli]
+          python -m dotenv -f .env list --format simple | tee -a $GITHUB_ENV
+          echo "ADBC_USE_ASAN=ON" >> $GITHUB_ENV
+          echo "ADBC_USE_UBSAN=ON" >> $GITHUB_ENV
+
+      - name: Test PostgreSQL Driver - postgres 14
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_POSTGRESQL: "1"
+          PYTEST_ADDOPTS: "--error-for-skips"
+        run: |
+          env POSTGRES_VERSION=14 docker compose up --wait --detach postgres-test
+          ./ci/scripts/cpp_test.sh "$(pwd)/build"
+          ./ci/scripts/python_test.sh "$(pwd)" "$(pwd)/build"
+          docker compose down
+          docker compose rm -fsv
+      - name: Test PostgreSQL Driver - postgres 15
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_POSTGRESQL: "1"
+          PYTEST_ADDOPTS: "--error-for-skips"
+        run: |
+          env POSTGRES_VERSION=15 docker compose up --wait --detach postgres-test
+          ./ci/scripts/cpp_test.sh "$(pwd)/build"
+          ./ci/scripts/python_test.sh "$(pwd)" "$(pwd)/build"
+          docker compose down
+          docker compose rm -fsv
+      - name: Test PostgreSQL Driver - postgres 16
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_POSTGRESQL: "1"
+          PYTEST_ADDOPTS: "--error-for-skips"
+        run: |
+          env POSTGRES_VERSION=16 docker compose up --wait --detach postgres-test
+          ./ci/scripts/cpp_test.sh "$(pwd)/build"
+          ./ci/scripts/python_test.sh "$(pwd)" "$(pwd)/build"
+          docker compose down
+          docker compose rm -fsv
+      - name: Test PostgreSQL Driver - postgres 17
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_POSTGRESQL: "1"
+          PYTEST_ADDOPTS: "--error-for-skips"
+        run: |
+          env POSTGRES_VERSION=17 docker compose up --wait --detach postgres-test
+          ./ci/scripts/cpp_test.sh "$(pwd)/build"
+          ./ci/scripts/python_test.sh "$(pwd)" "$(pwd)/build"
+          docker compose down
+          docker compose rm -fsv
+      - name: Test PostgreSQL Driver - postgres 18
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_POSTGRESQL: "1"
+          PYTEST_ADDOPTS: "--error-for-skips"
+        run: |
+          env POSTGRES_VERSION=18 docker compose up --wait --detach postgres-test
+          ./ci/scripts/cpp_test.sh "$(pwd)/build"
+          ./ci/scripts/python_test.sh "$(pwd)" "$(pwd)/build"
+          docker compose down
+          docker compose rm -fsv
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+      - name: Run PostgreSQL Validation Suite
+        run: |
+          env POSTGRES_VERSION=18 docker compose up --wait --detach postgres-test
+          env BUILD_ALL=0 BUILD_DRIVER_POSTGRESQL=1 uv --project=./c/driver/postgresql/validation/ run ci/scripts/validate.sh $(pwd)
+          docker compose down
+
+  snowflake:
+    name: "Snowflake Integration Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get required Go version
+        run: |
+          (. .env && echo "GO_VERSION=${GO}") >> $GITHUB_ENV
+      - name: Get Date
+        id: get-date
+        run: |
+          echo "today=$(/bin/date -u '+%Y%m%d')" >> $GITHUB_OUTPUT
+      - name: Cache Conda
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/conda_pkgs_dir
+          key: conda-${{ runner.os }}-${{ steps.get-date.outputs.today }}-${{ env.CACHE_NUMBER }}-${{ hashFiles('ci/**') }}
+      - uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
+        with:
+          miniforge-version: latest
+          use-only-tar-bz2: false
+          use-mamba: true
+      - name: Install Dependencies
+        run: |
+          ./ci/scripts/remamba.sh install -c conda-forge \
+            --file ci/conda_env_cpp.txt \
+            --file ci/conda_env_python.txt
+      - name: Work around ASAN issue (GH-1617)
+        run: |
+          sudo sysctl vm.mmap_rnd_bits=28
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          check-latest: true
+          cache: true
+          cache-dependency-path: go/adbc/go.sum
+      - name: Build and Test Snowflake Driver
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_SNOWFLAKE: "1"
+          ADBC_SNOWFLAKE_URI: ${{ secrets.SNOWFLAKE_URI }}
+        run: |
+          ./ci/scripts/cpp_build.sh "$(pwd)" "$(pwd)/build"
+          ./ci/scripts/cpp_test.sh "$(pwd)/build"
+      - name: Build and Test Snowflake Driver (Python)
+        env:
+          BUILD_ALL: "0"
+          BUILD_DRIVER_MANAGER: "1"
+          BUILD_DRIVER_SNOWFLAKE: "1"
+          ADBC_SNOWFLAKE_URI: ${{ secrets.SNOWFLAKE_URI }}
+        run: |
+          ./ci/scripts/python_build.sh "$(pwd)" "$(pwd)/build"
+          env BUILD_DRIVER_MANAGER=0 ./ci/scripts/python_test.sh "$(pwd)" "$(pwd)/build"
+
+  flightsql_interop:
+    name: "FlightSQL C# Interop"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get required Go version
+        run: |
+          (. .env && echo "GO_VERSION=${GO}") >> $GITHUB_ENV
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          check-latest: true
+          cache: true
+          cache-dependency-path: go/adbc/go.sum
+      - name: Build ADBC Driver
+        working-directory: go/adbc/pkg
+        run: |
+          make libadbc_driver_flightsql.so
+      - name: Start Test Servers
+        run: |
+          docker compose up --wait --detach spiceai-test
+      - name: Test Driver against Spice.ai OSS
+        env:
+          FLIGHTSQL_INTEROP_TEST_CONFIG_FILE: "../../../../../csharp/configs/flightsql-spiceai.json"
+        run: |
+          dotnet test ./csharp/test/Drivers/Interop/FlightSql/Apache.Arrow.Adbc.Tests.Drivers.Interop.FlightSql.csproj
+      - name: Stop Test Servers
+        run: |
+          docker compose down

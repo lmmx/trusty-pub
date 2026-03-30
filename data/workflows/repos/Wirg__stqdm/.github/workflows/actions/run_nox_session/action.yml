@@ -1,0 +1,22 @@
+name: 'Run Nox Session'
+description: 'Action to run a nox session'
+inputs:
+  nox_session:
+    required: true
+    type: string
+    description: "name of the nox session to run"
+
+runs:
+  using: composite
+  steps:
+    - name: Escape characters from ${{ inputs.nox_session }}
+      run: echo "${{ inputs.nox_session }}" | sed "s/[,'~()\. =]/_/g" | awk '{print "nox_session_escape="$1}' >> $GITHUB_ENV
+      shell: bash
+    - name: Cache .nox envdir
+      uses: actions/cache@v3
+      id: cache
+      with:
+        path: .nox
+        key: nox-envdir-${{ runner.os }}-session-${{ env.nox_session_escape }}
+    - run: poetry run nox --session "${{ inputs.nox_session }}" --reuse-existing-virtualenvs
+      shell: bash

@@ -1,0 +1,156 @@
+name: Auto-release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  create-release:
+    name: Create GitHub release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Get release notes
+        run: python changelog.py notes ${{ steps.version.outputs.version }} > release_notes.md
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          PRERELEASE=""
+          if [[ "$TAG" =~ -(alpha|beta|rc)[0-9]*$ ]]; then
+            PRERELEASE="--prerelease"
+          fi
+          gh release create "$TAG" \
+            --title "Release ${{ steps.version.outputs.version }}" \
+            --notes-file release_notes.md \
+            --verify-tag \
+            $PRERELEASE
+
+  containers:
+    name: Build container images
+    needs: create-release
+    runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            tag-suffix: ""
+          - dockerfile: Dockerfile.trixie
+            tag-suffix: "-trixie"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Detect pre-release
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          if [[ "$TAG_NAME" =~ -(alpha|beta|rc)[0-9]*$ ]]; then
+            echo "is_prerelease=true" >> $GITHUB_ENV
+          else
+            echo "is_prerelease=false" >> $GITHUB_ENV
+          fi
+        shell: bash
+
+      - name: Generate stable tag
+        id: stable-tag
+        run: |
+          if [ "${{ env.is_prerelease }}" == "false" ]; then
+            if [ "${{ matrix.tag-suffix }}" == "" ]; then
+              echo "stable_tag=type=raw,value=stable" >> $GITHUB_OUTPUT
+            elif [ "${{ matrix.tag-suffix }}" == "-trixie" ]; then
+              echo "stable_tag=type=raw,value=stable-trixie" >> $GITHUB_OUTPUT
+            else
+              echo "stable_tag=" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "stable_tag=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          flavor: |
+            latest=false
+          images: |
+            schemathesis/schemathesis
+            ghcr.io/schemathesis/schemathesis
+          tags: |
+            type=semver,pattern={{raw}}${{ matrix.tag-suffix }}
+            type=semver,pattern={{version}}${{ matrix.tag-suffix }}
+            ${{ steps.stable-tag.outputs.stable_tag }}
+
+      - name: Build metadata
+        run: |
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+          echo "Is prerelease: ${{ env.is_prerelease }}"
+          echo "Tag suffix: '${{ matrix.tag-suffix }}'"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/schemathesis/schemathesis:buildcache${{ matrix.tag-suffix }}
+          cache-to: type=registry,ref=ghcr.io/schemathesis/schemathesis:buildcache${{ matrix.tag-suffix }},mode=max
+
+  release_package:
+    name: Build and publish package to pypi.org
+    needs: create-release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Build package
+        run: uvx hatchling build
+
+      - name: Publish distribution package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

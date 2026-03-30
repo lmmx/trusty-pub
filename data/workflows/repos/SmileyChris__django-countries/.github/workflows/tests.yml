@@ -1,0 +1,123 @@
+name: Tests
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Legacy: Python 3.8 + Django 3.2
+          - python-version: "3.8"
+            test-env: legacy
+          # Previous: Python 3.10 + Django 4.2
+          - python-version: "3.10"
+            test-env: previous
+          # Latest: Python 3.13 + Django 5.1
+          - python-version: "3.13"
+            test-env: latest
+          - python-version: "3.13"
+            test-env: latest-pyuca
+          - python-version: "3.13"
+            test-env: latest-noi18n
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Run tests for ${{ matrix.test-env }}
+        run: just test ${{ matrix.test-env }} ${{ matrix.python-version }}
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}-${{ matrix.test-env }}
+          path: .coverage.*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  lint-and-type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Check formatting
+        run: |
+          uv run ruff check --select I django_countries
+          uv run ruff format --check django_countries
+
+      - name: Run linters
+        run: uv run ruff check django_countries
+
+      - name: Run type checker
+        run: uv run mypy django_countries
+
+      - name: Check documentation
+        run: uv run --group docs mkdocs build --strict
+
+      - name: Run security scan
+        run: uv run bandit -r django_countries -x tests
+
+  coverage:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install coverage
+        run: uv pip install --system coverage
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Combine and check coverage
+        run: |
+          coverage combine
+          echo "Test coverage (must be 100%):"
+          coverage report --include="django_countries/tests/*" --fail-under=100 -m
+          echo ""
+          echo "Source coverage (must be 90%+):"
+          coverage report --omit="django_countries/tests/*" --fail-under=90 -m
+          coverage html
+
+      - name: Upload coverage HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/

@@ -1,0 +1,29 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        versions:
+          - python: "3.10"
+            env: py310-django50
+          - python: "3.11"
+            env: py311-django50
+
+    name: "Python ${{ matrix.versions.python }} - ${{ matrix.versions.env }}"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.versions.python }}
+      - name: Install Dependencies
+        run: pip install tox coverage
+      - name: Run Tests
+        run: tox -e ${{ matrix.versions.env }}

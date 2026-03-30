@@ -1,0 +1,33 @@
+name: Test
+description: "Run unit tests for the Fabric CICD project"
+
+on:
+    pull_request:
+        branches: ["main"]
+        types: [opened, edited, synchronize, ready_for_review]
+    push:
+        branches: ["main"]
+
+jobs:
+    unit_test:
+        name: Unit Test (Python ${{ matrix.python-version }})
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Python ${{ matrix.python-version }}
+              uses: actions/setup-python@v5
+              with:
+                  python-version: ${{ matrix.python-version }}
+
+            - name: Run unit tests
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install uv
+                  uv sync --dev
+                  uv run pytest -v || exit 1  # Fail the job if any tests fail

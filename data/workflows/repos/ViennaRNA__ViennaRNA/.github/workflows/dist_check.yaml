@@ -1,0 +1,85 @@
+name: Run distcheck
+
+on:
+  workflow_dispatch:
+    inputs:
+      config-flags:
+        description: 'Configure flags to prepare the source directory'
+        default: '--with-cluster --with-kinwalker --disable-lto'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      config-flags:
+        description: 'Configure flags to prepare the source directory'
+        default: '--with-cluster --with-kinwalker --disable-lto'
+        required: false
+        type: string
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Install prerequisites
+      run:  |
+        sudo apt-get update
+        sudo apt-get -y install \
+          build-essential \
+          autoconf \
+          automake \
+          gengetopt \
+          help2man \
+          bison \
+          flex \
+          libtool \
+          check \
+          liblapacke \
+          liblapacke-dev \
+          graphviz \
+          python3-sphinx \
+          python3-myst-parser \
+          python3-sphinxcontrib.bibtex \
+          python3-sphinx-copybutton \
+          python3-sphinx-rtd-theme \
+          texlive-latex-recommended \
+          texlive-latex-extra \
+          texlive-font-utils \
+          texlive-fonts-recommended
+    - name: Checkout swig repo
+      uses: actions/checkout@v6
+      with:
+        repository: swig/swig
+        ref: 'v4.4.0'
+        path: swig
+    - name: Install swig
+      run:  |
+        cd swig
+        ./autogen.sh && ./configure --prefix=/usr
+        make -j $(nproc)
+        sudo make install
+    - name: Checkout doxygen repo
+      uses: actions/checkout@v6
+      with:
+        repository: doxygen/doxygen
+        ref: 'Release_1_15_0'
+        path: doxygen
+    - name: Install doxygen
+      run:  |
+        cd doxygen
+        mkdir build
+        cd build
+        cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX:PATH=/usr -Dbuild_doc:BOOL=OFF ..
+        make -j $(nproc)
+        sudo make install
+    - name: Autotools setup
+      run:  |
+        tar -xjf src/dlib-20.0.tar.bz2 -C src
+        tar -xzf src/libsvm-3.35.tar.gz -C src
+        autoreconf -i
+    - name: Configure
+      run: ./configure ${{ inputs.config-flags }}
+    - name: distcheck
+      run:  make distcheck

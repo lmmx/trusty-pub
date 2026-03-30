@@ -1,0 +1,157 @@
+# -*- coding: utf-8 -*-
+# :Project:   python-rapidjson -- Github Actions configuration
+# :Created:   Fri Oct 2 06:52:59 2020 CEST
+# :Author:    Martin Thoma <info@martin-thoma.de>
+# :License:   MIT License
+# :Copyright: © 2020 Martin Thoma
+# :Copyright: © 2020, 2021, 2022, 2023, 2024, 2025 Lele Gaifax
+#
+
+# For more information see:
+# https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+# and
+# https://packaging.python.org/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+
+name: Build, test and upload to PyPI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  tests:
+    name: All tests, on current Python
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-test.txt
+          pip install .
+
+      - name: Tests
+        run: |
+          pytest tests
+
+      - name: Doctests
+        run: |
+          make -C docs doctest -e PYTHON=$(which python3)
+
+      - name: Typing stub tests
+        run: |
+          stubtest rapidjson
+
+  debug-tests:
+    name: Memory leak tests, on current debug build Python
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: deadsnakes/action@v3.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          debug: true
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-test.txt
+          pip install .
+
+      - run: |
+          pytest tests
+
+  build_wheels:
+    name: Build wheels on ${{matrix.arch}} for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-14
+          - macos-15-intel
+          - windows-2025
+        arch:
+          - auto
+        include:
+          - os: ubuntu-24.04
+            arch: aarch64
+          - os: ubuntu-24.04
+            arch: ppc64le
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: docker/setup-qemu-action@v3
+        if:  ${{ matrix.arch == 'aarch64' || matrix.arch == 'ppc64le' }}
+        name: Set up QEMU
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+          CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+          CIBW_TEST_REQUIRES: "pytest pytest-benchmark pytz"
+          CIBW_TEST_COMMAND: "pytest {project}/tests"
+          CIBW_SKIP: "cp38* pp*"
+          # Skip tests on emulated hardware, take too long or not supported
+          CIBW_TEST_SKIP: "*-*linux_{aarch64,ppc64le} *-macosx_*:arm64"
+          CIBW_ENABLE: cpython-prerelease
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-for-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+
+  upload_wheels:
+    name: Upload wheels to PyPI
+    needs: build_wheels
+    runs-on: ubuntu-latest
+
+    # Upload to PyPI on every tag starting with 'v'
+    # FIXME: for some reason, the job is skipped, although the configuration is
+    #        almost identical to the one I use on pglast... let's try to temporarily
+    #        remove the condition
+    #if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-for-*
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}

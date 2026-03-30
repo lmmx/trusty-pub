@@ -1,0 +1,55 @@
+---
+# Copyright (c) Ansible Project
+# GNU General Public License v3.0+ (see LICENSES/GPL-3.0-or-later.txt or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# This workflow will install CSS build dependencies and run the CSS build
+
+name: Build CSS
+
+on:
+  push:
+    branches:
+      - main
+      - stable-*
+  pull_request:
+    branches:
+      - main
+      - stable-*
+  # Run once per week (Monday at 04:00 UTC)
+  schedule:
+    - cron: '0 4 * * 1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+
+      - name: Install dependencies
+        run: |
+          npm clean-install
+        working-directory: ./src/sphinx_antsibull_ext/css
+
+      - name: Build CSS
+        run: |
+          ./build.sh
+        working-directory: ./src/sphinx_antsibull_ext/css
+
+      - name: Make sure no files were changed
+        run: |
+          CHANGED="$(git status --porcelain=v1 --untracked=normal)"
+          if [ "${CHANGED}" != "" ]; then
+            echo "Found changed files:"
+            echo "${CHANGED}"
+            echo "In case you changed the SCSS source files, you need to run './build.sh' (after running 'npm install') in src/sphinx_antsibull_ext/css"
+            exit 1
+          fi

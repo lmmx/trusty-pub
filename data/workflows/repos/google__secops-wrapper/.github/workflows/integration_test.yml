@@ -1,0 +1,314 @@
+# Integration Tests Workflow
+#
+# USAGE INSTRUCTIONS:
+# 1. Get the exact commit SHA you want to test (must be in the PR)
+# 2. Comment on the PR with: /run-integration-tests <SHA>
+# 3. The workflow will checkout that specific commit and run integration tests
+
+name: Integration Tests
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  check-authorization:
+    name: Check Authorization
+    # Only run this workflow when someone comments '/run-integration-tests' in a PR
+    if: |
+      startsWith(github.event.comment.body, '/run-integration-tests') &&
+      contains(toJSON(github.event.issue), 'pull_request')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    # These outputs will be used by other jobs
+    outputs:
+      authorized: ${{ steps.auth-check.outputs.authorized }}
+      pr_number: ${{ github.event.issue.number }}
+      # The commit SHA extracted from the comment
+      commit_sha: ${{ steps.extract-sha.outputs.result }}
+      # Whether a valid SHA was found in the comment
+      has_sha: ${{ steps.extract-sha.outputs.result != '' }}
+      
+    steps:
+      - uses: actions/checkout@v6
+      
+      - name: Extract commit SHA from comment
+        id: extract-sha
+        uses: actions/github-script@v8
+        with:
+          result-encoding: string
+          script: |
+            const commentBody = context.payload.comment.body;
+            // Look for SHA pattern after '/run-integration-tests' command
+            // SHA must be a 40-character hex string
+            const shaMatch = commentBody.match(/\/run-integration-tests\s+([0-9a-f]{40})(?:\s|$)/i);
+            
+            if (shaMatch && shaMatch[1]) {
+              const sha = shaMatch[1];
+              console.log(`Found SHA in comment: ${sha}`);
+              
+              // Verify the SHA belongs to this PR
+              try {
+                // Get PR number from the issue
+                const prNumber = context.payload.issue.number;
+                
+                // Normalize SHA to lowercase for comparison
+                const normalizedSha = sha.toLowerCase();
+                
+                // Get all commits from the PR with pagination
+                const commits = [];
+                let page = 1;
+                let hasMore = true;
+                
+                while (hasMore) {
+                  const { data: pageCommits } = await github.rest.pulls.listCommits({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: prNumber,
+                    per_page: 100,
+                    page: page
+                  });
+                  
+                  commits.push(...pageCommits);
+                  hasMore = pageCommits.length === 100;
+                  page++;
+                }
+                
+                console.log(`Total commits in PR #${prNumber}: ${commits.length}`);
+                
+                // Check if the provided SHA exists in this PR's commits
+                const commitExists = commits.some(commit => commit.sha.toLowerCase() === normalizedSha);
+                
+                if (commitExists) {
+                  console.log(`Verified SHA ${sha} belongs to PR #${prNumber}`);
+                  core.setOutput('has_sha', 'true');
+                  return normalizedSha;
+                } else {
+                  console.log(`Error: SHA ${sha} does not belong to PR #${prNumber}`);
+                  console.log(`Total commits checked: ${commits.length}`);
+                  console.log('The SHA must be from a commit in the current PR.');
+                  core.setOutput('has_sha', 'false');
+                  return ''; // Return empty string if SHA not in PR
+                }
+              } catch (error) {
+                console.error(`Error validating SHA: ${error.message}`);
+                core.setOutput('has_sha', 'false');
+                return ''; // Return empty string on error
+              }
+            } else {
+              console.log(`No valid SHA found in comment. Format should be: /run-integration-tests <40-character-SHA>`);
+              core.setOutput('has_sha', 'false');
+              return ''; // Return empty string if no SHA found
+            }
+      
+      - name: Check CODEOWNERS authorization
+        id: auth-check
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const commenter = context.payload.comment.user.login;
+            console.log(`Comment by: ${commenter}`);
+
+            // Verify this is a pull request comment
+            if (!context.payload.issue.pull_request) {
+              console.log('This comment is not on a pull request. Skipping.');
+              core.setOutput("is_authorized", "false");
+              return;
+            }
+            
+            try {              
+              // Get CODEOWNERS file
+              const { data: codeownersFile } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: '.github/CODEOWNERS',
+              });
+              
+              // Decode content from base64
+              const content = Buffer.from(codeownersFile.content, 'base64')
+                .toString('utf8');
+              
+              // Parse CODEOWNERS file
+              const lines = content.split('\n')
+                .filter(line => line.trim() && !line.startsWith('#'));
+              
+              // Extract owners
+              const owners = new Set();
+              for (const line of lines) {
+                const matches = line.match(/@[\w-]+(?:\/[\w-]+)?/g) || [];
+                for (const match of matches) {
+                  owners.add(match.substring(1)); 
+                }
+              }
+              
+              // Check if commenter is in CODEOWNERS
+              const isAuthorized = 
+                owners.has(commenter) || 
+                Array.from(owners).some(owner => 
+                  owner.includes('/') && 
+                  owner.startsWith(context.repo.owner + '/')
+                );
+              
+              // Output authorization result as a simple string
+              core.setOutput("authorized", isAuthorized ? "true" : "false");
+              console.log(`Authorization result: ${isAuthorized}`);
+              
+            } catch (error) {
+              console.error(`Error processing CODEOWNERS: ${error.message}`);
+              core.setOutput("authorized", "false");
+            }
+
+  integration-tests:
+    name: Run Integration Tests
+    needs: check-authorization
+    # Only run if the user is authorized AND provided a valid SHA
+    if: |
+      needs.check-authorization.outputs.authorized == 'true' && 
+      needs.check-authorization.outputs.commit_sha != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: write
+    
+    env:
+      # Chronicle config variables
+      CHRONICLE_CUSTOMER_ID: ${{ secrets.CHRONICLE_CUSTOMER_ID }}
+      CHRONICLE_PROJECT_NUMBER: ${{ secrets.CHRONICLE_PROJECT_NUMBER }}
+      CHRONICLE_REGION: ${{ vars.CHRONICLE_REGION }}
+      
+      # Service account variables
+      CHRONICLE_PROJECT_NAME: ${{ secrets.CHRONICLE_PROJECT_NAME }}
+      CHRONICLE_PRIVATE_KEY_ID: ${{ secrets.CHRONICLE_PRIVATE_KEY_ID }}
+      CHRONICLE_PRIVATE_KEY: ${{ secrets.CHRONICLE_PRIVATE_KEY }}
+      CHRONICLE_CLIENT_EMAIL: ${{ secrets.CHRONICLE_CLIENT_EMAIL }}
+      CHRONICLE_CLIENT_ID: ${{ secrets.CHRONICLE_CLIENT_ID }}
+      CHRONICLE_AUTH_URI: ${{ vars.CHRONICLE_AUTH_URI }}
+      CHRONICLE_TOKEN_URI: ${{ vars.CHRONICLE_TOKEN_URI }}
+      CHRONICLE_AUTH_PROVIDER_CERT_URL: ${{ vars.CHRONICLE_AUTH_PROVIDER_CERT_URL }}
+      CHRONICLE_CLIENT_X509_CERT_URL: ${{ secrets.CHRONICLE_CLIENT_X509_CERT_URL }}
+      CHRONICLE_UNIVERSE_DOMAIN: ${{ vars.CHRONICLE_UNIVERSE_DOMAIN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-authorization.outputs.commit_sha }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+          pip install pytest pytest-cov python-dotenv
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+
+      - name: Create in-progress check
+        id: create-check
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          result-encoding: string
+          script: |
+            // Use the SHA specified in the comment, not the PR head SHA
+            const sha = '${{ needs.check-authorization.outputs.commit_sha }}';
+            const run_id = process.env.GITHUB_RUN_ID;
+            const run_url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run_id}`;
+            
+            // Create a check
+            const check = await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Integration Tests',
+              head_sha: sha,
+              status: 'in_progress',
+              output: {
+                title: 'Integration Tests Running',
+                summary: `Running integration tests for commit: ${sha.substring(0, 8)}...`,
+                text: `Integration tests were triggered by comment and are now running on commit ${sha}.\n\n[View Action Details](${run_url})`
+              }
+            });
+            
+            return check.data.id;
+  
+      - name: Run integration tests
+        id: run-tests
+        continue-on-error: true
+        run: |
+          echo "Running integration tests..."
+          python -m pytest tests/ -m "integration" -v --junitxml=junit/integration-test-results.xml
+      
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: integration-test-results
+          path: junit/integration-test-results.xml
+          retention-days: 1
+          
+      - name: Publish integration test results
+        uses: EnricoMi/publish-unit-test-result-action@v2.23.0
+        if: always()
+        with:
+          files: junit/integration-test-results.xml
+          commit: ${{ needs.check-authorization.outputs.commit_sha }}
+          comment_mode: off
+          
+      - name: Update check with test results
+        if: always()
+        uses: actions/github-script@v8
+        env:
+          CHECK_ID: ${{ steps.create-check.outputs.result }}
+          TEST_OUTCOME: ${{ steps.run-tests.outcome }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const sha = '${{ needs.check-authorization.outputs.commit_sha }}';
+            const run_id = process.env.GITHUB_RUN_ID;
+            const run_url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run_id}`;
+            
+            // Determine test status
+            const testStatus = process.env.TEST_OUTCOME;
+            let checkConclusion, statusText, statusEmoji;
+            
+            if (testStatus === 'success') {
+              checkConclusion = 'success';
+              statusText = 'Passed';
+              statusEmoji = '✅';
+            } else if (testStatus === 'failure') {
+              checkConclusion = 'failure';
+              statusText = 'Failed';
+              statusEmoji = '❌';
+            } else {
+              checkConclusion = 'neutral';
+              statusText = 'Skipped or Cancelled';
+              statusEmoji = '⚠️';
+            }
+            
+            const checkId = process.env.CHECK_ID;
+            const shortSha = sha.substring(0, 8);
+            await github.rest.checks.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              check_run_id: checkId,
+              status: 'completed',
+              conclusion: checkConclusion,
+              output: {
+                title: `Integration Tests ${statusText} for ${shortSha}`,
+                summary: `Integration tests for commit ${shortSha} ${statusText.toLowerCase()}.`,
+                text: `Integration tests for commit ${sha} ${statusText.toLowerCase()}. ${statusEmoji}\n\n[View Action Details](${run_url})`
+              }
+            });

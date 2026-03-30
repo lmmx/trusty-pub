@@ -1,0 +1,169 @@
+# GitHub Actions docs: https://docs.github.com/en/actions/how-tos/write-workflows
+# Reference syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
+# Env. variables: https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-variables#default-environment-variables
+# Add'l variables: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+
+# Requires encrypted secret secrets.pypi_password
+# (see https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)
+
+# This file is automatically "updated" with PRs by the "pre-commit ci" app in GitHub https://pre-commit.ci; it is
+# currently scheduled weekly at approximately 16:00 UTC Monday.
+
+
+name: Test and deploy release
+on: [push, pull_request, workflow_dispatch]
+
+env:
+  FORCE_COLOR: 1
+  PYTHONUNBUFFERED: 1
+  PYTHONUTF8: 1
+
+jobs:
+  # Set the job key. The key is displayed as the job name when a job name is not provided.
+  test:
+    # matrix.* values are defined below in strategy.
+    name: "Test (${{ matrix.python-version }}, ${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+
+    # Identifies any jobs that must complete successfully before this job will run.
+    # needs: [pre-commit]
+
+    # A strategy creates a build matrix for your jobs. You can define different variations to run each job in.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Python versions at https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
+        # RCs need to be specified fully, e.g. '3.13.0-rc.3', or use allow-preleleases: true in setop-python
+        python-version: ['3.14', '3.13', '3.12', '3.11', '3.10']
+        disable-gil: [true]
+
+    env:
+      commitmsg: ${{ github.event.head_commit.message }}  # only available at check-out; becomes env.commitmsg
+      UV_SYSTEM_PYTHON: 1  # for uv, turns on --system by default
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # Checks out a copy of the repository per https://github.com/actions/checkout
+      - name: Check out repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Build Python and packages per https://github.com/actions/setup-python
+      # Using actions/setup-python can be faster than uv, because GitHub caches the Python versions alongside the runner.
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      # Install uv per https://github.com/astral-sh/setup-uv/blob/main/README.md
+      # and https://docs.astral.sh/uv/guides/integration/github
+      # Caching is enabled on on GitHub-hosted runners
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: >
+          uv pip install
+          --upgrade
+          -r tests/requirements_testing.txt
+
+      - name: Run tests
+        run: >
+          uv run --no-project
+          pytest
+          -v
+          tests/
+
+      # - name: Run tests (Windows)
+      # if: runner.os == 'Linux' || runner.os == 'macOS'
+      #   if: runner.os == 'Windows'
+      #   run:
+      #     # workaround for Windows fatal exception: access violation
+      #     python -m pytest -v --cov=./ --cov-report=term -p no:faulthandler tests/
+      #   env:
+      #     PYTHONUTF8: 1
+      #     COVERALLS_FLAG_NAME: tests-${{ matrix.python-version }}-${{ matrix.os }}
+      #     COVERALLS_PARALLEL: true
+      #   continue-on-error: true
+
+      # NOT RUNNING COVERALLS
+      # - name: Upload coverage data to coveralls.io (parallel)
+      #   run: coveralls --service=github
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.github_token }}
+      #     COVERALLS_FLAG_NAME: tests-${{ matrix.python-version }}-${{ matrix.os }}
+      #     COVERALLS_PARALLEL: true
+      #   continue-on-error: true
+
+  # NOT RUNNING COVERALLS
+  # coveralls:
+  #   name: Completion -> coveralls.io
+  #   needs: [test]
+  #   runs-on: ubuntu-latest
+  #   continue-on-error: true
+  #   steps:
+  #   - name: Harden the runner (Audit all outbound calls)
+  #     uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+  #     with:
+  #       egress-policy: audit
+
+  #   - name: Coveralls parallel finished
+  #     uses: coverallsapp/github-action@5cbfd81b66ca5d10c19b062c04de0199c215fb6e # v2.3.7
+  #     with:
+  #       github-token: ${{ secrets.github_token }}
+  #       parallel-finished: true
+
+  deploy:
+    name: Deploy release
+    permissions:
+      contents: write  # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+    needs: [test]
+    # ref https://docs.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#github-context
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/airportsdata
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Check out repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.14'
+
+      # Install uv per https://github.com/astral-sh/setup-uv/blob/main/README.md
+      # and https://docs.astral.sh/uv/guides/integration/github
+      # Caching is enabled on GitHub-hosted runners
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      # Build using uv https://docs.astral.sh/uv/concepts/projects/build/
+      - name: Build dist
+        run: uv build
+
+      # PyPI publish GitHub Action from https://github.com/pypa/gh-action-pypi-publish
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # V2.6.1
+        with:
+          body_path: RELEASE.rst
+          draft: false
+          prerelease: false
+          preserve_order: false
+          make_latest: true

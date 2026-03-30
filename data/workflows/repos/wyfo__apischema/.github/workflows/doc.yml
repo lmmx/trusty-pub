@@ -1,0 +1,151 @@
+name: Documentation
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  push:
+    branches:
+      - master
+    paths:
+      - apischema/**
+      - benchmark/**
+      - docs/**
+      - examples/**
+      - mkdocs.yml
+      - pyproject.toml
+  pull_request:
+    paths:
+      - apischema/**
+      - benchmark/**
+      - docs/**
+      - examples/**
+      - mkdocs.yml
+
+jobs:
+  run_benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tests/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cythonize
+        run: scripts/cythonize.sh
+      - name: Install apischema
+        run: pip install -e .
+      - name: Install requirements
+        run: pip install -r benchmark/requirements.txt
+      - name: Run benchmark
+        run: python benchmark/main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark_table
+          path: examples/benchmark_table.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark_chart_light
+          path: docs/benchmark_chart_light.svg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark_chart_dark
+          path: docs/benchmark_chart_dark.svg
+  upload_doc:
+    needs: [run_benchmark]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tests/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark_table
+          path: examples
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark_chart_light
+          path: docs
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark_chart_dark
+          path: docs
+      - name: Install requirements
+        run: pip install -r docs/requirements.txt
+      - name: Build documentation
+        run: mkdocs build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: documentation
+          path: site/**
+  publish_doc:
+    needs: [run_benchmark]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'release'
+    steps:
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tests/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # TODO bump to 3.12 when mike will support it
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark_table
+          path: examples
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark_chart_light
+          path: docs
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark_chart_dark
+          path: docs
+      - name: Install requirements
+        run: pip install -r docs/requirements.txt
+      - name: Setup git
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git fetch origin gh-pages --depth=1
+      - name: Retrieve current version
+        # TODO use a better thing that parsing pyproject.toml
+        run: |
+          echo "version=$(cat pyproject.toml | grep "version =" | cut -d' ' -f3 | cut -d'"' -f2 | cut -d. -f-2)" >> $GITHUB_ENV
+          echo "revision=$(cat pyproject.toml | grep "version =" | cut -d' ' -f3 | cut -d'"' -f2 | cut -d. -f3)" >> $GITHUB_ENV
+      - name: Deploy latest documentation
+        if: github.event_name == 'release' && env.revision == '0'
+        run: |
+          mike retitle latest "$(mike list latest -j | jq .version -r)"
+          mike deploy $version latest -t "$version (latest)" -u
+      - name: Deploy patch documentation
+        if: github.event_name == 'release' && env.revision != '0'
+        run: mike deploy $version
+      - name: Deploy dev documentation
+        if: github.event_name == 'push'
+        run: mike deploy dev
+      - name: Publish documentation
+        if: github.event_name == 'push' || github.event_name == 'release'
+        run: |
+          git switch gh-pages
+          cat versions.json | jq '[.[-1], .[:-1][]]' -r | tee versions.json
+          git add versions.json
+          git commit -m "sort versions.json"
+          git push origin gh-pages

@@ -1,0 +1,25 @@
+on:
+  workflow_dispatch:
+
+name: Publish Documentation
+jobs:
+  build-publish-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Needed if using OIDC to get release secrets.
+      contents: write # Needed in this case to write github pages.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+
+      - name: Install poetry
+        uses: abatilo/actions-poetry@7b6d33e44b4f08d7021a1dee3c044e9c253d6439
+
+      - uses: ./.github/actions/build-docs
+
+      - uses: ./.github/actions/publish-docs
+        with:
+          token: ${{secrets.GITHUB_TOKEN}}

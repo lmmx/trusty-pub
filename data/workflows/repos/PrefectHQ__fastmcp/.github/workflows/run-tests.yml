@@ -1,0 +1,119 @@
+name: Tests
+
+env:
+  PY_COLORS: 1
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - ".github/workflows/**"
+
+  # run on all pull requests because these checks are required and will block merges otherwise
+  pull_request:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run_tests:
+    name: "Tests: Python ${{ matrix.python-version }} on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.13"
+      fail-fast: false
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: ./.github/actions/setup-uv
+        with:
+          python-version: ${{ matrix.python-version }}
+          resolution: locked
+
+      - name: Run unit tests
+        uses: ./.github/actions/run-pytest
+
+      - name: Run client process tests
+        uses: ./.github/actions/run-pytest
+        with:
+          test-type: client_process
+
+  run_tests_lowest_direct:
+    name: "Tests with lowest-direct dependencies"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv (lowest-direct)
+        uses: ./.github/actions/setup-uv
+        with:
+          resolution: lowest-direct
+
+      - name: Run unit tests
+        uses: ./.github/actions/run-pytest
+
+      - name: Run client process tests
+        uses: ./.github/actions/run-pytest
+        with:
+          test-type: client_process
+
+  run_conformance_tests:
+    name: "MCP conformance tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: ./.github/actions/setup-uv
+        with:
+          resolution: locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run conformance tests
+        uses: ./.github/actions/run-pytest
+        with:
+          test-type: conformance
+
+  run_integration_tests:
+    name: "Integration tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: ./.github/actions/setup-uv
+        with:
+          resolution: locked
+
+      - name: Run integration tests
+        uses: ./.github/actions/run-pytest
+        with:
+          test-type: integration
+        env:
+          FASTMCP_GITHUB_TOKEN: ${{ secrets.FASTMCP_GITHUB_TOKEN }}
+          FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID: ${{ secrets.FASTMCP_TEST_AUTH_GITHUB_CLIENT_ID }}
+          FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET: ${{ secrets.FASTMCP_TEST_AUTH_GITHUB_CLIENT_SECRET }}

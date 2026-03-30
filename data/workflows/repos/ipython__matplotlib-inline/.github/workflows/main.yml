@@ -1,0 +1,75 @@
+name: Tests
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+
+defaults:
+  run:
+    shell: bash -l {0}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 3
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+        include:
+          #- os: macos-latest
+          #  python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.14"
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Setup Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install package with test dependencies
+      run: pip install .[test]
+
+    - name: Test installation without nbdime
+      run: pytest -v
+
+    - name: Test flake8
+      if: ${{ matrix.python-version == '3.14' }}
+      run: flake8 matplotlib_inline --ignore=E501,W504,W503
+
+    - name: Test Build
+      if: ${{ matrix.python-version == '3.14' }}
+      run: |
+        pip install build
+        python -m build
+
+    - name: Install ruff
+      if: ${{ matrix.python-version == '3.14' }}
+      run: pip install ruff
+
+    - name: Check code with ruff
+      if: ${{ matrix.python-version == '3.14' }}
+      run: ruff check matplotlib_inline
+
+    - name: Check formatting with ruff
+      if: ${{ matrix.python-version == '3.14' }}
+      run: ruff format matplotlib_inline --check
+
+    - name: install Mypy
+      if: ${{ matrix.python-version == '3.14' }}
+      run : pip install mypy matplotlib
+
+    - name: run mypy
+      if: ${{ matrix.python-version == '3.14' }}
+      run: mypy .

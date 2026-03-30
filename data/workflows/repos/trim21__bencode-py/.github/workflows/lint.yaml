@@ -1,0 +1,38 @@
+name: lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  mypy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          activate-environment: 'true'
+
+      - run: uv sync --dev --no-install-project
+
+      - uses: liskin/gh-problem-matcher-wrap@v3
+        with:
+          action: add
+          linters: mypy
+          run: mypy --show-column-numbers src/
+
+  pre-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: trim21/actions/prek@master

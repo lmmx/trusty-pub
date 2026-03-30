@@ -1,0 +1,279 @@
+---
+name: Build packages
+
+# Note: these jobs also build and cache the libpq, but, because every Python
+# version will try to build and cache the same libpq instance, there is a race
+# condition and most likely the artifacts manager will refuse to cache.
+#
+# Please run the `build-and-cache-libpq.yml` workflow when the libpq/openssl
+# version change in order to update the cache.
+
+on:
+  - workflow_dispatch
+
+env:
+  PIP_BREAK_SYSTEM_PACKAGES: "1"
+  LIBPQ_VERSION: "17.6"
+  OPENSSL_VERSION: "3.5.4"
+  PQ_FLAGS: ""
+
+jobs:
+  sdist:  # {{{
+    if: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_name: psycopg2
+          - package_name: psycopg2-binary
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repos
+        uses: actions/checkout@v6
+
+      - name: Build sdist
+        run: ./scripts/build/build_sdist.sh
+        env:
+          PACKAGE_NAME: ${{ matrix.package_name }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: sdist-${{ matrix.package_name }}
+          path: |
+            dist/*.tar.gz
+
+    env:
+      PSYCOPG2_TESTDB: postgres
+      PSYCOPG2_TESTDB_HOST: 172.17.0.1
+      PSYCOPG2_TESTDB_USER: postgres
+      PSYCOPG2_TESTDB_PASSWORD: password
+      PSYCOPG2_TEST_FAST: 1
+
+    services:
+      postgresql:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+  # }}}
+
+  linux:  # {{{
+    if: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [manylinux, musllinux]
+        arch: [x86_64, aarch64, ppc64le, riscv64]
+        pyver: [cp39, cp310, cp311, cp312, cp313, cp314]
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repos
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU for multi-arch build
+        uses: docker/setup-qemu-action@v3
+
+      - name: Cache libpq build
+        uses: actions/cache@v5
+        with:
+          path: /tmp/libpq.build
+          key: libpq-${{ matrix.platform }}-${{ matrix.arch }}-${{ env.LIBPQ_VERSION }}-${{ env.OPENSSL_VERSION }}${{ env.PQ_FLAGS }}
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+        env:
+          CIBW_SKIP: "cp31?t-*"
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+          CIBW_MANYLINUX_I686_IMAGE: manylinux2014
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux2014
+          CIBW_MANYLINUX_PPC64LE_IMAGE: manylinux2014
+          CIBW_MANYLINUX_RISCV64_IMAGE: quay.io/pypa/manylinux_2_39_riscv64
+          CIBW_BUILD: ${{matrix.pyver}}-${{matrix.platform}}_${{matrix.arch}}
+          CIBW_ARCHS_LINUX: auto aarch64 ppc64le riscv64
+          CIBW_BEFORE_ALL_LINUX: ./scripts/build/wheel_linux_before_all.sh
+          CIBW_REPAIR_WHEEL_COMMAND: >-
+            ./scripts/build/strip_wheel.sh {wheel}
+            && auditwheel repair -w {dest_dir} {wheel}
+          CIBW_TEST_COMMAND: >-
+            export PYTHONPATH={project} &&
+            python -c "import tests; tests.unittest.main(defaultTest='tests.test_suite')"
+          CIBW_ENVIRONMENT_PASS_LINUX: LIBPQ_VERSION OPENSSL_VERSION
+          CIBW_ENVIRONMENT: >-
+            PACKAGE_NAME=psycopg2-binary
+            LIBPQ_BUILD_PREFIX=/host/tmp/libpq.build
+            PATH="$LIBPQ_BUILD_PREFIX/bin:$PATH"
+            LD_LIBRARY_PATH="$LIBPQ_BUILD_PREFIX/lib:$LIBPQ_BUILD_PREFIX/lib64"
+            PSYCOPG2_TESTDB=postgres
+            PSYCOPG2_TESTDB_HOST=172.17.0.1
+            PSYCOPG2_TESTDB_USER=postgres
+            PSYCOPG2_TESTDB_PASSWORD=password
+            PSYCOPG2_TEST_FAST=1
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: linux-${{matrix.pyver}}-${{matrix.platform}}_${{matrix.arch}}
+          path: ./wheelhouse/*.whl
+
+    services:
+      postgresql:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+  # }}}
+
+  macos:  # {{{
+    runs-on: macos-latest
+    if: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # These archs require an Apple M1 runner: [arm64, universal2]
+        arch: [x86_64, arm64]
+        pyver: [cp39, cp310, cp311, cp312, cp313, cp314]
+
+    steps:
+      - name: Checkout repos
+        uses: actions/checkout@v6
+
+      - name: Cache libpq build
+        uses: actions/cache@v5
+        with:
+          path: /tmp/libpq.build
+          key: libpq-macos-${{ env.LIBPQ_VERSION }}-${{ matrix.arch }}-${{ env.OPENSSL_VERSION }}${{ env.PQ_FLAGS }}
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+        env:
+          CIBW_SKIP: "cp31?t-*"
+          CIBW_BUILD: ${{matrix.pyver}}-macosx_${{matrix.arch}}
+          CIBW_ARCHS_MACOS: ${{matrix.arch}}
+          MACOSX_ARCHITECTURE: ${{matrix.arch}}
+          CIBW_BEFORE_ALL_MACOS: ./scripts/build/wheel_macos_before_all.sh
+          CIBW_TEST_COMMAND: >-
+            export PYTHONPATH={project} &&
+            python -c "import tests; tests.unittest.main(defaultTest='tests.test_suite')"
+          CIBW_ENVIRONMENT: >-
+            PG_VERSION=16
+            PACKAGE_NAME=psycopg2-binary
+            PSYCOPG2_TESTDB=postgres
+            PATH="/tmp/libpq.build/bin:$PATH"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-${{matrix.pyver}}-macos-${{matrix.arch}}
+          path: ./wheelhouse/*.whl
+
+  # }}}
+
+  windows:  # {{{
+    runs-on: windows-latest
+    if: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [win_amd64]
+        pyver: [cp39, cp310, cp311, cp312, cp313, cp314]
+        package_name: [psycopg2, psycopg2-binary]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # there are some other libpq in PATH
+      - name: Drop spurious libpq in the path
+        run: rm -rf c:/tools/php C:/Strawberry/c/bin
+
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Start PostgreSQL service for test
+        run: |
+          $PgSvc = Get-Service "postgresql*"
+          Set-Service $PgSvc.Name -StartupType manual
+          $PgSvc.Start()
+        shell: powershell
+
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const path = require('path')
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            core.addPath(path.join(process.env.VCPKG_INSTALLATION_ROOT, 'installed/x64-windows-release/lib'));
+            core.addPath(path.join(process.env.VCPKG_INSTALLATION_ROOT, 'installed/x64-windows-release/bin'));
+
+      - name: Create the binary package source tree
+        run: >-
+          sed -i 's/^setup(name="psycopg2"/setup(name="${{matrix.package_name}}"/'
+          setup.py
+        if: ${{ matrix.package_name != 'psycopg2' }}
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+        env:
+          CIBW_SKIP: "cp31?t-*"
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite" # cache vcpkg
+          CIBW_BUILD: ${{matrix.pyver}}-${{matrix.arch}}
+          CIBW_ARCHS_WINDOWS: AMD64 x86
+          CIBW_BEFORE_BUILD_WINDOWS: '.\scripts\build\wheel_win32_before_build.bat'
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >-
+            delvewheel repair -w {dest_dir}
+            --no-mangle "libiconv-2.dll;libwinpthread-1.dll" {wheel}
+          CIBW_TEST_COMMAND: >-
+            set PYTHONPATH={project} &&
+            python -c "import tests; tests.unittest.main(defaultTest='tests.test_suite')"
+          # Note: no fast test because we don't run Windows tests
+          CIBW_ENVIRONMENT_WINDOWS: >-
+            PSYCOPG2_TESTDB=postgres
+            PSYCOPG2_TESTDB_USER=postgres
+            PSYCOPG2_TESTDB_HOST=localhost
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-${{ matrix.package_name }}-${{matrix.pyver}}-${{matrix.arch}}
+          path: ./wheelhouse/*.whl
+
+  # }}}
+
+  merge:  # {{{
+    runs-on: ubuntu-latest
+    needs:
+      - sdist
+      - linux
+      - macos
+      - windows
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v6
+        with:
+          name: psycopg2-artifacts
+          delete-merged: true
+
+  # }}}

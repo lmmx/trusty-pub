@@ -1,0 +1,58 @@
+name: "Package"
+
+on:
+  push:
+    paths:
+      - "CHANGES.rst"
+      - "MANIFEST.in"
+      - "setup.py"
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Monthly on first day to capture breakage caused by dependencies
+    - cron: "0 23 1 * *"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: "Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version:
+          - "3.8"
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+      fail-fast: true
+
+    steps:
+      - name: "Check out the repo"
+        uses: "actions/checkout@v3"
+
+      - name: "Run make build in Docker"
+        uses: "addnab/docker-run-action@v3"
+        with:
+          # Available tags: https://hub.docker.com/_/python/tags
+          image: "python:${{ matrix.python-version }}-alpine"
+          options: --rm -v ${{ github.workspace }}:/workspace -w /workspace
+          run: |
+            set -o errexit
+            apk add bash make py3-setuptools
+            # Use /usr/bin/python3 instead of /usr/local/bin/python3
+            PATH=/usr/bin:$PATH make build
+            PATH=/usr/bin:$PATH pip install dist/ydiff-*-any.whl

@@ -1,0 +1,59 @@
+name: Tests
+
+# Trigger the workflow on push or pull request
+# events but only for the master branch:
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "pypy-3.9"]
+
+    env:
+      PYTHON: ${{ matrix.python-version }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }} with uv
+        uses: drivendataorg/setup-python-uv-action@v1.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'packages'
+
+      - name: Install dependencies
+        run: |
+          uv sync
+      - name: Run tests
+        run: |
+          uv run pytest --cov=./ --cov-report=xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          file: ./coverage.xml
+          env_vars: PYTHON
+          fail_ci_if_error: false
+
+  linters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.10 with uv
+        uses: drivendataorg/setup-python-uv-action@v1.0.0
+        with:
+          python-version: "3.10"
+          cache: 'packages'
+
+      - name: Install dependencies
+        run: |
+          uv sync
+      - name: Run pre-commit checks
+        run: |
+          uv run pre-commit run --all --all-files

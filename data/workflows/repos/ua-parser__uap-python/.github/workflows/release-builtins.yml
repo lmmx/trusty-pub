@@ -1,0 +1,126 @@
+name: Publish ua-parser builtins
+
+run-name: Publish ${{ inputs.tag || 'master' }} to ${{ inputs.environment || 'pypi (scheduled)' }}
+
+permissions: {}
+
+on:
+  schedule:
+    # schedule a dev release on every 1st of the month, at 2034 UTC
+    - cron: "34 20 1 * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "uap-core ref to release"
+        type: string
+      environment:
+        description: "environment to release for (testpypi or pypi)"
+        type: environment
+        required: true
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.check.outputs.release }}
+    steps:
+    - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # 6.0.1
+      with:
+        submodules: true
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548  # 6.1.0
+      with:
+        python-version: "3.x"
+
+    - name: Check necessity of release
+      id: check
+      env:
+        PYPI: ${{ github.event.inputs.environment || 'pypi' }}
+        REF: ${{ inputs.tag || 'HEAD' }}
+      run: |
+        case $PYPI in
+            pypi)
+                DOMAIN=pypi.org
+                ;;
+            testpypi)
+                DOMAIN=test.pypi.org
+                ;;
+            *)
+                exit 1
+        esac
+
+        RELREV=$(python scripts/relrev.py --domain "$DOMAIN")
+        VERSION=$(date +%Y%m)
+        CURREV=$(python scripts/tagcore.py --ref $REF --version $VERSION)
+
+        if [ -n "$CURREV" -a "$RELREV" = "$CURREV" ]
+        then
+            echo "current rev matches latest release, skip new release"
+        else
+            echo release=true >> $GITHUB_OUTPUT
+        fi
+    - name: Install pypa/build
+      if: ${{ steps.check.outputs.release == 'true' }}
+      run: python3 -m pip install build --user
+    - name: Build wheel
+      if: ${{ steps.check.outputs.release == 'true' }}
+      run: |
+        python3 -m build -w ua-parser-builtins
+        mv ua-parser-builtins/dist .
+    - name: Store the distribution packages
+      if: ${{ steps.check.outputs.release == 'true' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # 6.0.0
+      with:
+        name: python-package-distributions
+        path: dist/
+
+  publish-to-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    if: ${{ github.event.inputs.environment == 'testpypi' && needs.build.outputs.release == 'true' }}
+    runs-on: ubuntu-latest
+
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/ua-parser-builtins
+
+    permissions:
+      id-token: write
+
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # 7.0.0
+      with:
+        name: python-package-distributions
+        path: dist/
+    - name: Publish
+      uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # 1.13.0
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        skip-existing: true
+        verbose: true
+
+  publish-to-pypi:
+    name: publish
+    needs: build
+    if: ${{ (github.event_name == 'schedule' || github.event.inputs.environment == 'pypi') && needs.build.outputs.release == 'true' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ua-parser-builtins
+    permissions:
+      id-token: write
+
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # 7.0.0
+      with:
+        name: python-package-distributions
+        path: dist/
+    - name: Publish
+      uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # 1.13.0
+      with:
+        verbose: true

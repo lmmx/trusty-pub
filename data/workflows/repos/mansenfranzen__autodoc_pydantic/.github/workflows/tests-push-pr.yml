@@ -1,0 +1,140 @@
+name: "TESTS: Push/Pull"
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-stable:
+    environment: Tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python_version: "3.8"
+            pydantic_version: "20"
+            sphinx_version: "45"
+          - python_version: "3.9"
+            pydantic_version: "20"
+            sphinx_version: "45"
+          - python_version: "3.9"
+            pydantic_version: "20"
+            sphinx_version: "53"
+          - python_version: "3.10"
+            pydantic_version: "20"
+            sphinx_version: "62"
+          - python_version: "3.10"
+            pydantic_version: "20"
+            sphinx_version: "70"
+          - python_version: "3.11"
+            pydantic_version: "20"
+            sphinx_version: "70"
+          - python_version: "3.11"
+            pydantic_version: "21"
+            sphinx_version: "71"
+          - python_version: "3.11"
+            pydantic_version: "22"
+            sphinx_version: "71"
+          - python_version: "3.11"
+            pydantic_version: "23"
+            sphinx_version: "71"
+          - python_version: "3.11"
+            pydantic_version: "24"
+            sphinx_version: "72"
+          - python_version: "3.12"
+            pydantic_version: "25"
+            sphinx_version: "72"
+          - python_version: "3.12"
+            pydantic_version: "26"
+            sphinx_version: "72"
+          - python_version: "3.12"
+            pydantic_version: "27"
+            sphinx_version: "73"
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Test Environment and Run Tox
+        uses: ./.github/actions/invoke-tox
+        with:
+          python-version: ${{ matrix.python_version }}
+          tox-environment: py${{ matrix.python_version }}-pydantic${{ matrix.pydantic_version }}-sphinx${{ matrix.sphinx_version }}
+          install-graphviz: true
+          codacy: ${{ secrets.CODACY_PROJECT_TOKEN }}
+
+  test-latest:
+    environment: Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Test Environment and Run Tox
+        uses: ./.github/actions/invoke-tox
+        with:
+          tox-environment: latest
+          install-graphviz: true
+          codacy: ${{ secrets.CODACY_PROJECT_TOKEN }}
+
+  test-no-erdantic:
+    environment: Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Test Environment and Run Tox
+        uses: ./.github/actions/invoke-tox
+        with:
+          tox-environment: no-erdantic
+
+  linter:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Test Environment and Run Tox
+        uses: ./.github/actions/invoke-tox
+        with:
+          tox-environment: linter
+
+  formatter:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Test Environment and Run Tox
+        uses: ./.github/actions/invoke-tox
+        with:
+          tox-environment: formatter
+
+  type-checker:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Test Environment and Run Tox
+        uses: ./.github/actions/invoke-tox
+        with:
+          tox-environment: type-checker
+          install-graphviz: true
+
+  security-scan:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        scan: ["lib", "dev"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+  
+      - name: Setup Test Environment and Run Tox
+        uses: ./.github/actions/invoke-tox
+        with:
+          tox-environment: security-scan${{ matrix.scan }}
+          install-graphviz: true

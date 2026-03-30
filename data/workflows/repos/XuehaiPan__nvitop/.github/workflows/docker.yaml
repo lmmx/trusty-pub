@@ -1,0 +1,120 @@
+name: Build and Publish Docker Images
+
+on:
+  pull_request:
+    paths:
+      - setup.py
+      - setup.cfg
+      - pyproject.toml
+      - MANIFEST.in
+      - nvitop/version.py
+      - nvitop-exporter/nvitop_exporter/version.py
+      - Dockerfile
+      - nvitop-exporter/Dockerfile
+      - .github/workflows/docker.yaml
+  release:
+    types:
+      - published
+  # Allow to trigger the workflow manually
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to GHCR"
+        type: boolean
+        default: true
+        required: false
+      tag:
+        description: "Version tag to publish"
+        type: string
+        required: true
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  IMAGE_REGISTRY: "ghcr.io"
+  FORCE_COLOR: "1"
+  CLICOLOR_FORCE: "1"
+
+jobs:
+  build-and-publish:
+    name: Build and Publish Docker Images for ${{ matrix.name }}
+    if: github.repository_owner == 'XuehaiPan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - name: nvitop
+            context: .
+            dockerfile: Dockerfile
+          - name: nvitop-exporter
+            context: .
+            dockerfile: nvitop-exporter/Dockerfile
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Test Docker build
+        run: |
+          docker build --tag test-image:latest ${{ matrix.context }}
+          docker run --rm test-image:latest --version
+          docker run --rm test-image:latest --help
+
+      - name: Extract version
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == 'release' ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            TAGS="${VERSION#v},latest"
+          elif [[ "${{ github.event_name }}" == 'workflow_dispatch' ]]; then
+            TAGS="${{ github.event.inputs.tag }}"
+          else
+            TAGS="pr-${{ github.event.number }}"
+          fi
+          NAME="${{ env.IMAGE_REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}"
+          NAME="$(echo "${NAME}" | tr '[:upper:]' '[:lower:]')"
+          TAGS="$(echo "${TAGS}" | tr -d '[:space:]' | tr ',' '\n' | sort -uV | sed "s|^|${NAME}:|" | tr '\n' ',')"
+          TAGS="${TAGS%,}"
+          echo "image-name=${NAME}" | tee -a "${GITHUB_OUTPUT}"
+          echo "image-tags=${TAGS}" | tee -a "${GITHUB_OUTPUT}"
+
+      - name: Login to Container Registry
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          tags: ${{ steps.tag.outputs.image-tags }}
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true') }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Generate artifact attestation
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ steps.tag.outputs.image-name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

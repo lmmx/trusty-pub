@@ -1,0 +1,52 @@
+name: Run the test suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "pypy-3.11"]
+        include:
+        - os: macos-latest
+          python-version: "3.9"
+        - os: windows-latest
+          python-version: "3.9"
+        - os: macos-latest
+          python-version: "3.14"
+        - os: windows-latest
+          python-version: "3.14"
+        - os: macos-latest
+          python-version: "pypy-3.11"
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
+        cache: pip
+        cache-dependency-path: pyproject.toml
+    - name: Install the project and its test dependencies
+      run: pip install --group test coverage[toml] .
+    - name: Test with pytest
+      run: coverage run -m pytest -v
+      env:
+        PYTHONWARNDEFAULTENCODING: 1
+    - name: Generate coverage report
+      run: coverage xml
+    - name: Send coverage data to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        file: coverage.xml
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

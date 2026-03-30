@@ -1,0 +1,371 @@
+name: "[Python] Release"
+
+on:
+  push:
+    tags:
+      - python-v*
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PACKAGE_NAME: css_inline
+  PYTHON_VERSION: "3.11" # to build abi3 wheels
+
+jobs:
+  sdist:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build sdist
+        uses: messense/maturin-action@v1
+        with:
+          command: sdist
+          args: -m bindings/python/Cargo.toml --out dist
+      - name: Install sdist
+        run: |
+          pip install dist/${{ env.PACKAGE_NAME }}-*.tar.gz --force-reinstall
+      - name: Upload sdist
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          if-no-files-found: error
+          path: dist
+
+  macos-x86_64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build wheels - x86_64
+        uses: messense/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release -m bindings/python/Cargo.toml --out dist
+      - name: Install built wheel - x86_64
+        run: |
+          pip install dist/${{ env.PACKAGE_NAME }}-*.whl --force-reinstall
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-macos-x86_64
+          if-no-files-found: error
+          path: dist
+
+  macos-universal:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build wheels - universal2
+        uses: messense/maturin-action@v1
+        with:
+          args: --release -m bindings/python/Cargo.toml --target universal2-apple-darwin --out dist
+      - name: Install built wheel - universal2
+        run: |
+          pip install dist/${{ env.PACKAGE_NAME }}-*universal2.whl --force-reinstall
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-macos-universal
+          if-no-files-found: error
+          path: dist
+
+  windows:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        target: [x64, x86]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: ${{ matrix.target }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release -m bindings/python/Cargo.toml --out dist
+      - name: Install built wheel
+        shell: bash
+        run: |
+          python -m pip install dist/${{ env.PACKAGE_NAME }}-*.whl --force-reinstall
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-windows-${{ matrix.target }}
+          if-no-files-found: error
+          path: dist
+
+  linux:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        target: [x86_64, i686]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: --release -m bindings/python/Cargo.toml --out dist --interpreter python3.11
+      - name: Install built wheel
+        if: matrix.target == 'x86_64'
+        run: |
+          pip install dist/${{ env.PACKAGE_NAME }}-*.whl --force-reinstall
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-linux-${{ matrix.target }}
+          if-no-files-found: error
+          path: dist
+
+  linux-cross:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          - target: aarch64
+            base_image: --platform=linux/arm64 arm64v8/ubuntu:24.04
+          - target: armv7
+            base_image: --platform=linux/arm/v7 arm32v7/ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: 2_24
+          args: --release -m bindings/python/Cargo.toml --no-default-features --out dist
+      - uses: uraimo/run-on-arch-action@v3
+        name: Install built wheel
+        with:
+          arch: none
+          distro: none
+          base_image: ${{ matrix.base_image }}
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update
+            apt-get install -y --no-install-recommends python3 python3-pip
+          run: |
+            pip3 install ${{ env.PACKAGE_NAME }} --no-index --find-links dist/ --force-reinstall --break-system-packages
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-linux-cross-${{ matrix.target }}
+          if-no-files-found: error
+          path: dist
+
+  musllinux:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: musllinux_1_2
+          args: --release -m bindings/python/Cargo.toml --out dist
+      - name: Install built wheel
+        uses: addnab/docker-run-action@v3
+        with:
+          image: alpine:latest
+          options: -v ${{ github.workspace }}:/io -w /io
+          run: |
+            apk add py3-pip
+            pip3 install ${{ env.PACKAGE_NAME }} --no-index --find-links /io/dist/ --force-reinstall --break-system-packages
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-musllinux-${{ matrix.target }}
+          if-no-files-found: error
+          path: dist
+
+  musllinux-cross:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        platform:
+          - target: aarch64-unknown-linux-musl
+            arch: aarch64
+          - target: armv7-unknown-linux-musleabihf
+            arch: armv7
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          manylinux: musllinux_1_2
+          args: --release -m bindings/python/Cargo.toml --out dist
+      - uses: uraimo/run-on-arch-action@v3
+        name: Install built wheel
+        with:
+          arch: ${{ matrix.platform.arch }}
+          distro: alpine_latest
+          githubToken: ${{ github.token }}
+          install: |
+            apk add py3-pip
+          run: |
+            pip3 install ${{ env.PACKAGE_NAME }} --no-index --find-links dist/ --force-reinstall --break-system-packages
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-musllinux-cross-${{ matrix.platform.target }}-${{ matrix.platform.arch }}
+          if-no-files-found: error
+          path: dist
+
+  pypy:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, macos-15-intel]
+        target: [x86_64, aarch64]
+        python-version:
+          - "3.11"
+        exclude:
+          - os: macos-15-intel
+            target: aarch64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: pypy${{ matrix.python-version }}
+      - name: Build wheels
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: 2_24
+          args: --release -m bindings/python/Cargo.toml --out dist -i pypy${{ matrix.python-version }}
+      - name: Install built wheel
+        if: matrix.target == 'x86_64'
+        run: |
+          pip install dist/${{ env.PACKAGE_NAME }}-*.whl --force-reinstall
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-pypy-${{ matrix.os }}-${{ matrix.target }}-${{ matrix.python-version }}
+          if-no-files-found: error
+          path: dist
+
+  pyodide:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          # Nightly 1.86 as 1.87+ is incompatible with PyOdide as of now
+          toolchain: nightly-2025-02-01
+          targets: wasm32-unknown-emscripten
+          components: rust-src
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+      - run: |
+          pip install pyodide-build>=0.28.0
+          echo EMSCRIPTEN_VERSION=$(pyodide config get emscripten_version) >> $GITHUB_ENV
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EMSCRIPTEN_VERSION }}
+      - run: pyodide build
+        working-directory: ./bindings/python
+        env:
+          DEFAULT_CROSS_BUILD_ENV_URL: "https://github.com/pyodide/pyodide/releases/download/0.28.0a3/xbuildenv-0.28.0a3.tar.bz2"
+          RUSTFLAGS: "-C link-arg=-sSIDE_MODULE=2 -Z link-native-libraries=no -Z emscripten-wasm-eh"
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-pyodide
+          if-no-files-found: error
+          path: ./bindings/python/dist
+
+  release:
+    name: Release
+    runs-on: ubuntu-22.04
+    needs:
+      - sdist
+      - macos-x86_64
+      - macos-universal
+      - windows
+      - linux
+      - linux-cross
+      - musllinux
+      - musllinux-cross
+      - pypy
+      - pyodide
+    if: "startsWith(github.ref, 'refs/tags/')"
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: all
+      - name: Merge files
+        run: |
+          mkdir dist
+          mv all/*/* dist
+      - uses: actions/setup-python@v6
+      - name: Extract Version
+        run: echo "version=${GITHUB_REF#refs/tags/python-v}" >> $GITHUB_ENV
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          make_latest: false
+          draft: true
+          name: "[Python] Release ${{ env.version }}"
+          files: dist/**
+
+      - name: Remove PyOdide Wheel for PyPI
+        run: |
+          mkdir dist-for-pypi
+          for file in dist/*; do
+            if [[ "$file" != *"pyodide"* ]]; then
+              cp "$file" dist-for-pypi/
+            fi
+          done
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          pip install --upgrade twine
+          twine upload --skip-existing dist-for-pypi/*

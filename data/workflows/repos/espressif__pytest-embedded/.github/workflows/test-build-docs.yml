@@ -1,0 +1,25 @@
+name: Test Build Docs
+
+on:
+  pull_request:
+    paths:
+      - "**.py"
+      - "docs/**"
+      - "*.md"
+
+jobs:
+  test-build-docs:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          bash foreach.sh install
+          pip install -r docs/requirements.txt
+      - name: Test build docs
+        run: |
+          cd docs && make html SPHINXOPTS="-W"

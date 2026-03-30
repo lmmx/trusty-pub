@@ -1,0 +1,111 @@
+name: Frontend Code Checks
+
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches:
+      - "main"
+      - "release-**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CI: true
+
+jobs:
+  Check-Frontend-Changes:
+    runs-on: ubuntu-latest
+    outputs:
+      has_frontend_changes: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for frontend file changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          list-files: shell
+          filters: |
+            frontend:
+              - 'clients/**'
+              - '.github/workflows/frontend_checks.yml'
+
+      - name: Log changed files
+        if: steps.filter.outputs.frontend == 'true'
+        run: echo "${{ steps.filter.outputs.frontend_files }}"
+
+  Clients-Unit:
+    needs: Check-Frontend-Changes
+    if: needs.Check-Frontend-Changes.outputs.has_frontend_changes == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate docs
+        working-directory: clients/fides-js
+        run: npm run docs:generate
+
+      - name: Fail if docs are not up to date
+        working-directory: clients/fides-js
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "Docs are not up to date. Please run 'npm run docs:generate' and commit the changes.";
+            git status
+            git diff
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format
+        run: npm run format:ci
+
+      - name: Unit tests
+        run: npm run test
+
+  # Summary job for branch protection - consolidates all frontend checks
+  Frontend-Checks-Summary:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - Clients-Unit
+    steps:
+      - name: Check job results
+        run: |
+          echo "Clients-Unit: ${{ needs.Clients-Unit.result }}"
+
+          # Fail only if jobs failed (not if skipped)
+          if [ "${{ needs.Clients-Unit.result }}" == "failure" ]; then
+            echo "❌ One or more required jobs failed"
+            exit 1
+          fi
+
+          # Check for cancelled jobs (treat as failure)
+          if [ "${{ needs.Clients-Unit.result }}" == "cancelled" ]; then
+            echo "❌ One or more required jobs were cancelled"
+            exit 1
+          fi
+
+          echo "✅ All required frontend checks passed or were skipped"

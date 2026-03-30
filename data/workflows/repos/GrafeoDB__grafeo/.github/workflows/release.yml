@@ -1,0 +1,548 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # Create GitHub release
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create_release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: false
+
+  # Build release binaries
+  build-binaries:
+    name: Build (${{ matrix.os }}-${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            rid: linux-x64
+            native_lib: libgrafeo_c.so
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+            rid: linux-arm64
+            native_lib: libgrafeo_c.so
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            rid: win-x64
+            native_lib: grafeo_c.dll
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            rid: osx-x64
+            native_lib: libgrafeo_c.dylib
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            rid: osx-arm64
+            native_lib: libgrafeo_c.dylib
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build release binaries
+        run: cargo build --release --workspace --target ${{ matrix.target }} --exclude grafeo-python
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          STAGING="grafeo-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$STAGING"
+          cp target/${{ matrix.target }}/release/grafeo "$STAGING/" || true
+          cp target/${{ matrix.target }}/release/libgrafeo_c.so "$STAGING/" || true
+          cp target/${{ matrix.target }}/release/libgrafeo_c.dylib "$STAGING/" || true
+          cp LICENSE README.md "$STAGING/"
+          tar czvf "${STAGING}.tar.gz" "$STAGING"
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $staging = "grafeo-${{ github.ref_name }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $staging
+          Copy-Item target/${{ matrix.target }}/release/grafeo.exe $staging/ -ErrorAction SilentlyContinue
+          Copy-Item target/${{ matrix.target }}/release/grafeo_c.dll $staging/ -ErrorAction SilentlyContinue
+          Copy-Item LICENSE, README.md $staging/
+          Compress-Archive -Path $staging -DestinationPath "${staging}.zip"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./grafeo-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+
+      - name: Upload CLI binary artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: grafeo-cli-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/grafeo
+            target/${{ matrix.target }}/release/grafeo.exe
+          if-no-files-found: ignore
+
+      - name: Upload native library for NuGet
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.rid }}
+          path: target/${{ matrix.target }}/release/${{ matrix.native_lib }}
+          if-no-files-found: ignore
+
+  # Generate and upload SHA256 checksums for all release archives
+  checksums:
+    name: SHA256 Checksums
+    runs-on: ubuntu-latest
+    needs: [create-release, build-binaries]
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          # Collect all archive files
+          find . -name '*.tar.gz' -o -name '*.zip' | sort | while read -r f; do
+            sha256sum "$f" >> ../checksums.txt
+          done
+          # Also checksum the CLI binaries
+          find . -name 'grafeo' -o -name 'grafeo.exe' | sort | while read -r f; do
+            sha256sum "$f" >> ../checksums.txt
+          done
+          cat ../checksums.txt
+
+      - name: Upload checksums
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./checksums.txt
+        continue-on-error: true
+
+  # Publish crates to crates.io (in dependency order)
+  publish-crates:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: build-binaries
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish crates in dependency order
+        run: |
+          publish_crate() {
+            local crate=$1
+            echo "Publishing $crate..."
+            if cargo publish -p "$crate" --no-verify 2>&1 | tee /dev/stderr | grep -q "already exists"; then
+              echo "::notice::$crate already published, skipping"
+            fi
+            echo "Waiting for crates.io index..."
+            sleep 30
+          }
+
+          publish_crate grafeo-common
+          publish_crate grafeo-core
+          publish_crate grafeo-adapters
+          publish_crate grafeo-engine
+          publish_crate grafeo
+          publish_crate grafeo-cli
+
+  # Tag Go module (subdirectory modules need prefixed tags)
+  tag-go-module:
+    name: Tag Go Module
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Go module tag
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          GO_TAG="crates/bindings/go/${VERSION}"
+          COMMIT_SHA="${{ github.sha }}"
+          # Create tag via GitHub API (avoids git config/auth issues)
+          gh api "repos/${{ github.repository }}/git/refs" \
+            -f "ref=refs/tags/${GO_TAG}" \
+            -f "sha=${COMMIT_SHA}" || echo "Go tag ${GO_TAG} may already exist"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger Go module proxy
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          # Go proxy requires uppercase letters escaped as !lowercase
+          ESCAPED=$(echo "github.com/GrafeoDB/grafeo/crates/bindings/go" | sed 's/[A-Z]/!\L&/g')
+          curl -sf "https://proxy.golang.org/${ESCAPED}/@v/${VERSION}.info" || echo "Go proxy fetch pending"
+
+  # Build Node.js native modules for each platform
+  build-node-native:
+    name: Node.js (${{ matrix.target }})
+    runs-on: ${{ matrix.host }}
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-latest
+            target: x86_64-apple-darwin
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross tools (aarch64 Linux GNU)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install cross tools (aarch64 Linux musl)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Install dependencies
+        working-directory: crates/bindings/node
+        run: npm install
+
+      - name: Build native module
+        working-directory: crates/bindings/node
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            npx napi build --platform --release --target ${{ matrix.target }} --features full --cross-compile
+          else
+            npx napi build --platform --release --target ${{ matrix.target }} --features full
+          fi
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-bindings-${{ matrix.target }}
+          path: crates/bindings/node/grafeo.*.node
+          if-no-files-found: error
+
+  # Publish Node.js platform packages and main package to npm
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [create-release, build-node-native]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: crates/bindings/node
+        run: npm install
+
+      - name: Download all Node.js artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: crates/bindings/node/artifacts
+          pattern: node-bindings-*
+          merge-multiple: true
+
+      - name: Move artifacts to npm directories
+        working-directory: crates/bindings/node
+        run: |
+          echo "=== Downloaded artifacts ==="
+          ls -la artifacts/
+          # Copy .node files to cwd where napi artifacts expects them
+          cp artifacts/grafeo.*.node .
+          npx napi artifacts --npm-dir npm
+          echo "=== Platform packages ==="
+          find npm -name '*.node' -ls
+
+      - name: Publish platform packages
+        working-directory: crates/bindings/node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in npm/*/; do
+            if ls "$dir"*.node 1>/dev/null 2>&1; then
+              echo "Publishing $(basename "$dir")..."
+              (cd "$dir" && npm publish --access public) || true
+            fi
+          done
+
+      - name: Publish @grafeo-db/js
+        working-directory: crates/bindings/node
+        run: npm publish --access public --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true
+
+  # Publish WASM package to npm
+  publish-wasm:
+    name: Publish WASM to npm
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.115
+
+      - name: Build WASM package (all languages + AI)
+        run: bash scripts/build-wasm.sh --target bundler --features full
+
+      - name: Fix WASM package metadata
+        run: |
+          # The build script generates the pkg/ directory via wasm-bindgen.
+          # Copy our maintained package.json over the generated one.
+          cp crates/bindings/wasm/package.json crates/bindings/wasm/pkg/package.json
+
+      - name: Publish @grafeo-db/wasm
+        working-directory: crates/bindings/wasm/pkg
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true
+
+  # Publish WASM lite package to npm
+  publish-wasm-lite:
+    name: Publish WASM Lite to npm
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.115
+
+      - name: Build WASM lite package (GQL only)
+        run: bash scripts/build-wasm.sh --target bundler --out-dir crates/bindings/wasm/pkg-lite
+
+      - name: Fix WASM lite package metadata
+        run: cp crates/bindings/wasm/package-lite.json crates/bindings/wasm/pkg-lite/package.json
+
+      - name: Publish @grafeo-db/wasm-lite
+        working-directory: crates/bindings/wasm/pkg-lite
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true
+
+  # Publish CLI npm wrapper packages
+  publish-cli-npm:
+    name: Publish CLI to npm
+    runs-on: ubuntu-latest
+    needs: build-binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            npm_platform: linux-x64
+            os: linux
+            cpu: x64
+            binary: grafeo
+          - target: aarch64-unknown-linux-gnu
+            npm_platform: linux-arm64
+            os: linux
+            cpu: arm64
+            binary: grafeo
+          - target: x86_64-apple-darwin
+            npm_platform: darwin-x64
+            os: darwin
+            cpu: x64
+            binary: grafeo
+          - target: aarch64-apple-darwin
+            npm_platform: darwin-arm64
+            os: darwin
+            cpu: arm64
+            binary: grafeo
+          - target: x86_64-pc-windows-msvc
+            npm_platform: win32-x64
+            os: win32
+            cpu: x64
+            binary: grafeo.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download CLI binary
+        uses: actions/download-artifact@v8
+        with:
+          name: grafeo-cli-${{ matrix.target }}
+          path: platform-pkg/
+
+      - name: Create platform package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd platform-pkg
+          cat > package.json << EOF
+          {
+            "name": "@grafeo-db/cli-${{ matrix.npm_platform }}",
+            "version": "${VERSION}",
+            "description": "Grafeo CLI binary for ${{ matrix.npm_platform }}",
+            "license": "AGPL-3.0-or-later",
+            "repository": {
+              "type": "git",
+              "url": "https://github.com/GrafeoDB/grafeo"
+            },
+            "os": ["${{ matrix.os }}"],
+            "cpu": ["${{ matrix.cpu }}"],
+            "files": ["${{ matrix.binary }}"]
+          }
+          EOF
+          chmod +x ${{ matrix.binary }} 2>/dev/null || true
+          ls -la
+
+      - name: Publish platform package
+        working-directory: platform-pkg
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true
+
+  # Publish main CLI npm launcher (after platform packages)
+  publish-cli-npm-launcher:
+    name: Publish @grafeo-db/cli
+    runs-on: ubuntu-latest
+    needs: publish-cli-npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish launcher package
+        working-directory: packages/grafeo-cli-npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true
+
+  # Publish C# bindings to NuGet
+  publish-nuget:
+    name: Publish to NuGet
+    runs-on: ubuntu-latest
+    needs: build-binaries
+    environment: nuget
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download native libraries
+        uses: actions/download-artifact@v8
+        with:
+          path: native-libs
+          pattern: native-*
+
+      - name: Arrange native libraries into runtimes layout
+        run: |
+          CSHARP_DIR="crates/bindings/csharp/src/Grafeo"
+          for rid_dir in native-libs/native-*/; do
+            rid=$(basename "$rid_dir" | sed 's/native-//')
+            mkdir -p "$CSHARP_DIR/runtimes/$rid/native"
+            cp "$rid_dir"/* "$CSHARP_DIR/runtimes/$rid/native/"
+          done
+          echo "=== Native library layout ==="
+          find "$CSHARP_DIR/runtimes" -type f -ls
+
+      - name: Pack NuGet package
+        working-directory: crates/bindings/csharp/src/Grafeo
+        run: dotnet pack -c Release -o ../../nupkg
+
+      - name: Publish to NuGet
+        run: dotnet nuget push "crates/bindings/csharp/nupkg/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        continue-on-error: true

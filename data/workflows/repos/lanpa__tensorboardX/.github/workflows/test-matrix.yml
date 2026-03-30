@@ -1,0 +1,85 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Python application
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install system dependencies and setup Python environment
+      run: |
+        sudo apt-get install libsndfile1
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        uv venv --python ${{ matrix.python-version }}
+        source .venv/bin/activate
+        uv sync
+    - name: Lint with ruff
+      run: |
+        source .venv/bin/activate
+        ruff check tensorboardX/
+    - name: Test with pytest
+      env:
+          MPLBACKEND: Agg
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      run: |
+        source .venv/bin/activate
+        visdom &
+        pytest --cov=tensorboardX --cov-report=xml tests/
+
+    - name: Upload coverage to Codecov
+      if: ${{ !cancelled() && matrix.python-version == '3.11' }}
+      run: |
+        curl -Os https://cli.codecov.io/latest/linux/codecov
+        chmod +x codecov
+        ./codecov --verbose upload-process --fail-on-error -n 'service'-${{ github.run_id }} -F service -f coverage.xml
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install dependencies and run examples
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        uv venv --python 3.9
+        source .venv/bin/activate
+        uv pip install six tensorboard pytest matplotlib torchvision protobuf==4.22.3 moviepy==1.0.3 imageio==2.27
+        python examples/demo.py
+        python examples/demo_graph.py
+        python examples/demo_embedding.py
+        python examples/demo_custom_scalars.py
+        python examples/demo_multiple_embedding.py
+        python examples/demo_purge.py
+        python examples/demo_matplotlib.py
+
+  test-protobuf-versions:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        protobuf-version: ["3.20", "4.21", "4.22", "4.23"]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install python 3.11 and setup environment
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        uv venv --python 3.11
+ 
+    - name: Run basic import check
+      run: |
+        source .venv/bin/activate
+        uv pip install numpy protobuf==${{ matrix.protobuf-version }}
+        python -c "import tensorboardX"
+ 

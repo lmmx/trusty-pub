@@ -1,0 +1,52 @@
+name: Continuous Integration
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        rust-version: ["stable", "1.71.1"]
+    name: "Rust ${{ matrix.rust-version }} Python ${{ matrix.python-version }}"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Cache Python modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('**/setup.cfg') }}
+          restore-keys: |
+            ${{ runner.os }}-py${{ matrix.python-version }}-
+      - name: Install Rust
+        run: |
+          rustup toolchain install --profile minimal ${{ matrix.rust-version }}
+      - name: Install dependencies
+        run: |
+          rustup default ${{ matrix.rust-version }}
+          rm -rf .cache .eggs rust_fst/_ffi.py build *.egg-info
+          find ./ -name "__pycache__" -type d -print0 |xargs -0 rm -rf
+          find ./ -name "*.pyc" -type f -print0 |xargs -0 rm -rf
+          find ./ -name "*.so" -type f -print0 |xargs -0 rm -rf
+          pip install -U pip maturin
+          sudo apt install libffi-dev
+      - name: Compile
+        run: |
+          pip install -U --upgrade-strategy=eager .[test]
+      - name: Run Tests
+        run: |
+          pytest --cache-clear

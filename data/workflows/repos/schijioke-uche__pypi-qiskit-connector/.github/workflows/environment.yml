@@ -1,0 +1,48 @@
+# @Author: Dr. Jeffrey Chijioke-Uche, IBM Quantum Ambassador
+# @last update: 2025-03-01
+
+name: 🧠 Qcon Intelligent Core  - Deployment Environment
+
+on:
+  push:
+    branches:
+      - pypi
+  workflow_dispatch:  
+  schedule:
+    - cron: '14 8 * * 1-5'    
+    - cron: '14 10 * * 1-5'   
+
+permissions:
+  contents: write
+  actions: write
+  deployments: write
+  pull-requests: write
+  checks: write
+  statuses: write
+  
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi  # This creates the 'pypi' environment if it doesn't exist
+      url: https://pypi.org/project/qiskit-connector
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Git Hard Reset Main
+        run: |
+          git reset --hard origin/main
+          git pull origin main
+
+      - name: Qiskit Connector Active State
+        env:
+          GH_TOKEN: ${{ secrets.PAT_GITHUB }}
+        run: |
+          python .github/scripts/pkg_active_check.py
+
+      - name: Echo Deployment Context
+        run: |
+          echo "🧪 Creating deployment environment: pypi"
+          echo "🔗 Target URL: https://pypi.org/project/qiskit-connector"

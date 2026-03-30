@@ -1,0 +1,45 @@
+name: lib-deploy-macos-arm
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-lib-deploy-macos-arm:
+    name: Lib Deploy (macOS ARM64)
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Display platform information
+      run: |
+        echo "Platform: macOS ARM64 - Library Deployment (.dylib)"
+        uname -a
+        python --version
+
+    - name: Download and install toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      timeout-minutes: 20
+
+    - name: Run lib-deploy tests
+      run: |
+        uv run pytest tests/test_dylib_deployment.py tests/test_deployment_factory.py -v

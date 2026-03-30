@@ -1,0 +1,80 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:  # 05:00 UTC = 06:00 CET = 07:00 CEST
+  - cron: "0 5 * * *"
+
+# Cancel previous runs that have not completed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    strategy:
+      matrix:
+        os:
+        - macos-latest
+        - ubuntu-latest
+        - windows-latest
+        python-version:
+        - "3.10"  # Earliest supported version
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - "3.14"  # Latest supported version
+        # commented: only enable once next Python version enters RC
+        # - "3.15.0-rc.1"  # Development version
+
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }}-py${{ matrix.python-version }}
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up uv, Python
+      uses: astral-sh/setup-uv@v7
+      with:
+        activate-environment: true
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install the package and dependencies
+      # TEMPORARY Work around https://github.com/khaeru/sdmx/issues/273
+      run: uv pip install "requests-cache < 1.3" .[tests]
+
+    - name: Run pytest
+      run: |
+        uv run --no-sync \
+          pytest \
+          --color=yes --durations=20 -ra --verbose \
+          --sdmx-fetch-data \
+          --cov-report=xml \
+          --numprocesses=auto
+      shell: bash
+
+    - name: Upload test coverage to Codecov.io
+      uses: codecov/codecov-action@v5
+
+  pre-commit:
+    name: Code quality
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+    - uses: astral-sh/setup-uv@v7
+      with: { python-version: "3.14" }
+    - uses: actions/cache@v5
+      with:
+        path: ~/.cache/pre-commit
+        key: ${{ github.job }}|${{ hashFiles('.pre-commit-config.yaml') }}
+        lookup-only: ${{ github.event_name == 'schedule' }}
+        # lookup-only: true
+    - name: Run pre-commit
+      run: uvx pre-commit run --all-files --show-diff-on-failure --color=always

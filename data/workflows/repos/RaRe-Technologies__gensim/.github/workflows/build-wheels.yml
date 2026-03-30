@@ -1,0 +1,171 @@
+name: Build wheels
+
+on:
+  push:
+    branches: [ develop ]
+  pull_request:
+    branches: [ develop ]
+  schedule:
+    - cron: '0 0 * * sun,wed'
+
+jobs:
+
+  linters:
+    uses: ./.github/workflows/linters.yml
+
+  build_wheels:
+    needs: linters
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-latest]
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.1.4
+        env:
+          CIBW_ARCHS_LINUX: x86_64 aarch64
+          CIBW_ARCHS_MACOS: x86_64 arm64
+          CIBW_ARCHS_WINDOWS: AMD64 x86
+          CIBW_SKIP: pp* cp38-* cp314* *-win32 *_i686 *-musllinux_*
+          CIBW_TEST_COMMAND: pytest -rfxEXs --durations=20 --disable-warnings --showlocals --pyargs gensim
+          CIBW_TEST_REQUIRES: pytest testfixtures mock
+          CIBW_TEST_SKIP: cp38* cp39* cp310* cp311* cp314* *_aarch64 *_arm64 *_universal2
+          CIBW_BUILD_VERBOSITY: 3
+
+      - name: Upload wheels as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  test:
+    name: Test ${{ matrix.os }} Py${{ matrix.python }}
+    needs: build_wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {python: '3.9', os: macos-latest}
+          - {python: '3.10', os: macos-latest}
+          - {python: '3.11', os: macos-latest}
+          - {python: '3.12', os: macos-latest}
+          - {python: '3.13', os: macos-latest}
+
+          - {python: '3.9', os: ubuntu-24.04}
+          - {python: '3.10', os: ubuntu-24.04}
+          - {python: '3.11', os: ubuntu-24.04}
+          - {python: '3.12', os: ubuntu-24.04}
+          - {python: '3.13', os: ubuntu-24.04}
+
+          - {python: '3.9', os: windows-2025}
+          - {python: '3.10', os: windows-2025}
+          - {python: '3.11', os: windows-2025}
+          - {python: '3.12', os: windows-2025}
+          - {python: '3.13', os: windows-2025}
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Setup up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Downloads build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      #
+      # We want to make sure our wheels run against older Numpy versions
+      #
+      - name: Install oldest-supported-numpy
+        run: python -m pip install oldest-supported-numpy
+
+      #
+      # We know that the Windows Py3.10 wheels are broken: they won't work
+      # with older numpy versions.  We still want to test the wheel somehow,
+      # so we use a newer numpy version.
+      #
+      # https://github.com/RaRe-Technologies/gensim/issues/3489
+      #
+      - name: Install newest numpy (windows py3.10 only)
+        if: ${{ (matrix.os == 'windows-2025') && (matrix.python == '3.10') }}
+        run: |
+          python -m pip uninstall --yes oldest-supported-numpy
+          python -m pip install --upgrade numpy
+
+      #
+      # Avoid checking out the entire gensim repo to get just one file
+      #
+      - name: Download installwheel.py
+        run: curl "https://raw.githubusercontent.com/RaRe-Technologies/gensim/develop/.github/workflows/installwheel.py" --output installwheel.py --silent
+
+      - name: Install wheel
+        run: python installwheel.py artifacts/wheels-${{ matrix.os }}
+
+      - name: Debug test environment
+        run: |
+          pip freeze
+          python -c 'import numpy;print(numpy.__file__)'
+          python -c 'import numpy;print(numpy.__version__)'
+
+      #
+      # If the wheel was incorrectly built, then this will fail.
+      # https://github.com/RaRe-Technologies/gensim/issues/3097
+      #
+      - name: Test wheel
+        run: python -c 'import gensim'
+
+  upload:
+    name: Upload to S3
+    if: always()
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pip install awscli boto3
+
+      - name: Downloads build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Check files
+        run: tree artifacts/
+
+      #
+      # Avoid checking out the entire gensim repo to get just one file
+      #
+      - name: Download installwheel.py
+        run: curl "https://raw.githubusercontent.com/RaRe-Technologies/gensim/develop/.github/workflows/update_index.py" --output update_index.py --silent
+
+      - name: Upload wheels to s3://gensim-wheels
+        #
+        # Only do this if the credentials are set.
+        # This means that PRs will still build wheels, but not upload them.
+        # (PRs do not have access to secrets).
+        #
+        if: ${{ env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          find artifacts/ -name '*.whl' -print -exec aws s3 cp --no-progress {} s3://gensim-wheels/ \;
+          python update_index.py gensim-wheels "" > index.html
+          aws s3 cp --no-progress index.html s3://gensim-wheels/index.html
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

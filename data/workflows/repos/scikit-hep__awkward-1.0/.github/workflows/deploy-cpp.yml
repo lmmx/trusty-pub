@@ -1,0 +1,42 @@
+name: Deploy C++
+
+on:
+  workflow_dispatch:
+    inputs:
+        publish-pypi:
+            type: boolean
+            description: Publish to PyPI
+
+jobs:
+
+  build-wheels:
+    uses: ./.github/workflows/build-wheels.yml
+
+  upload-awkward-cpp:
+    needs: [build-wheels]
+    runs-on: ubuntu-latest
+    if: inputs.publish-pypi
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    environment:
+      name: "pypi"
+      url: "https://pypi.org/project/awkward-cpp/"
+    steps:
+
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: "awkward-cpp*"
+        path: dist
+        merge-multiple: true
+
+    - name: List distributions to be deployed
+      run: ls -l dist/
+
+    - name: Generate artifact attestation for sdist and wheel
+      uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+      with:
+        subject-path: "dist/awkward*cpp-*"
+
+    - uses: pypa/gh-action-pypi-publish@v1.13.0

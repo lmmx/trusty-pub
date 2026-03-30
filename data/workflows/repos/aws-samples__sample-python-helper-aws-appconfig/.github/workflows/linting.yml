@@ -1,0 +1,25 @@
+name: Linting
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    name: Python 3.14
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - name: Setup python
+        uses: actions/setup-python@v4.7.1
+        with:
+          python-version: 3.14
+          architecture: x64
+      - name: Update pip
+        run: pip install --upgrade pip
+      - name: Install linters
+        run: pip install black flake8
+      - name: check code style with black
+        run: black --check **/*.py
+      - name: flake8 tests
+        run: flake8 **/*.py

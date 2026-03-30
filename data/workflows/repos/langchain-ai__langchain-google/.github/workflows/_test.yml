@@ -1,0 +1,75 @@
+name: test
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: true
+        type: string
+        description: "From which folder this pipeline executes"
+      langchain-location:
+        required: false
+        type: string
+        description: "Relative path to the langchain library folder"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    name: "make test #${{ matrix.python-version }}"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }} + uv
+        uses: "./.github/actions/uv_setup"
+        with:
+          python-version: ${{ matrix.python-version }}
+          working-directory: ${{ inputs.working-directory }}
+          cache-key: core
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libqpdf-dev
+
+      - name: Install dependencies
+        shell: bash
+        run: uv sync --group test
+
+      - name: Install langchain editable
+        working-directory: ${{ inputs.working-directory }}
+        if: ${{ inputs.langchain-location }}
+        env:
+          LANGCHAIN_LOCATION: ${{ inputs.langchain-location }}
+        run: |
+          uv pip install -e "$LANGCHAIN_LOCATION"
+
+      - name: Run core tests
+        shell: bash
+        run: |
+          make test
+
+      - name: Ensure the tests did not create any additional files
+        shell: bash
+        run: |
+          set -eu
+
+          STATUS="$(git status)"
+          echo "$STATUS"
+
+          # grep will exit non-zero if the target message isn't found,
+          # and `set -e` above will cause the step to fail.
+          echo "$STATUS" | grep 'nothing to commit, working tree clean'

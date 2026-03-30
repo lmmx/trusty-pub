@@ -1,0 +1,40 @@
+name: Automatic tests
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+    - uses: actions/checkout@v5
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: pip install -Ur requirements.dev.txt
+    - name: Install the library
+      run: pip install -e .
+    - name: Run tests
+      run: pytest
+  lint:
+    name: Lint code
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.9"
+    - name: Install dependencies
+      run: pip install -Ur requirements.dev.txt
+    - name: Check code formatting
+      run: black --check .
+    - name: Check imports order
+      run: isort --check .
+    - name: Install the library
+      run: pip install -e .
+    - name: Run typechecking
+      run: pyright

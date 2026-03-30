@@ -5,23 +5,26 @@ import tomllib
 _TOML = Path(__file__).with_name("defaults.toml")
 
 
-def resolve_package_listing(name: str | None = None) -> dict:
-    """
-    Return metadata for a package listing.
+def _load_toml() -> dict:
+    return tomllib.loads(_TOML.read_text())
 
-    If `name` is None, picks the first key under [data.top_pypi_packages].
-    """
-    raw = tomllib.loads(_TOML.read_text())
-    listings = raw["data"]["top_pypi_packages"]
+
+def resolve_package_listing(name: str | None = None) -> dict:
+    listings = _load_toml()["data"]["top_pypi_packages"]
     if name is None:
-        # Pick the first key in TOML — canonical
         name = next(iter(listings))
-    return listings[name]  # KeyError if not found
+    return listings[name]
 
 
 def resolve_pypi_metadata(name: str | None = None) -> dict:
-    raw = tomllib.loads(_TOML.read_text())
-    sources = raw["data"]["pypi_metadata"]
+    sources = _load_toml()["data"]["pypi_metadata"]
+    if name is None:
+        name = next(iter(sources))
+    return sources[name]
+
+
+def resolve_workflows(name: str | None = None) -> dict:
+    sources = _load_toml()["data"]["workflows"]
     if name is None:
         name = next(iter(sources))
     return sources[name]

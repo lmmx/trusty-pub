@@ -1,0 +1,48 @@
+name: CI Tests/Lints
+
+on:
+  push:
+    paths:
+      - "termynal/**"
+      - "tests/**"
+      - "uv.lock"
+    branches: [ main ]
+  pull_request:
+    paths:
+      - "termynal/**"
+      - "tests/**"
+      - "uv.lock"
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install python dependencies
+        run: make install-uv install
+
+      - name: Run linters
+        run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.version }}
+
+      - name: Install python dependencies
+        run: make install-uv install
+
+      - name: Run test
+        run: make test

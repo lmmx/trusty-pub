@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+env:
+  PYTHON_VERSION: "3.14"
+  NODE_OPTIONS: --max_old_space_size=6144
+
+# Set default workflow permissions
+# All scopes not mentioned here are set to no access
+# https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token
+permissions:
+  actions: none
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write # Required to upload release assets
+      id-token: write # For "Trusted Publisher" to PyPi
+    if: github.repository_owner == 'home-assistant'
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Verify version
+        uses: home-assistant/actions/helpers/verify-version@d56d093b9ab8d2105bc0cb6ee9bcc0ef4ec8b96d # master
+
+      - name: Setup Node
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Download Translations
+        run: ./script/translations_download
+        env:
+          LOKALISE_TOKEN: ${{ secrets.LOKALISE_TOKEN }}
+
+      - name: Build and release package
+        run: |
+          python3 -m pip install build
+          export SKIP_FETCH_NIGHTLY_TRANSLATIONS=1
+          script/release
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          skip-existing: true
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG_NAME" dist/*.whl dist/*.tar.gz --clobber
+
+  wheels-init:
+    name: Init wheels build
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate requirements.txt
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          # Sleep to give pypi time to populate the new version across mirrors
+          sleep 240
+          version=$(echo "$GITHUB_REF" | awk -F"/" '{print $NF}' )
+          echo "home-assistant-frontend==$version" > ./requirements.txt
+
+      # home-assistant/wheels doesn't support SHA pinning
+      - name: Build wheels
+        uses: home-assistant/wheels@e5742a69d69f0e274e2689c998900c7d19652c21 # 2025.12.0
+        with:
+          abi: cp314
+          tag: musllinux_1_2
+          arch: amd64
+          wheels-key: ${{ secrets.WHEELS_KEY }}
+          requirements: "requirements.txt"
+
+  release-landing-page:
+    name: Release landing-page frontend
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to upload release assets
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version-file: ".nvmrc"
+      - name: Install dependencies
+        run: yarn install
+      - name: Download Translations
+        run: ./script/translations_download
+        env:
+          LOKALISE_TOKEN: ${{ secrets.LOKALISE_TOKEN }}
+      - name: Build landing-page
+        run: landing-page/script/build_landing_page
+      - name: Tar folder
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: tar -czf "landing-page/home_assistant_frontend_landingpage-${TAG_NAME}.tar.gz" -C landing-page/dist .
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG_NAME" "landing-page/home_assistant_frontend_landingpage-${TAG_NAME}.tar.gz" --clobber

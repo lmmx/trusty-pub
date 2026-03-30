@@ -1,0 +1,113 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  merge_group:
+
+jobs:
+  integration_tests:
+    # Will not run if the event is a PR to bump-meilisearch-v* (so a pre-release PR)
+    # Will still run for each push to bump-meilisearch-v*
+    if: github.event_name != 'pull_request' || !startsWith(github.base_ref, 'bump-meilisearch-v')
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    name: integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pipenv"
+      - name: Install pipenv
+        run: pip install pipenv
+      - name: Install dependencies
+        run: pipenv install --dev --python=${{ matrix.python-version }}
+      - name: Meilisearch (latest version) setup with Docker
+        run: docker run -d -p 7700:7700 getmeili/meilisearch-enterprise:latest meilisearch --no-analytics --master-key=masterKey
+      - name: Test with pytest
+        run: pipenv run pytest --cov-report=xml
+
+  pylint:
+    name: pylint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          cache: "pipenv"
+      - name: Install pipenv
+        run: pipx install pipenv
+      - name: Install dependencies
+        run: pipenv install --dev --python=${{ matrix.python-version }}
+      - name: Linter with pylint
+        run: pipenv run pylint meilisearch tests
+
+  mypy:
+    name: mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+          cache: "pipenv"
+      - name: Install pipenv
+        run: pip install pipenv
+      - name: Install dependencies
+        run: pipenv install --dev --python=${{ matrix.python-version }}
+      - name: mypy type check
+        run: pipenv run mypy meilisearch
+
+  black:
+    name: black
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+          cache: "pipenv"
+      - name: Install pipenv
+        run: pip install pipenv
+      - name: Install dependencies
+        run: pipenv install --dev --python=${{ matrix.python-version }}
+      - name: black
+        run: pipenv run black meilisearch tests --check
+
+  isort:
+    name: isort
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+          cache: "pipenv"
+      - name: Install pipenv
+        run: pip install pipenv
+      - name: Install dependencies
+        run: pipenv install --dev --python=${{ matrix.python-version }}
+      - name: isort
+        run: pipenv run isort meilisearch tests --check-only
+
+  yaml-lint:
+    name: Yaml linting check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Yaml lint check
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          config_file: .yamllint.yml

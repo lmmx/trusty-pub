@@ -1,0 +1,99 @@
+name: Test Installation and Integration
+
+on:
+  push:
+    branches: [ main, develop, release_* ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-with-behavex:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        behave-version: ['1.2.6', 'latest']
+      fail-fast: false
+    
+    steps:
+    - name: Checkout behavex-images repository
+      uses: actions/checkout@v4
+      with:
+        path: behavex-images
+    
+    - name: Checkout behavex repository
+      uses: actions/checkout@v4
+      with:
+        repository: hrcorval/behavex
+        path: behavex
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install specific behave version
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        if [ "${{ matrix.behave-version }}" = "latest" ]; then
+          echo "Installing latest behave version..."
+          python -m pip install behave
+        else
+          echo "Installing behave version ${{ matrix.behave-version }}..."
+          python -m pip install behave==${{ matrix.behave-version }}
+        fi
+        # Verify behave installation
+        python -c "import behave; print(f'Behave version: {behave.__version__}')"
+      shell: bash
+    
+    - name: Install behavex-images and behavex
+      run: |
+        cd behavex-images
+        python -m pip install -e .
+        cd ../behavex
+        python -m pip install -e .
+      shell: bash
+    
+    - name: Test behavex-images installation and basic functionality
+      run: |
+        cd behavex
+        echo "Testing behavex-images installation and basic functionality with behave ${{ matrix.behave-version }}..."
+        
+        # Display behave version for debugging
+        echo "Current behave version:"
+        python -c "import behave; print(f'Behave version: {behave.__version__}')"
+        
+        # Create platform-independent temp directories
+        python -c "import tempfile; import os; temp_dir1 = tempfile.mkdtemp(); temp_dir2 = tempfile.mkdtemp(); print(f'TEMP_DIR1={temp_dir1}'); print(f'TEMP_DIR2={temp_dir2}')" > temp_dirs.txt
+        
+        # Source the temp directories (works on all platforms with bash)
+        source temp_dirs.txt
+        echo "Using temp directories: TEMP_DIR1=$TEMP_DIR1, TEMP_DIR2=$TEMP_DIR2"
+        
+        # Test 1: Verify behavex-images imports correctly
+        echo "Test 1: Testing basic imports..."
+        python -c "import behavex_images; print('PASS: behavex-images imported successfully'); from behavex_images.image_attachments import AttachmentsCondition; print('PASS: AttachmentsCondition imported successfully'); from behavex_images.extend_environment import extend_behave_hooks; print('PASS: extend_behave_hooks imported successfully'); extend_behave_hooks(); print('PASS: Hook extension executed successfully'); print('PASS: Basic import and compatibility test passed')"
+        
+        # Test 2: Test behave compatibility directly
+        echo "Test 2: Testing behave compatibility..."
+        python -c "import sys; import behave; from behavex_images.extend_environment import extend_behave_hooks; from behave.runner import ModelRunner; extend_behave_hooks(); print(f'PASS: Hook wrapper compatible with behave {behave.__version__}'); print('PASS: ModelRunner.run_hook is available') if hasattr(ModelRunner, 'run_hook') else print('WARNING: ModelRunner.run_hook not found')"
+        
+        # Test 3: Run a simple behavex command to verify integration
+        echo "Test 3: Testing basic behavex execution..."
+        behavex ./tests/features/secondary_features/passing_tests.feature -o "$TEMP_DIR1"
+        
+        # Test 4: Run behavex with image attachments on a simple test (if available)
+        echo "Test 4: Testing behavex with image attachments (if test exists)..."
+        if [ -f "./tests/features/secondary_features/simple_image_tests.feature" ]; then
+          behavex ./tests/features/secondary_features/simple_image_tests.feature -o "$TEMP_DIR2" -t "@IMAGE_ATTACHMENT"
+        else
+          echo "Simple image test not available, skipping..."
+        fi
+        
+        # Cleanup temp directories
+        rm -rf "$TEMP_DIR1" "$TEMP_DIR2" temp_dirs.txt
+        
+        echo "PASS: All installation and integration tests passed with behave ${{ matrix.behave-version }}"
+      shell: bash

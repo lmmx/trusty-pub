@@ -1,0 +1,504 @@
+# **what?**
+# Runs code quality checks, unit tests, and verifies python build on
+# all code commited to the repository. This workflow should not
+# require any secrets since it runs for PRs from forked repos.
+# By default, secrets are not passed to workflows running from
+# a forked repo.
+
+# **why?**
+# Ensure code for dbt meets a certain quality standard.
+
+# **when?**
+# This will run for all PRs, when code is pushed to a release
+# branch, and when manually triggered.
+
+name: Tests and Code Checks
+
+on:
+  push:
+    branches:
+      - "master"
+      - "develop"
+      - "*.latest"
+      - "releases/*"
+  pull_request:
+  workflow_dispatch:
+
+permissions: read-all
+
+# will cancel previous workflows triggered by the same event and for the same ref for PRs or same SHA otherwise
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ contains(github.event_name, 'pull_request') && github.event.pull_request.head.ref || github.sha }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  code-quality:
+    name: code-quality
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install python dependencies
+        run: |
+          pip install pre-commit
+          pip install mypy==1.3.0
+          pip install -r dev-requirements.txt
+          pip --version
+          pre-commit --version
+          mypy --version
+          dbt --version
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  unit:
+    name: unit test / python ${{ matrix.python-version }}
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    env:
+      TOXENV: "unit"
+      PYTEST_ADDOPTS: "-v --color=yes --csv unit_results.csv"
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install tox
+          python -m pip --version
+          tox --version
+
+      - name: Run tox
+        run: tox
+
+      - name: Get current date
+        if: always()
+        id: date
+        run: echo "date=$(date +'%Y-%m-%dT%H_%M_%S')" >> $GITHUB_OUTPUT #no colons allowed for artifacts
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unit_results_${{ matrix.python-version }}-${{ steps.date.outputs.date }}.csv
+          path: unit_results.csv
+
+  functional:
+    name: functional test / python ${{ matrix.python-version }}
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    env:
+      TOXENV: "functional"
+      PYTEST_ADDOPTS: "-v --color=yes --csv functional_results.csv"
+      S3_MD_ORG_KEY: ${{ secrets.S3_MD_ORG_KEY }}
+      S3_MD_ORG_REGION: ${{ secrets.S3_MD_ORG_REGION }}
+      S3_MD_ORG_SECRET: ${{ secrets.S3_MD_ORG_SECRET }}
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install tox
+          python -m pip --version
+          tox --version
+
+      - name: Run tox
+        run: tox
+
+      - name: Get current date
+        if: always()
+        id: date
+        run: echo "date=$(date +'%Y-%m-%dT%H_%M_%S')" >> $GITHUB_OUTPUT #no colons allowed for artifacts
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: functional_results_${{ matrix.python-version }}-${{ steps.date.outputs.date }}.csv
+          path: functional_results.csv
+
+  filebased:
+    name: file-based functional test / python ${{ matrix.python-version }}
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    env:
+      TOXENV: "filebased"
+      PYTEST_ADDOPTS: "-v --color=yes --csv filebased_results.csv"
+      S3_MD_ORG_KEY: ${{ secrets.S3_MD_ORG_KEY }}
+      S3_MD_ORG_REGION: ${{ secrets.S3_MD_ORG_REGION }}
+      S3_MD_ORG_SECRET: ${{ secrets.S3_MD_ORG_SECRET }}
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install tox
+          python -m pip --version
+          tox --version
+
+      - name: Run tox
+        run: tox
+
+      - name: Get current date
+        if: always()
+        id: date
+        run: echo "date=$(date +'%Y-%m-%dT%H_%M_%S')" >> $GITHUB_OUTPUT #no colons allowed for artifacts
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: filebased_results_${{ matrix.python-version }}-${{ steps.date.outputs.date }}.csv
+          path: filebased_results.csv
+
+  check-md-token:
+    name: Check if MotherDuck v0.10.x token exists
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.md-token.outputs.exists }}
+    steps:
+        - id: md-token
+          env:
+              MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN_10 }}
+          if: ${{ env.MOTHERDUCK_TOKEN != '' }}
+          run: echo "::set-output name=exists::true"
+
+  motherduck:
+    name: MotherDuck functional test / python ${{ matrix.python-version }}
+    needs: [check-md-token]
+    if: needs.check-md-token.outputs.exists == 'true'
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11']
+
+    env:
+      TOXENV: "md"
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN_10 }}
+      PYTEST_ADDOPTS: "-v --color=yes --csv motherduck_results.csv"
+      S3_MD_ORG_KEY: ${{ secrets.S3_MD_ORG_KEY }}
+      S3_MD_ORG_REGION: ${{ secrets.S3_MD_ORG_REGION }}
+      S3_MD_ORG_SECRET: ${{ secrets.S3_MD_ORG_SECRET }}
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install tox
+          python -m pip --version
+          tox --version
+
+      - name: Run tox
+        run: tox
+
+      - name: Get current date
+        if: always()
+        id: date
+        run: echo "date=$(date +'%Y-%m-%dT%H_%M_%S')" >> $GITHUB_OUTPUT #no colons allowed for artifacts
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: motherduck_results_${{ matrix.python-version }}-${{ steps.date.outputs.date }}.csv
+          path: motherduck_results.csv
+
+  buenavista:
+    name: Buena Vista functional test / python ${{ matrix.python-version }}
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11']
+
+    env:
+      TOXENV: "buenavista"
+      PYTEST_ADDOPTS: "-v --color=yes --csv buenavista_results.csv"
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install tox
+          python -m pip --version
+          tox --version
+
+      - name: Run tox
+        run: tox
+
+      - name: Get current date
+        if: always()
+        id: date
+        run: echo "date=$(date +'%Y-%m-%dT%H_%M_%S')" >> $GITHUB_OUTPUT #no colons allowed for artifacts
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: buenavista_results_${{ matrix.python-version }}-${{ steps.date.outputs.date }}.csv
+          path: buenavista_results.csv
+
+  fsspec:
+    name: fsspec test / python ${{ matrix.python-version }}
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10']
+
+    env:
+      TOXENV: "fsspec"
+      PYTEST_ADDOPTS: "-v --color=yes --csv fsspec_results.csv"
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install tox
+          python -m pip --version
+          tox --version
+
+      - name: Run tox
+        run: tox
+
+      - name: Get current date
+        if: always()
+        id: date
+        run: echo "date=$(date +'%Y-%m-%dT%H_%M_%S')" >> $GITHUB_OUTPUT #no colons allowed for artifacts
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: fsspec_results_${{ matrix.python-version }}-${{ steps.date.outputs.date }}.csv
+          path: fsspec_results.csv
+
+  plugins:
+    name: plugins test / python ${{ matrix.python-version }}
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11']
+
+    env:
+      TOXENV: "plugins"
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN_10 }}
+      PYTEST_ADDOPTS: "-v --color=yes --csv plugins_results.csv"
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install tox
+          python -m pip --version
+          tox --version
+
+      - name: Run tox
+        run: tox
+
+      - name: Get current date
+        if: always()
+        id: date
+        run: echo "date=$(date +'%Y-%m-%dT%H_%M_%S')" >> $GITHUB_OUTPUT #no colons allowed for artifacts
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plugins_results_${{ matrix.python-version }}-${{ steps.date.outputs.date }}.csv
+          path: plugins_results.csv
+
+  build:
+    name: build packages
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install python dependencies
+        run: |
+          pip install --upgrade setuptools wheel twine check-wheel-contents
+          pip --version
+      - name: Build distributions
+        run: ./scripts/build-dist.sh
+
+      - name: Show distributions
+        run: ls -lh dist/
+
+      - name: Check distribution descriptions
+        run: |
+          twine check dist/*
+      - name: Check wheel contents
+        run: |
+          check-wheel-contents dist/*.whl --ignore W002,W007,W008
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  test-build:
+    name: verify packages / python ${{ matrix.python-version }} / ${{ matrix.os }}
+
+    needs: build
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        run: |
+          pip install --upgrade wheel
+          pip --version
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Show distributions
+        run: ls -lh dist/
+
+      - name: Install wheel distributions
+        run: |
+          find ./dist/*.whl -maxdepth 1 -type f | xargs pip install --force-reinstall --find-links=dist/
+      - name: Check wheel distributions
+        run: |
+          dbt --version
+      - name: Install source distributions
+        run: |
+          find ./dist/*.gz -maxdepth 1 -type f | xargs pip install --force-reinstall --find-links=dist/
+      - name: Check source distributions
+        run: |
+          dbt --version
+
+  notify-failure:
+    name: Send Slack notification on failure
+    if: failure() && github.ref == 'refs/heads/master'
+    needs: [code-quality, unit, functional, filebased, motherduck, buenavista, fsspec, plugins, build, test-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.MOTHERDUCK_CI_NOTIFICATION_WEBHOOK }}
+          webhook-type: webhook-trigger
+          payload: |
+            {
+              "text": "dbt-duckdb main workflow failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }

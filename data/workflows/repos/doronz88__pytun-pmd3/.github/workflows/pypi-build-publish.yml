@@ -1,0 +1,49 @@
+name: Python build and publish
+
+on:
+  push:
+    branches: [ 'master' ]
+  pull_request:
+    branches: [ 'master' ]
+  release:
+    types: published
+
+jobs:
+  build:
+      name: Build source distribution
+      runs-on: ubuntu-latest
+
+      steps:
+        - uses: actions/checkout@v4
+
+        - name: Build
+          run: pipx run build
+
+        - uses: actions/upload-artifact@v4
+          with:
+            name: sdist
+            path: dist/*.tar.gz
+
+        - uses: actions/upload-artifact@v4
+          with:
+            name: wheel
+            path: dist/*.whl
+
+  pypi-publish:
+    name: Publish release to PyPI
+    if: ${{ github.event_name == 'release' }}
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment:
+      name: PyPI
+      url: https://pypi.org/p/pytun-pmd3
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,206 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  release:
+    types:
+      - published
+
+jobs:
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: 'true'
+
+      - uses: actions/setup-python@v6
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest hypothesis mypy Cython
+
+      # The cythonized files allow installation from the sdist without cython
+      - name: Generate cython
+        run: |
+          chmod +x ./src/Levenshtein/generate.sh
+          ./src/Levenshtein/generate.sh
+
+      - name: Build sdist
+        run: |
+          git apply ./tools/sdist.patch
+          pip install build
+          python -m build --sdist
+          # test whether tarball contains all files required for compiling
+          pip install dist/levenshtein-*.tar.gz -v
+
+      - name: Test type stubs
+        run: |
+          python -m mypy.stubtest Levenshtein --ignore-missing-stub
+
+      - name: Test with pytest and backtrace in case of SegFault
+        run: |
+          tools/seg_wrapper.sh pytest tests
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: artifact-sdist
+          path: dist/*.tar.gz
+
+  build_wheels_windows:
+    name: Build wheel on ${{ matrix.os }}/auto
+    needs: [build_sdist]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    env:
+      CIBW_TEST_SKIP: "*-win32"
+      CIBW_BUILD_VERBOSITY: 3
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: artifact-sdist
+          path: dist
+
+      - uses: actions/setup-python@v6
+
+      - name: Copy wheel
+        run: cp dist/*.tar.gz levenshtein.tar.gz
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+        with:
+          package-dir: levenshtein.tar.gz
+          output-dir: wheelhouse
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: artifact-${{ github.job }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_wheels_macos:
+    name: Build wheel on ${{ matrix.os }}/auto
+    needs: [build_sdist]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, macos-14]
+    env:
+      CIBW_TEST_SKIP: "pp*-macosx_*"
+      CIBW_BUILD_VERBOSITY: 3
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: artifact-sdist
+          path: dist
+
+      - uses: actions/setup-python@v6
+
+      - name: Copy wheel
+        run: cp dist/*.tar.gz levenshtein.tar.gz
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+        with:
+          package-dir: levenshtein.tar.gz
+          output-dir: wheelhouse
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: artifact-${{ github.job }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_wheels_linux:
+    name: Build wheels on ubuntu-latest/auto
+    needs: [build_sdist]
+    runs-on: ubuntu-latest
+    env:
+      CIBW_TEST_SKIP: "*musllinux_*"
+      CIBW_BUILD_VERBOSITY: 3
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: artifact-sdist
+          path: dist
+
+      - uses: actions/setup-python@v6
+
+      - name: Copy wheel
+        run: cp dist/*.tar.gz levenshtein.tar.gz
+
+      - name: Build wheel
+        uses: pypa/cibuildwheel@v3.3.1
+        with:
+          package-dir: levenshtein.tar.gz
+          output-dir: wheelhouse
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: artifact-${{ github.job }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_wheels_linux_arm:
+    name: Build wheels on ubuntu-24.04-arm/${{matrix.arch}}
+    needs: [build_sdist]
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64, armv7l]
+    env:
+      CIBW_ARCHS_LINUX: ${{matrix.arch}}
+      CIBW_TEST_SKIP: "{*_{aarch64},*musllinux_*}"
+      CIBW_BUILD_VERBOSITY: 3
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: artifact-sdist
+          path: dist
+
+      - uses: actions/setup-python@v6
+
+      - name: Copy wheel
+        run: cp dist/*.tar.gz levenshtein.tar.gz
+
+      - name: Build wheel
+        uses: pypa/cibuildwheel@v3.3.1
+        with:
+          package-dir: levenshtein.tar.gz
+          output-dir: wheelhouse
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: artifact-${{ github.job }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+
+  deploy-wheels:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: [build_wheels_windows, build_wheels_macos, build_wheels_linux, build_wheels_linux_arm, build_sdist]
+    name: deploy wheels to pypi
+    runs-on: ubuntu-latest
+    environment: pypi-release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          pattern: artifact-*
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@v1.13.0

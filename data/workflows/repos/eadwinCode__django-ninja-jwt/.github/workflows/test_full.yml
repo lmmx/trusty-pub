@@ -1,0 +1,56 @@
+name: Full Test
+
+on:
+  push:
+  pull_request:
+    types: [assigned, opened, synchronize, reopened]
+
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        django-version: ['<3.2', '<3.3', '<4.2', '<4.3', '<5.1', '<5.2', '<5.3']
+        exclude:
+          - python-version: '3.8'
+            django-version: '<5.1'
+          - python-version: '3.9'
+            django-version: '<5.1'
+          - python-version: '3.12'
+            django-version: '<3.2'
+          - python-version: '3.12'
+            django-version: '<3.3'
+          - python-version: '3.13'
+            django-version: '<3.2'
+          - python-version: '3.13'
+            django-version: '<3.3'
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install core
+        run: pip install "Django${{ matrix.django-version }}" "pydantic-settings>=2.0.0"
+      - name: Install tests
+        run: pip install pytest pytest-asyncio pytest-django django-ninja-extra 'python-jose==3.3.0' 'pyjwt[crypto]' freezegun
+      - name: Test
+        run: pytest
+  codestyle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - name: Install Flit
+        run: pip install flit
+      - name: Install Dependencies
+        run: make install
+      - name: Ruff Linting Check
+        run: ruff check ninja_jwt tests

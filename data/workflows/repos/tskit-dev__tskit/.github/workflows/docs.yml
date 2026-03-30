@@ -1,0 +1,19 @@
+name: Build Docs
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+    tags:
+      - '*'
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  Docs:
+    uses: tskit-dev/.github/.github/workflows/docs.yml@v15
+    with:
+      pyproject-directory: python
+      additional-apt-packages: doxygen
+      pre-build-command: cd docs/doxygen && doxygen

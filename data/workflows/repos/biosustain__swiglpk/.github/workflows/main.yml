@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - devel
+  pull_request:
+    branches:
+      - master
+      - devel
+
+jobs:
+  versions:
+    uses: ./.github/workflows/versions.yml
+
+  build_sdist:
+    needs: versions
+    uses: ./.github/workflows/build-sdist.yml
+    with:
+      glpk_version: ${{ needs.versions.outputs.glpk_version }}
+
+  build_wheels:
+    needs: versions
+    uses: ./.github/workflows/build-wheels.yml
+    with:
+      glpk_version: ${{ needs.versions.outputs.glpk_version }}

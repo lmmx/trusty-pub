@@ -1,0 +1,66 @@
+name: C#
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'csharp/v**'
+    paths:
+      - '.github/workflows/csharp.yml'
+      - 'csharp/**'
+      - 'test-resources/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/csharp.yml'
+      - 'csharp/**'
+      - 'test-resources/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: |
+          10.0.x
+          9.0.x
+          8.0.x
+    - run: cd csharp && dotnet build && dotnet test
+
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: '10.0.x'
+    - run: cd csharp/examples/webhook-server && dotnet build
+    - run: cd csharp/examples/sign-request && dotnet build
+  
+  publish:
+    runs-on: ubuntu-latest
+    # Runs only on tag pushes for C# (combined with line 7) and if test job succeeded
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    needs: test
+    steps:
+    - uses: actions/checkout@v6
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+        dotnet-quality: 'preview'
+    - name: Generate NuGet package
+      run: |
+        cd csharp
+        dotnet pack src/truelayer-signing.csproj \
+          --configuration Release \
+          --include-source \
+          -property:SymbolPackageFormat=snupkg
+    - name: Push to NuGet
+      run: |
+        cd csharp
+        dotnet nuget push src/bin/Release/TrueLayer.Signing.*.nupkg \
+          --source https://api.nuget.org/v3/index.json \
+          --api-key ${{ secrets.NUGET_API_KEY }}

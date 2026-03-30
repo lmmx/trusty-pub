@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    if: github.repository == 'jazzband/dj-database-url'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set version from release/tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/*/}
+          VERSION=${VERSION#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.12
+
+      - name: Build package
+        run: |
+          uv version ${{ env.VERSION }}
+          uv build
+          uvx twine check dist/*
+
+      - name: Upload packages to Jazzband
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: jazzband
+          password: ${{ secrets.JAZZBAND_RELEASE_KEY }}
+          repository_url: https://jazzband.co/projects/dj-database-url/upload

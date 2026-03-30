@@ -1,0 +1,77 @@
+name: Linux examples (CPU, CUDA)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "optimum/quanto/**"
+      - "examples/**"
+      - "pyproject.toml"
+  pull_request:
+    types: [assigned, opened, synchronize, reopened]
+    paths:
+      - "optimum/quanto/**"
+      - "examples/**"
+      - "pyproject.toml"
+
+jobs:
+  check-commits:
+    uses: ./.github/workflows/check-commits.yml
+  python-quality:
+    uses: ./.github/workflows/python-quality.yml
+  run-examples:
+    needs: [check-commits, python-quality]
+    runs-on:
+      group: aws-g5-4xlarge-plus
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ["cpu", "cuda"]
+    container:
+      image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+      options: --gpus 0
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check CUDA installation
+        run: |
+          nvcc -V
+
+      - name: Build and install packages
+        run: |
+          pip install --upgrade pip
+          pip install -e .[examples]
+
+      # Run examples
+      - name: Run MNIST classification example
+        run: |
+          for w in int4 int8 float8; do \
+            for a in none int8 float8; do \
+              python examples/vision/image-classification/mnist/quantize_mnist_model.py \
+                --weights $w --activations $a --device ${{ matrix.device }}; \
+            done; \
+          done
+      - name: Run OWL detection example
+        run: |
+          for w in int4 int8 float8; do \
+            python examples/vision/object-detection/quantize_owl_model.py \
+              --image http://images.cocodataset.org/val2017/000000039769.jpg \
+              --texts "a photo of a cat" "a remote" \
+              --weights $w --device ${{ matrix.device }}; \
+          done
+      - name: Run text-classification example
+        run: |
+          for w in int4 int8; do \
+            for a in none int8; do \
+              python examples/nlp/text-classification/sst2/quantize_sst2_model.py \
+                --weights $w --activations $a --device ${{ matrix.device }}; \
+            done; \
+          done
+      - name: Run text-to-image example
+        if: ${{ matrix.device == 'cuda'}}
+        run: |
+          for w in int4 int8 fp8; do \
+            python examples/vision/text-to-image/quantize_pixart_sigma.py \
+              --qtype $w --device ${{ matrix.device }}; \
+          done

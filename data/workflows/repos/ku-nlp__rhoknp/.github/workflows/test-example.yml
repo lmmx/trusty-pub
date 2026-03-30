@@ -1,0 +1,59 @@
+name: TestExample
+
+on:
+  schedule:
+    - cron: "0 3 */16 * *" # Runs at 3:00 UTC on the 1 and 17th of every month.
+  workflow_dispatch:
+
+jobs:
+  test-example:
+    name: Run tests for examples
+    container: kunlp/jumanpp-knp:ubuntu24.04
+    runs-on: ubuntu-24.04
+    strategy:
+      max-parallel: 7
+      fail-fast: false
+      matrix:
+        python-version:
+          ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Install required apt packages
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -yq
+          apt-get install -yq curl build-essential libsqlite3-dev libffi-dev
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          uv sync --group test --extra cli --no-cache
+      - name: Install KWJA
+        run: |
+          # Install KWJA with CPU-only PyTorch to reduce disk usage
+          uv tool install kwja --python 3.12 --no-cache --with "torch==2.7.1+cpu" --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Run tests for all files under examples/apply_*.py
+        shell: bash
+        run: |
+          for example in examples/apply_*.py; do
+              if [[ -f "${example}" ]]; then
+                  echo "Running tests for ${example}"
+                  uv run python "${example}" "こんにちは"
+              fi
+          done
+      - name: Run tests for examples/use_*.py
+        shell: bash
+        run: |
+          for example in examples/use_*.py; do
+              if [[ -f "${example}" ]]; then
+                  echo "Running tests for ${example}"
+                  uv run python "${example}" "こんにちは"
+              fi
+          done

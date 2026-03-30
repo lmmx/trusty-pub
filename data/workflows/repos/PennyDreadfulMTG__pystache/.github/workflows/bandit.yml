@@ -1,0 +1,19 @@
+name: Security check - Bandit
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Run bandit
+      uses: VCTLabs/bandit-report-artifacts@master
+      with:
+        project_path: pystache
+        ignore_failure: true
+        exclude_paths: 'pystache/tests'

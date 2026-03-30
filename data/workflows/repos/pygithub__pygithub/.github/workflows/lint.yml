@@ -1,0 +1,34 @@
+name: Lint
+on:
+  push:
+    branches:
+      - main
+      - release-v*
+  pull_request:
+  merge_group:
+permissions: {}
+
+jobs:
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/mypy
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/pre-commit
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - run: pip install -r requirements/docs.txt
+      - run: pip install -e .
+      - run: sphinx-build doc build

@@ -1,0 +1,115 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+name: "Nightly PyPI Build"
+
+on:
+  schedule:
+    - cron: "0 0 * * *"  # Runs at midnight UTC every day
+  workflow_dispatch:  # Allows manual triggering
+
+permissions:
+  contents: read
+
+jobs:
+  set-version:
+    if: github.repository == 'apache/iceberg-python'  # Only run for apache repo
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.set-version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.12
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+
+      - name: Set version
+        id: set-version
+        run: |
+          CURRENT_VERSION=$(uv version --short)
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          echo "VERSION=${CURRENT_VERSION}.dev${TIMESTAMP}" >> "$GITHUB_OUTPUT"
+
+      - name: Debug version
+        run: echo "Publishing version ${{ steps.set-version.outputs.VERSION }}"
+
+  nightly-build:
+    needs: set-version
+    uses: ./.github/workflows/pypi-build-artifacts.yml
+    with:
+      version: ${{ needs.set-version.outputs.VERSION }}
+  testpypi-publish:
+    name: Publish to TestPypi
+    needs:
+      - nightly-build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/pyiceberg
+
+    permissions:
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+
+    steps:
+    - name: Download all the artifacts
+      uses: actions/download-artifact@v8
+      with:
+        merge-multiple: true
+        path: dist/
+    - name: List downloaded artifacts
+      run: ls -R dist/
+    - name: Publish to TestPyPI
+      id: publish-testpypi
+      continue-on-error: true
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        skip-existing: true
+        verbose: true
+    - name: Display error message on publish failure
+      if: steps.publish-testpypi.outcome == 'failure'
+      run: |
+        echo "::error::Failed to publish to TestPyPI"
+        echo ""
+        echo "⚠️  TestPyPI Publish Failed"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "This may be due to TestPyPI storage limits."
+        echo "See: https://docs.pypi.org/project-management/storage-limits"
+        echo ""
+        echo "To resolve this issue, use the pypi-cleanup utility to clean up old TestPyPI artifacts:"
+        echo "https://pypi.org/project/pypi-cleanup/"
+        echo ""
+        echo "  uvx pypi-cleanup --package pyiceberg --host https://test.pypi.org/ \\"
+        echo "    --verbose -d 10 --do-it --username <username>"
+        echo ""
+        echo "Requirements:"
+        echo "  • Must be a maintainer for pyiceberg on TestPyPI"
+        echo "    (https://test.pypi.org/project/pyiceberg)"
+        echo "  • Requires TestPyPI password and 2FA"
+        echo "  • ⚠️  ONLY do this for TestPyPI, NOT for production PyPI!"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        exit 1

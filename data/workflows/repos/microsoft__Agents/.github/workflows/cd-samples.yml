@@ -1,0 +1,85 @@
+name: cd-samples
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build dotnet Samples
+        working-directory: ./samples/dotnet
+        run: |
+          dotnet build
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Build Node Copilot Studio client sample
+        working-directory: ./samples/nodejs/copilotstudio-client/
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Node Copilot Studio client - React Webchat sample
+        working-directory: ./samples/nodejs/copilotstudio-webchat-react/
+        run: |
+          npm ci
+          npm run build
+
+      - name: build Node QuickStart
+        working-directory: ./samples/nodejs/quickstart
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build  Node Cards Agent
+        working-directory: ./samples/nodejs/cards/
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build  iamge Node Skill Agent
+        working-directory: ./samples/nodejs/copilotstudio-skill/
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Node langChain Agent
+        working-directory: ./samples/nodejs/langchain-multiturn/
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Node StreamingResponse Agent
+        working-directory: ./samples/nodejs/azure-ai-streaming/
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Node auto signin Agent
+        working-directory: ./samples/nodejs/auto-signin/
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Node OBO Agent
+        working-directory: ./samples/nodejs/obo-authorization/
+        run: |
+          npm ci
+          npm run build

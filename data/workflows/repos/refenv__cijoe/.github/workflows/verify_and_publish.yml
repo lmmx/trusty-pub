@@ -1,0 +1,415 @@
+---
+name: verify_and_publish
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+    - "main"
+    tags:
+    - "v*"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  format:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.12']
+
+    steps:
+    - name: Grab source
+      uses: actions/checkout@v4.1.7
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5.2.0
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Python dependencies and their versions
+      run: |
+        brew update || true
+        brew upgrade pipx || true
+        make deps
+        make info
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install pre-commit
+      run: |
+        pipx install pre-commit --python ${{ matrix.python-version }}
+
+    - name: Run pre-commit
+      run: |
+        make format-all
+
+  unittest:
+    needs: format
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+    - name: Grab source
+      uses: actions/checkout@v4.1.7
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5.2.0
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Python dependencies and their versions
+      run: |
+        brew update || true
+        brew upgrade pipx || true
+        make deps
+        make info
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: All
+      run: |
+        make all
+        cijoe -r
+
+    - name: Upload coverage file
+      if: always()
+      uses: actions/upload-artifact@v4.3.0
+      with:
+        name: report-coverage-${{ matrix.python-version }}-${{ matrix.os }}
+        path: .coverage
+        if-no-files-found: error
+
+
+  examples:
+    needs: format
+    runs-on: ubuntu-22.04
+
+    # This is needed for 'guestmount' / 'libguestfs'
+    env:
+      LIBGUESTFS_BACKEND: direct
+
+    container:
+      image: ghcr.io/refenv/cijoe-docker:latest
+      options: >
+        --device=/dev/kvm
+        --device=/dev/fuse
+        --cap-add=SYS_ADMIN
+        --security-opt apparmor=unconfined
+
+    strategy:
+      fail-fast: false
+      matrix:
+        usage_example:
+        - core.default
+        - core.testrunner
+        - core.get_put
+        - linux.build_kdebs
+        - linux.null_blk
+        - qemu.build
+        - qemu.guest_aarch64
+        - qemu.guest_x86_64
+        - system_imaging.debian
+        python-version: ['3.12']
+
+    steps:
+    - name: Grab source
+      uses: actions/checkout@v4.2.2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5.3.0
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: tmp install deps
+      run: |
+        apt-get update -y
+        apt-get install libdw-dev -y
+
+    - name: Build and install cijoe from source
+      run: |
+        pipx uninstall cijoe
+        make deps info build install
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    # This is necessary for running pytest, which is invoked in
+    # the testrunner example
+    - name: Inject pytest
+      if: matrix.usage_example == 'core.testrunner'
+      run: |
+        pipx inject cijoe --force pytest --include-apps
+
+    - name: Emit the example configuration file and workflow
+      run: |
+        cijoe --example ${{ matrix.usage_example }}
+
+    - name: Rename cijoe-script to match pytest naming conventions
+      if: matrix.usage_example == 'core.testrunner'
+      run: |
+        mv cijoe-example-${{ matrix.usage_example }}/cijoe-script.py \
+          cijoe-example-${{ matrix.usage_example }}/test_cijoe-script.py
+
+    - name: Run it!
+      run: |
+        coverage run \
+          $(which cijoe) --monitor -l \
+            --config cijoe-example-${{ matrix.usage_example }}/cijoe-config.toml \
+            cijoe-example-${{ matrix.usage_example }}/cijoe-workflow.yaml
+
+    - name: Coverage report
+      run: |
+        coverage report
+
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@v4.3.0
+      with:
+        name: report-cijoe_packages-${{ matrix.usage_example }}
+        path: cijoe-output/*
+        if-no-files-found: error
+
+    - name: Upload coverage files
+      if: always()
+      uses: actions/upload-artifact@v4.3.0
+      with:
+        name: report-coverage-${{ matrix.usage_example }}
+        path: .coverage
+        if-no-files-found: error
+
+
+  test_config_images:
+    needs: format
+    runs-on: ubuntu-22.04
+
+    # This is needed for 'guestmount' / 'libguestfs'
+    env:
+      LIBGUESTFS_BACKEND: direct
+
+    container:
+      image: ghcr.io/refenv/cijoe-docker:latest
+      options: >
+        --device=/dev/kvm
+        --device=/dev/fuse
+        --cap-add=SYS_ADMIN
+        --security-opt apparmor=unconfined
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+        - debian-12
+        - fedora-43
+        - ubuntu-2404
+        - freebsd-14
+        architecture:
+        - x86_64
+        include:
+        - image: debian-12
+          architecture: aarch64
+
+    steps:
+    - name: Grab source
+      uses: actions/checkout@v4.2.2
+    - name: Set up Python
+      uses: actions/setup-python@v5.3.0
+      with:
+        python-version: 3.12
+
+    - name: tmp install deps
+      run: |
+        apt-get update -y
+        apt-get install libdw-dev -y
+
+    - name: Build and install cijoe from source
+      run: |
+        pipx uninstall cijoe
+        make deps info build install
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Get config file
+      run: |
+        cp \
+          $(cijoe -r | grep "system_imaging.example_config_debian" -A 1 | tail -n1 | sed -n -e 's/^.*path: //p') \
+          cijoe-config.toml
+
+    - name: Run system_imaging.diskimage_from_cloudimage
+      run: |
+        $(which cijoe) \
+          system_imaging.diskimage_from_cloudimage \
+          --monitor -l \
+          --config cijoe-config.toml \
+          --output report-${{ matrix.image }}-${{ matrix.architecture }}-diskimage_from_cloudimage \
+          --pattern ${{ matrix.image }}-${{ matrix.architecture }}
+
+    - name: Run system_imaging.dockerimage_from_diskimage
+      if: contains(matrix.image, 'freebsd') == false
+      run: |
+        $(which cijoe) \
+          system_imaging.dockerimage_from_diskimage \
+          --monitor -l \
+          --config cijoe-config.toml \
+          --output report-${{ matrix.image }}-${{ matrix.architecture }}-dockerimage_from_diskimage \
+          --pattern ${{ matrix.image }}-${{ matrix.architecture }}
+
+    - name: Archive reports
+      if: always()
+      run: |
+        tar czf report-config_img-${{ matrix.image }}_${{ matrix.architecture }}.tar.gz \
+          report-${{ matrix.image }}-${{ matrix.architecture }}-*
+
+    - name: Upload reports
+      uses: actions/upload-artifact@v4.3.0
+      if: always()
+      with:
+        name: report-config_img-${{ matrix.image }}_${{ matrix.architecture }}
+        path: report-config_img-${{ matrix.image }}_${{ matrix.architecture }}.tar.gz
+        if-no-files-found: error
+
+
+  test_cli:
+    needs: format
+    runs-on: ubuntu-22.04
+
+    # This is needed for 'guestmount' / 'libguestfs'
+    env:
+      LIBGUESTFS_BACKEND: direct
+
+    container:
+      image: ghcr.io/refenv/cijoe-docker:latest
+      options: >
+        --device=/dev/kvm
+        --device=/dev/fuse
+        --cap-add=SYS_ADMIN
+        --security-opt apparmor=unconfined
+
+    strategy:
+      fail-fast: false
+      matrix:
+        cli:
+        - name: "integrity-check"
+          cmd: "$(which cijoe) example/cijoe-workflow.yaml -c example/cijoe-config.toml --integrity-check"
+        - name: "script-target"
+          cmd: "$(which cijoe) core.example_script_default -c example/cijoe-config.toml"
+        - name: "workflow-steps"
+          cmd: "$(which cijoe) example/cijoe-workflow.yaml -c example/cijoe-config.toml script_with_args"
+        - name: "emit-example"
+          cmd: "$(which cijoe) --example core.default"
+        - name: "archive"
+          cmd: "$(which cijoe) --archive"
+        python-version: ['3.12']
+
+    steps:
+    - name: Grab source
+      uses: actions/checkout@v4.2.2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5.3.0
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Build and install cijoe from source
+      run: |
+        pipx uninstall cijoe
+        make deps info build install
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Emit the example configuration file and workflow
+      run: |
+        cijoe --example core.default
+        mv ./cijoe-example-core.default ./example
+
+    - name: Create cijoe-output directory
+      if: matrix.cli.name == 'archive'
+      run: |
+        $(which cijoe) core.example_script_default -c example/cijoe-config.toml
+
+    - name: Run it!
+      run: |
+        coverage run ${{ matrix.cli.cmd }} -l --monitor
+
+    - name: Coverage report
+      run: |
+        coverage report
+
+    - name: Upload coverage files
+      if: always()
+      uses: actions/upload-artifact@v4.3.0
+      with:
+        name: report-coverage-cli-${{ matrix.cli.name }}
+        path: .coverage
+        if-no-files-found: error
+
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+    - unittest
+    - examples
+    - test_cli
+
+    runs-on: ubuntu-latest
+    steps:
+    - name: Grab source
+      uses: actions/checkout@v4.1.7
+    - name: Set up Python
+      uses: actions/setup-python@v5.2.0
+      with:
+        python-version: '3.9'
+
+    - name: Python dependencies and their versions
+      run: |
+        make deps
+        make info
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Build and publish
+      env:
+        TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+      run: |
+        make release
+
+  publish-coverage:
+    runs-on: ${{ matrix.os }}
+    needs: [examples, test_config_images, test_cli, unittest]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.12']
+
+    steps:
+    - name: Grab source
+      uses: actions/checkout@v4.2.2
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5.2.0
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Build and install cijoe from source
+      run: |
+        pipx uninstall cijoe || true
+        make deps info build install
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4.1.8
+      with:
+          # If you omit 'name', all artifacts from previous jobs are downloaded.
+        path: ./all_artifacts
+
+    - name: Show downloaded artifacts
+      run: |
+        find all_artifacts -name '.coverage*' -exec coverage debug data {} \;
+        coverage combine \
+          all_artifacts/report-coverage**/.coverage**
+        coverage report
+
+    - name: Coveralls upload
+      uses: coverallsapp/github-action@v2

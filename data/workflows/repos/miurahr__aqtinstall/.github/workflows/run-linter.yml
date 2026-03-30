@@ -1,0 +1,45 @@
+name: Run linter
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  linter:
+    name: Linter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install dependencies
+        run: |
+          pip install -U pip tox wheel setuptools coveralls coverage[toml]
+      - name: lint check
+        run: |
+          tox -e check
+
+  docs:
+    name: Document checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install dependencies
+        run: |
+          pip install -U pip tox wheel setuptools setuptools_scm[toml]
+      - name: docs build and link check
+        run: |
+          tox -e docs

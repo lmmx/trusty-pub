@@ -1,0 +1,113 @@
+name: lint-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install hatch
+        uses: pypa/hatch@install
+      - name: Lint documentation
+        run: hatch run docs:check
+
+  lint-code:
+    runs-on: ubuntu-latest
+    name: Lint code
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install hatch
+        uses: pypa/hatch@install
+      - name: Lint code
+        run: hatch fmt --check
+
+  lint-typing:
+    runs-on: ubuntu-latest
+    name: Lint type annotations
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install hatch
+        uses: pypa/hatch@install
+      - name: Lint typing
+        run: hatch run types:check
+
+  test:
+    runs-on: ubuntu-latest
+    name: Run tests
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install hatch
+        uses: pypa/hatch@install
+
+      - name: Test
+        run: hatch test --cover --python ${{ matrix.python-version }}
+
+      - name: Disambiguate coverage filename
+        run: mv .coverage ".coverage.${{ matrix.os }}.${{ matrix.python-version }}"
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+          path: .coverage*
+
+
+  coverage:
+    runs-on: ubuntu-latest
+    name: Report coverage
+    needs:
+      - test
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Hatch
+        uses: pypa/hatch@install
+
+      - name: Download coverage data
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Combine coverage data
+        run: hatch run coverage:combine
+
+      - name: Export coverage reports
+        run: hatch run coverage:xml
+
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+
+  package:
+    name: Build & verify package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hynek/build-and-inspect-python-package@v2

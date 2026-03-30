@@ -1,0 +1,56 @@
+# CI to test Robyn on major Linux, MacOS and Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "robyn/**"
+      - "src/**"
+      - "integration_tests/**"
+      - "unit_tests/**"
+      - "noxfile.py"
+      - "pyproject.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/python-CI.yml"
+  pull_request:
+    paths:
+      - "robyn/**"
+      - "src/**"
+      - "integration_tests/**"
+      - "unit_tests/**"
+      - "noxfile.py"
+      - "pyproject.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/python-CI.yml"
+
+name: Python Continuous integration
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu"]') || fromJSON('["windows", "ubuntu", "macos"]') }}
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.12"]') || fromJSON('["3.10", "3.11", "3.12", "3.13", "3.14"]') }}
+    name: ${{ matrix.os }} tests with python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+      - uses: Swatinem/rust-cache@v2
+      - name: Set up Nox
+        uses: wntrblm/nox@2024.03.02
+        with:
+          python-versions: ${{ matrix.python-version }}
+      - name: Test with Nox
+        run: nox --non-interactive --error-on-missing-interpreter -p ${{ matrix.python-version }}

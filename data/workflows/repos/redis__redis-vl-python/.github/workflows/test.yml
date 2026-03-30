@@ -1,0 +1,180 @@
+name: Test Suite
+
+on:
+  pull_request:
+
+  push:
+    branches:
+      - main
+
+  schedule:
+    - cron: "0 2 * * *" # 2 AM UTC nightly
+
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.11"
+  UV_VERSION: "0.7.13"
+
+jobs:
+  service-tests:
+    name: Service Tests
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Run service tests
+        uses: ./.github/actions/run-service-tests
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+        env:
+          HF_HOME: ${{ github.workspace }}/hf_cache
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GCP_LOCATION: ${{ secrets.GCP_LOCATION }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}
+          OPENAI_API_VERSION: ${{ secrets.OPENAI_API_VERSION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          LANGCACHE_WITH_ATTRIBUTES_API_KEY: ${{ secrets.LANGCACHE_WITH_ATTRIBUTES_API_KEY }}
+          LANGCACHE_WITH_ATTRIBUTES_CACHE_ID: ${{ secrets.LANGCACHE_WITH_ATTRIBUTES_CACHE_ID }}
+          LANGCACHE_WITH_ATTRIBUTES_URL: ${{ secrets.LANGCACHE_WITH_ATTRIBUTES_URL }}
+          LANGCACHE_NO_ATTRIBUTES_API_KEY: ${{ secrets.LANGCACHE_NO_ATTRIBUTES_API_KEY }}
+          LANGCACHE_NO_ATTRIBUTES_CACHE_ID: ${{ secrets.LANGCACHE_NO_ATTRIBUTES_CACHE_ID }}
+          LANGCACHE_NO_ATTRIBUTES_URL: ${{ secrets.LANGCACHE_NO_ATTRIBUTES_URL }}
+
+  test:
+    name: Python ${{ matrix.python-version }} - redis-py ${{ matrix.redis-py-version }} [${{ matrix.redis-image }}]
+    runs-on: ubuntu-latest
+    needs: service-tests
+    env:
+      HF_HOME: ${{ github.workspace }}/hf_cache
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        redis-py-version: ["5.x", "6.x", "7.x"]
+        redis-image: ["redis:8.2", "redis:8.4", "redis:latest"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cache HuggingFace Models
+        uses: actions/cache@v4
+        with:
+          path: hf_cache
+          key: ${{ runner.os }}-hf-cache
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}   # sets UV_PYTHON
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras
+
+          # Install right redis version based on redis py
+          if [[ "${{ matrix.redis-py-version }}" == "5.x" ]]; then
+            uv pip install "redis>=5,<6"
+          elif [[ "${{ matrix.redis-py-version }}" == "6.x" ]]; then
+            uv pip install "redis>=6,<7"
+          else
+            uv pip install "redis>=7,<8"
+          fi
+
+      - name: Set Redis image name
+        run: |
+          echo "REDIS_IMAGE=${{ matrix.redis-image }}" >> $GITHUB_ENV
+
+      - name: Run tests
+        env:
+          GCP_LOCATION: ${{ secrets.GCP_LOCATION }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          make test
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        if: (
+            matrix.redis-py-version == '7.x' &&
+            matrix.redis-image == 'redis:8.4' &&
+            matrix.python-version == '3.11' &&
+            (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+          )
+        with:
+          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+      - name: Run notebooks
+        if: (
+            matrix.redis-py-version == '7.x' &&
+            matrix.redis-image == 'redis:8.4' &&
+            matrix.python-version == '3.11' &&
+            (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+          )
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GCP_LOCATION: ${{ secrets.GCP_LOCATION }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}
+          OPENAI_API_VERSION: ${{ secrets.OPENAI_API_VERSION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          docker run -d --name redis -p 6379:6379 redis:8.4
+          make test-notebooks
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          python-version: ${{ env.PYTHON_VERSION }}   # sets UV_PYTHON
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+  
+      - name: Install dependencies
+        run: |
+          uv sync --group docs --frozen
+
+      - name: Build docs
+        run: |
+          make docs-build

@@ -1,0 +1,38 @@
+name: Type
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: 0 0 * * *
+
+jobs:
+  type:
+    name: Type
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+      - name: Setup Hatch Environment Variables
+        run: |
+          echo "HATCH_ENV_TYPE_VIRTUAL_UV_PATH=$(which uv)" >> $GITHUB_ENV
+          echo "HATCH_PYTHON=$(which python)" >> $GITHUB_ENV
+      - name: Install Hatch
+        uses: pypa/hatch@install
+      - name: Run Build Hooks
+        run: hatch build --hooks-only
+      - name: Run Type Checking
+        run: hatch run type

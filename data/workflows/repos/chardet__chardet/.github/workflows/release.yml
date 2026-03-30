@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-sdist
+          path: dist/*.tar.gz
+
+  build-pure-wheel:
+    name: Build pure Python wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv build --wheel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-pure-wheel
+          path: dist/*.whl
+
+  build-mypyc-wheels:
+    name: Build mypyc wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,riscv64
+      - uses: astral-sh/setup-uv@v7
+      - uses: pypa/cibuildwheel@v3.3
+        env:
+          CIBW_ENVIRONMENT_PASS_LINUX: HATCH_BUILD_HOOK_ENABLE_MYPYC
+          HATCH_BUILD_HOOK_ENABLE_MYPYC: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-mypyc-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  build-mypyc-wheels-windows:
+    name: Build mypyc wheels (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # MSVC has a 16,380-char string literal limit (C2026). mypyc generates
+      # a single C file with an encoded source map that exceeds this with 11
+      # modules. Use separate=true on Windows so each module gets its own
+      # extension, avoiding the limit. This is ~50% slower than the
+      # single-library build used on Linux/macOS.
+      - name: Patch pyproject.toml for MSVC compatibility
+        run: |
+          (Get-Content pyproject.toml) -replace 'options = \{ debug_level = "0" \}', 'options = { debug_level = "0", separate = true }' | Set-Content pyproject.toml
+        shell: pwsh
+      # Hide the patch from git so hatch-vcs derives the clean tagged version
+      # instead of a dirty dev version (e.g. 7.4.0.post2.dev0+g...).
+      - name: Restore clean git state for version derivation
+        run: git update-index --assume-unchanged pyproject.toml
+      - uses: astral-sh/setup-uv@v7
+      - uses: pypa/cibuildwheel@v3.3
+        env:
+          HATCH_BUILD_HOOK_ENABLE_MYPYC: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-mypyc-windows-latest
+          path: wheelhouse/*.whl
+
+  publish:
+    name: Publish to PyPI
+    needs: [build-sdist, build-pure-wheel, build-mypyc-wheels, build-mypyc-wheels-windows]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

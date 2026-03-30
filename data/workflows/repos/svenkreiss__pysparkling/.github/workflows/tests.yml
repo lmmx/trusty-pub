@@ -1,0 +1,59 @@
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        python: [ 3.7, 3.8, 3.9, "3.10", "3.11" ]
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: Install
+      run: |
+        python -m pip install --upgrade pip setuptools
+        python -m pip install -e ".[tests,scripts]"
+
+    - name: Print environment
+      run: |
+        python -m pip freeze
+        python --version
+        python -c "import pysparkling; print(pysparkling.__version__)"
+
+    - name: Check if import order is fine
+      run: |
+        isort . --check --diff
+
+    - name: Test pysparkling/rdd.py
+      run: python -m pytest pysparkling/rdd.py -vv
+
+    - name: Test pysparkling/tests
+      if: matrix.os == 'ubuntu-latest'  # because of timing sensitivity in stream tests
+      run: python -m pytest pysparkling/tests -vv
+
+    - name: Install SQL Dependencies
+      run: |
+        python -m pip install -e ".[sql]"
+
+    - name: Lint
+      if: matrix.python != '3.9'
+      run: pylint pysparkling scripts --disable=fixme
+
+    - name: pycodestyle
+      run: python -m pycodestyle pysparkling scripts
+
+    - name: Test All
+      if: matrix.os == 'ubuntu-latest'  # because of timing sensitivity in stream tests
+      run: python -m pytest -vv

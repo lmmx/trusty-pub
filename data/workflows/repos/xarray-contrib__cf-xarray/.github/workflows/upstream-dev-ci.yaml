@@ -1,0 +1,62 @@
+name: CI Upstream
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+    branches:
+      - main
+  schedule:
+    - cron: "0 0 * * *" # Daily "At 00:00" UTC
+  workflow_dispatch: # allows you to trigger the workflow run manually
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COLUMNS: 120
+
+jobs:
+  upstream-dev:
+    name: upstream-dev
+    runs-on: ubuntu-latest
+    if: ${{ (contains( github.event.pull_request.labels.*.name, 'test-upstream') && github.event_name == 'pull_request') || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # Fetch all history for all branches and tags.
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e .
+          uv pip install --system --group test-upstream
+
+      - name: Run Tests
+        if: success()
+        id: status
+        run: |
+          pytest -rf -n auto --cov=./ --cov-report=xml \
+            --report-log output-${{ matrix.python-version }}-log.jsonl
+      - name: Generate and publish the report
+        if: |
+          failure()
+          && steps.status.outcome == 'failure'
+          && github.event_name == 'schedule'
+          && github.repository_owner == 'xarray-contrib'
+        uses: xarray-contrib/issue-from-pytest-log@v1
+        with:
+          log-path: output-${{ matrix.python-version }}-log.jsonl

@@ -1,0 +1,363 @@
+name: PostgreSQL Extension Distribution
+
+permissions:
+  contents: read
+  id-token: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      pg_version:
+        description: "PostgreSQL version to build (17, 18, or all)"
+        required: false
+        default: "18"
+        type: choice
+        options:
+          - "17"
+          - "18"
+          - all
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+  push:
+    tags:
+      - v*
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref_name }}"
+  cancel-in-progress: true
+
+env:
+  YELLOW: "\e[93m"
+  GREEN: "\e[92m"
+  RED: "\e[91m"
+  DEFAULT: "\e[0m"
+  PG_VERSION: "${{ inputs.pg_version || '18' }}"
+
+jobs:
+  setup:
+    name: Determine PostgreSQL Versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: "${{ steps.set-versions.outputs.versions }}"
+      versions-list: "${{ steps.set-versions.outputs.versions-list }}"
+    steps:
+      - name: set versions to build
+        id: set-versions
+        run: |-
+          if [ "${PG_VERSION}" == "all" ]; then
+            echo "versions=[\"17\",\"18\"]" >> "${GITHUB_OUTPUT}"
+            echo "versions-list=17,18" >> "${GITHUB_OUTPUT}"
+          else
+            echo "versions=[\"${PG_VERSION}\"]" >> "${GITHUB_OUTPUT}"
+            echo "versions-list=${PG_VERSION}" >> "${GITHUB_OUTPUT}"
+          fi
+
+  extension-build:
+    name: Build PostgreSQL Extension
+    needs: [setup]
+    outputs:
+      version: "${{ steps.extract-version.outputs.version }}"
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [x86_64, aarch64]
+    runs-on: "deeplake-linux-${{ matrix.arch }}-runner"
+    container: "quay.io/activeloop/gcc-pypa-manylinux:2_28"
+    env:
+      VCPKG_ROOT: "${{ github.workspace }}/vcpkg"
+      VCPKG_FEATURE_FLAGS: dependencygraph
+      VCPKG_BINARY_SOURCES: "clear;files,/vcpkg-cache,readwrite"
+      VCPKG_DISABLE_METRICS: true
+      BUILD_PRESET: prod
+    steps:
+      - name: checkout
+        shell: bash
+        env:
+          ORG_GH_BOT_PAT: "${{ secrets.ORG_GH_BOT_PAT }}"
+        run: |-
+          branch="${{ github.head_ref || github.ref_name }}"
+          git clone -b "${branch}" "https://activeloop-bot:${ORG_GH_BOT_PAT}@github.com/${{ github.repository }}" .
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v5.1.1
+        with:
+          role-to-assume: "arn:aws:iam::067976305224:role/github"
+          aws-region: us-east-1
+          role-duration-seconds: "7200"
+
+      - name: install vcpkg
+        shell: bash
+        run: |-
+          bash scripts/build_scripts/manage_cache.sh download postgres
+          git clone https://github.com/microsoft/vcpkg.git
+          cd vcpkg
+          git checkout 6f29f12e82a8293156836ad81cc9bf5af41fe836
+          ./bootstrap-vcpkg.sh
+
+      - name: install python dependencies
+        shell: bash
+        run: |-
+          python3 -m pip install -U pip
+          python3 -m pip install requests
+
+      - name: fix ccache architecture mismatch
+        if: matrix.arch == 'aarch64'
+        shell: bash
+        run: |
+          if [ -f /usr/local/bin/ccache ] && ! /usr/local/bin/ccache --version >/dev/null 2>&1; then
+            echo "Removing incompatible ccache binary"
+            rm -f /usr/local/bin/ccache
+          fi
+
+      - name: build pg_deeplake for "${{ matrix.arch }}"
+        shell: bash
+        run: |-
+          echo -e "${YELLOW}Building the PostgreSQL extension...${DEFAULT}"
+          echo "Building for PostgreSQL version(s): ${PG_VERSION}"
+          python3 scripts/build_pg_ext.py prod --deeplake-static --pg-versions "${PG_VERSION}"
+          echo -e "${GREEN}Done.${DEFAULT}"
+
+      - name: clang-tidy
+        shell: bash
+        continue-on-error: true
+        run: |
+          curl \
+            -fsSL \
+            -o clang.sh \
+            https://raw.githubusercontent.com/activeloopai/shared-github-actions/refs/heads/main/.github/actions/clang-tidy/action.sh
+          bash clang.sh cpp/deeplake_pg builds/deeplake-pg-prod
+
+      - name: extract version
+        id: extract-version
+        shell: bash
+        run: |-
+          if [ -f "cpp/.ext/deeplake_api/lib/pkgconfig/deeplake_api.pc" ]; then
+            VERSION=$(PKG_CONFIG_PATH="cpp/.ext/deeplake_api/lib/pkgconfig" pkg-config --modversion deeplake_api)
+            echo "Extracted version from pkg-config: ${VERSION}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "Extracted version from git tag: ${VERSION}"
+          elif [[ -f "python/deeplake/__init__.py" ]]; then
+            VERSION=$(grep -E '^__version__ *= *"' python/deeplake/__init__.py | cut -d'"' -f2)
+          else
+            echo "Error: Could not determine version"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: test built packages
+        shell: bash
+        run: |-
+          if [ "${PG_VERSION}" == "18" ] || [ "${PG_VERSION}" == "all" ]; then
+            echo -e "${YELLOW}Running tests for PostgreSQL 18...${DEFAULT}"
+            if [ ! -f "postgres/pg_deeplake_18.so" ]; then
+              echo -e "${RED}Extension file pg_deeplake_18.so not found${DEFAULT}"
+              echo "Built files in postgres/:"
+              ls -la postgres/*.so || echo "No .so files found"
+              exit 1
+            fi
+            useradd -r -m -U -d /var/lib/postgresql -s /bin/bash postgres
+            chown -R postgres:postgres /var/lib/postgresql
+            chown -R postgres postgres/
+            echo -e "${YELLOW}Installing Python test dependencies...${DEFAULT}"
+            python3 -m pip install -r postgres/tests/py_tests/requirements.txt
+            echo -e "${YELLOW}Running Python tests...${DEFAULT}"
+            export PG_MAJOR_VERSION=18
+            export USER=postgres
+            cd postgres/tests/py_tests || exit 1
+            python3 -m pytest -v -m 'not slow or tpch' --tb=short || {
+              echo -e "${RED}Tests failed for PostgreSQL 18${DEFAULT}"
+              exit 1
+            }
+            cd ../..
+            echo -e "${GREEN}PostgreSQL 18 tests passed${DEFAULT}"
+          else
+            echo -e "${YELLOW}Skipping tests - only PostgreSQL 18 is tested (selected version: ${PG_VERSION})${DEFAULT}"
+          fi
+
+      - name: save cache and build artifacts
+        shell: bash
+        run: |-
+          artifact_file="postgres-$(arch)"
+          bash scripts/build_scripts/manage_cache.sh upload postgres
+          mv ./postgres "${artifact_file}" && tar cf "${artifact_file}".tar "${artifact_file}"
+          s5cmd cp "${artifact_file}".tar "s3://activeloop-platform-tests/indra/artifacts/postgres/${artifact_file}.tar"
+
+  repo-build:
+    name: Build PostgreSQL Extension Repo
+    if: github.event_name == 'workflow_dispatch'
+    needs: [setup, extension-build]
+    env:
+      OP_SERVICE_ACCOUNT_TOKEN: "${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}"
+      REPOSITORY: /tmp/activeloop-packages
+      SUPPORTED_VERSIONS: "${{ needs.setup.outputs.versions-list }}"
+      VERSION: "${{ needs.extension-build.outputs.version }}"
+    runs-on: ubuntu-latest
+    container: "quay.io/activeloopai/repo-builder:latest"
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6.0.1
+
+      - name: load 1pass
+        uses: 1password/load-secrets-action@v3.0.0
+        with:
+          export-env: true
+        env:
+          R2_ACCESS_KEY_ID: "op://GitHub Actions/registry-creds/cloudflare/CF_R2_ACCESS_KEY"
+          R2_SECRET_ACCESS_KEY: "op://GitHub Actions/registry-creds/cloudflare/CF_R2_SECRET_KEY"
+          R2_BUCKET_NAME: "op://GitHub Actions/common/REPOSITORY_BUCKET"
+          R2_ENDPOINT_URL: "op://GitHub Actions/common/REPOSITORY_BUCKET_ENDPOINT"
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v5.1.1
+        with:
+          role-to-assume: "arn:aws:iam::067976305224:role/github"
+          aws-region: us-east-1
+
+      - name: download build artifacts
+        shell: bash
+        run: |-
+          for arch in x86_64 aarch64; do
+            s5cmd cp "s3://activeloop-platform-tests/indra/artifacts/postgres/postgres-${arch}.tar" postgres-"${arch}".tar
+            tar xf postgres-"${arch}".tar
+          done
+
+      - name: build deb and rpm repositories
+        shell: bash
+        run: |-
+          op read --force --out-file private.asc "op://GitHub Actions/files/packages_activeloop_io_private_key"
+          op read --force --out-file public.asc "op://GitHub Actions/files/packages_activeloop_io_public_key"
+          gpg --import public.asc
+          gpg --import private.asc
+          KEY_ID=$(gpg --with-colons \
+          --import-options show-only \
+          --import public.asc | grep '^pub' | cut -d: -f5)
+          rm -f public.asc; rm -f private.asc
+          mkdir -p "${REPOSITORY}"/scripts/pg-deeplake/ &&
+          cp -f postgres/scripts/install.sh "${REPOSITORY}"/scripts/pg-deeplake/
+          for type in deb rpm; do
+            for arch in amd64 arm64; do
+              echo -e "${YELLOW}Building the ${type} repository...${DEFAULT}"
+              bash postgres/scripts/build_${type}.sh "${VERSION}"-1 "${REPOSITORY}" "${arch}" "${KEY_ID}" "${SUPPORTED_VERSIONS}"
+            done
+          done
+
+      - name: install aws cli
+        shell: bash
+        run: |-
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-$(arch).zip" -o "awscliv2.zip"
+          unzip awscliv2.zip && ./aws/install
+
+      - name: index and upload repository to r2
+        shell: bash
+        run: |-
+          echo -e "${YELLOW}Generating index HTMLs...${GREEN}"
+          unset AWS_SESSION_TOKEN && bash postgres/scripts/clone.sh
+          find "${REPOSITORY}" -name "index.html" -exec rm -f {} \;
+          python3 postgres/scripts/indexer.py --recursive "${{ env.REPOSITORY }}" &&
+          echo -e "${GREEN}Done.${DEFAULT}"
+          echo -e "${YELLOW}Uploading the repositories to R2 bucket...${DEFAULT}"
+          python3 postgres/scripts/uploader.py "${{ env.REPOSITORY }}" &&
+          echo -e "${GREEN}Done.${DEFAULT}"
+
+  build_container_images:
+    name: Build Container Images
+    if: github.event_name == 'workflow_dispatch'
+    needs: [setup, extension-build]
+    env:
+      OP_SERVICE_ACCOUNT_TOKEN: "${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}"
+      VERSION: "${{ needs.extension-build.outputs.version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: "${{ fromJson(needs.setup.outputs.versions) }}"
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6.0.1
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v5.1.1
+        with:
+          role-to-assume: "arn:aws:iam::067976305224:role/github"
+          aws-region: us-east-1
+
+      - name: download build artifacts
+        shell: bash
+        run: |-
+          for arch in x86_64 aarch64; do
+            aws s3 cp "s3://activeloop-platform-tests/indra/artifacts/postgres/postgres-${arch}.tar" postgres-"${arch}".tar
+            tar xf postgres-"${arch}".tar
+          done
+
+      - name: build deb packages
+        shell: bash
+        env:
+          PG_VERSION: "${{ matrix.version }}"
+          VERSION: "${{ needs.extension-build.outputs.version }}"
+        run: |-
+          mkdir -p ./debs
+          for arch_pair in "amd64:x86_64" "arm64:aarch64"; do
+            ARCH="${arch_pair%%:*}"
+            ARTIFACT_DIR="postgres-${arch_pair##*:}"
+            DEB_PATH=$(mktemp -d)
+            mkdir -p "${DEB_PATH}/pg-deeplake-${PG_VERSION}/DEBIAN/"
+            mkdir -p "${DEB_PATH}/pg-deeplake-${PG_VERSION}/usr/lib/postgresql/${PG_VERSION}/lib/"
+            mkdir -p "${DEB_PATH}/pg-deeplake-${PG_VERSION}/usr/share/postgresql/${PG_VERSION}/extension/"
+            install -m 644 "${ARTIFACT_DIR}"/pg_deeplake_"${PG_VERSION}".so "${DEB_PATH}/pg-deeplake-${PG_VERSION}/usr/lib/postgresql/${PG_VERSION}/lib/pg_deeplake"
+            install -m 644 "${ARTIFACT_DIR}"/pg_deeplake*.sql "${DEB_PATH}/pg-deeplake-${PG_VERSION}/usr/share/postgresql/${PG_VERSION}/extension/"
+            install -m 644 "${ARTIFACT_DIR}"/pg_deeplake.control "${DEB_PATH}/pg-deeplake-${PG_VERSION}/usr/share/postgresql/${PG_VERSION}/extension/"
+            printf '%s\n' \
+              "Package: pg-deeplake-${PG_VERSION}" \
+              "Version: ${VERSION}" \
+              "Section: database" \
+              "Priority: optional" \
+              "Architecture: ${ARCH}" \
+              "Maintainer: Activeloop SRE <sre@activeloop.dev>" \
+              "Description: PostgreSQL ${PG_VERSION} DeepLake Extension." \
+              > "${DEB_PATH}/pg-deeplake-${PG_VERSION}/DEBIAN/control"
+            dpkg --build "${DEB_PATH}/pg-deeplake-${PG_VERSION}" "./debs/pg-deeplake-${PG_VERSION}_${VERSION}-1_${ARCH}.deb"
+          done
+
+      - name: load 1pass
+        id: load-1pass
+        uses: 1password/load-secrets-action@v3.0.0
+        env:
+          QUAY_USERNAME: "op://GitHub Actions/registry-creds/quay/QUAY_USERNAME"
+          QUAY_PASSWORD: "op://GitHub Actions/registry-creds/quay/QUAY_PASSWORD"
+
+      - name: login to quay
+        uses: docker/login-action@v3.6.0
+        with:
+          username: "${{ steps.load-1pass.outputs.QUAY_USERNAME }}"
+          password: "${{ steps.load-1pass.outputs.QUAY_PASSWORD }}"
+          registry: quay.io
+
+      - name: setup docker qemu
+        uses: docker/setup-qemu-action@v3.7.0
+
+      - name: setup docker buildx
+        uses: docker/setup-buildx-action@v3.11.1
+
+      - name: build and push container images
+        shell: bash
+        env:
+          PG_VERSION: "${{ matrix.version }}"
+          VERSION: "${{ needs.extension-build.outputs.version }}"
+          COMMIT_SHA: "${{ github.sha }}"
+        run: |-
+          echo "Using package version: ${VERSION}"
+          echo "Using commit SHA: ${COMMIT_SHA}"
+          sed s/BASE_IMAGE/postgres:"${PG_VERSION}"-bookworm/g postgres/Dockerfile > Dockerfile.build
+          docker buildx build \
+            --push \
+            --tag quay.io/activeloopai/pg-deeplake:"${PG_VERSION}"_"${VERSION}"_"${COMMIT_SHA}" \
+            --tag quay.io/activeloopai/pg-deeplake:"${PG_VERSION}" \
+            --build-arg VERSION="${PG_VERSION}"_"${VERSION}"-1 \
+            --platform linux/amd64,linux/arm64 \
+            -f Dockerfile.build \
+            .

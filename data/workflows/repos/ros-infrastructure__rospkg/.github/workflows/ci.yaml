@@ -1,0 +1,34 @@
+---
+name: Run tests
+
+on:  # yamllint disable-line rule:truthy
+  push:
+    branches: ['master']
+  pull_request:
+
+jobs:
+  pytest:
+    uses: ros-infrastructure/ci/.github/workflows/pytest.yaml@main
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: yamllint -f github .
+  os-detect:
+    strategy:
+      matrix:
+        os:
+          - macos-14
+          - macos-15
+          - macos-26
+          - ubuntu-22.04
+          - ubuntu-24.04
+          - windows-2022
+          - windows-2025
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install .
+        env:
+          PIP_BREAK_SYSTEM_PACKAGES: 1
+      - run: python3 -m rospkg.os_detect

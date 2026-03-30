@@ -1,0 +1,62 @@
+name: test
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9.18, 3.10.11, 3.11.3, pypy3.9]
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -qq toilet figlet
+        sudo mkdir -p /usr/local/share/pyfiglet/
+        sudo chmod 777 /usr/local/share/pyfiglet/
+        python -m pip install --upgrade pip
+        pip install -r dev-requirements.txt
+        make full
+        python setup.py install
+    - name: Test with test.py
+      run: |
+        ./pyfiglet/test.py
+    - name: Test with pytest
+      run: |
+        pytest -vv
+
+  pypi-publish:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    name: Upload release to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: publish
+      url: https://pypi.org/p/pyfiglet
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.11.3
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11.3
+        cache: pip
+    - name: Build full dist
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r dev-requirements.txt
+        make full
+    - name: Publish package distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1

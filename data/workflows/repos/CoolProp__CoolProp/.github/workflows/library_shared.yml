@@ -1,0 +1,115 @@
+name: Library builds (shared)
+
+on:
+  push:
+    branches: [ 'master', 'main', 'develop', 'actions_shared' ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ 'master', 'main', 'develop' ]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # fail-fast: Default is true, switch to false to allow one platform to fail and still run others
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macOS-latest]
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install requests packaging
+
+    - name: Extract CoolProp version from CMakeLists.txt
+      shell: bash
+      run: |
+        set -x
+        COOLPROP_VERSION=$(python dev/extract_version.py --cmake-only)
+        echo COOLPROP_VERSION=$COOLPROP_VERSION >> $GITHUB_ENV
+
+    - name: Configure CMake
+      run: cmake -B build -S . -DCMAKE_BUILD_TYPE:STRING=${{ env.BUILD_TYPE }} -DCOOLPROP_SHARED_LIBRARY:BOOL=ON
+
+    - name: Build
+      run: cmake --build build --target install -j $(nproc) --config ${{ env.BUILD_TYPE }}
+
+    # Create a special case for Windows since we also need 2 flavours of 32bit binaries
+    - name: Configure CMake for 32bit Windows stdcall
+      if: startsWith(matrix.os, 'windows')
+      run: cmake -B build_stdc  -S . -DCMAKE_BUILD_TYPE:STRING=${{ env.BUILD_TYPE }} -DCOOLPROP_SHARED_LIBRARY:BOOL=ON -DCOOLPROP_STDCALL_LIBRARY:BOOL=ON -A Win32
+      
+    - name: Build with CMake for 32bit Windows stdcall
+      if: startsWith(matrix.os, 'windows')
+      run: cmake --build build_stdc --target install -j $(nproc) --config ${{ env.BUILD_TYPE }}
+
+    - name: Configure CMake for 32bit Windows cdecl
+      if: startsWith(matrix.os, 'windows')
+      run: cmake -B build_cdecl -S . -DCMAKE_BUILD_TYPE:STRING=${{ env.BUILD_TYPE }} -DCOOLPROP_SHARED_LIBRARY:BOOL=ON -DCOOLPROP_CDECL_LIBRARY:BOOL=ON   -A Win32
+      
+    - name: Build with CMake for 32bit Windows cdecl
+      if: startsWith(matrix.os, 'windows')
+      run: cmake --build build_cdecl --target install -j $(nproc) --config ${{ env.BUILD_TYPE }}
+
+    - name: Configure CMake for 64bit Windows arm64
+      if: startsWith(matrix.os, 'windows')
+      run: cmake -B build_arm64 -S . -DCMAKE_BUILD_TYPE:STRING=${{ env.BUILD_TYPE }} -DCOOLPROP_SHARED_LIBRARY:BOOL=ON -A ARM64
+      
+    - name: Build with CMake for 64bit Windows arm64
+      if: startsWith(matrix.os, 'windows')
+      run: cmake --build build_arm64 --target install -j $(nproc) --config ${{ env.BUILD_TYPE }}
+
+
+    # - name: Tar.gz the shared library to maintain case sensitivy and file permissions
+    #   working-directory: ./install_root/shared_library/
+    #   shell: bash
+    #   run: |
+    #     set -x
+    #     tar -cvzf CoolProp-${{ env.COOLPROP_VERSION }}-shared-${{ matrix.os }}.tar.gz ./*
+
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v4
+      with:
+          # Upload to unique artifact names tagged with suffix of matrix.os
+          # This is now requried by upload-artifact@v4, but will be merged later
+          name: shared_library-${{ matrix.os }}
+          path: install_root/shared_library
+
+    # - name: Upload TGZ or ZIP to release
+    #   if: contains(github.ref, 'refs/tags')
+    #   uses: svenstaro/upload-release-action@v2
+    #   with:
+    #     repo_token: ${{ secrets.GITHUB_TOKEN }}
+    #     file: install_root/shared_library/CoolProp-${{ env.COOLPROP_VERSION }}-shared-${{ matrix.os }}.tar.gz
+    #     tag: ${{ github.ref }}
+    #     overwrite: true
+    #     file_glob: false
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    - name: Merge Artifacts
+      uses: actions/upload-artifact/merge@v4
+      with:
+        # Merge all existing artifacts built above that start with pattern "shared_library-*"
+        pattern: shared_library-*
+        # Merge to single "shared_library" artifact
+        name: shared_library
+        # Remove the old individual artifacts once merged
+        delete-merged: true
+        

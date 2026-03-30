@@ -1,0 +1,44 @@
+name: Mathcad wrapper
+
+on:
+  # ========= Run on Pushes and Pull_Requests
+  push:
+    branches: [ 'master', 'main', 'develop', 'actions_mathcad' ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ 'master', 'main', 'develop' ]
+  # ========= Run on call from other workflows
+  workflow_call:
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # Get the PTC build library and header in the proper location
+    - name: Get dependencies
+      shell: bash
+      run: |
+        mkdir "Custom Functions"
+        cd "Custom Functions"        
+        cp ../wrappers/MathCAD/Prime/libs/MCADINCL.H .
+        cp ../wrappers/MathCAD/Prime/libs/mcaduser.lib .
+
+    - name: Configure CMake
+      run: cmake -DCOOLPROP_PRIME_MODULE:BOOL=ON -DCOOLPROP_PRIME_ROOT:STRING="${{ github.workspace }}" -B build -S .
+
+    - name: Build
+      run: | 
+        cmake --build build --target CoolPropMathcadWrapper -j $(nproc) --config Release
+        cmake --build build --target install --config Release
+
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v4
+      with:
+          name: MathcadPrime
+          path: install_root/MathcadPrime

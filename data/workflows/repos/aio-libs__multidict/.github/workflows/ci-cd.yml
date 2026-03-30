@@ -1,0 +1,607 @@
+---
+
+name: CI/CD
+
+on:
+  merge_group:
+  push:
+    branches:
+    - master
+    - >-
+      [0-9].[0-9]+
+    tags:
+    - v*
+  pull_request:
+  schedule:
+  - cron: 0 6 * * *  # Daily 6AM UTC build
+
+
+env:
+  COLOR: >-  # Supposedly, pytest or coveragepy use this
+    yes
+  FORCE_COLOR: 1  # Request colored output from CLI tools supporting it
+  MYPY_FORCE_COLOR: 1  # MyPy's color enforcement
+  PIP_DISABLE_PIP_VERSION_CHECK: 1
+  PIP_NO_PYTHON_VERSION_WARNING: 1
+  PIP_NO_WARN_SCRIPT_LOCATION: 1
+  PRE_COMMIT_COLOR: always
+  PROJECT_NAME: multidict
+  PY_COLORS: 1  # Recognized by the `py` package, dependency of `pytest`
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: 1
+  PYTHON_LATEST: 3.x
+
+
+jobs:
+
+  pre-setup:
+    name: ⚙️ Pre-set global build settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    defaults:
+      run:
+        shell: python
+    outputs:
+      # NOTE: These aren't env vars because the `${{ env }}` context is
+      # NOTE: inaccessible when passing inputs to reusable workflows.
+      dists-artifact-name: python-package-distributions
+      sdist-name: ${{ env.PROJECT_NAME }}-*.tar.gz
+      wheel-name: ${{ env.PROJECT_NAME }}-*.whl
+    steps:
+    - run: >-
+        print('No-op')
+
+
+  build-pure-python-dists:
+    name: 📦 Build distribution packages
+    needs:
+    - pre-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      sdist-filename: >-
+        ${{ steps.dist-filenames-detection.outputs.sdist-filename }}
+      wheel-filename: >-
+        ${{ steps.dist-filenames-detection.outputs.wheel-filename }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+    - name: Set up Python ${{ env.PYTHON_LATEST }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_LATEST }}
+    - name: Install core libraries for build
+      run: python -Im pip install build
+    - name: Build sdists and pure-python wheel
+      env:
+        MULTIDICT_NO_EXTENSIONS: Y
+      run: python -Im build
+    - name: Determine actual created filenames
+      id: dist-filenames-detection
+      run: >-
+        {
+        echo -n sdist-filename=
+        ;
+        basename "$(ls -1 dist/${{ needs.pre-setup.outputs.sdist-name }})"
+        ;
+        echo -n wheel-filename=
+        ;
+        basename "$(ls -1 dist/${{ needs.pre-setup.outputs.wheel-name }})"
+        ;
+        }
+        >> "${GITHUB_OUTPUT}"
+    - name: Upload built artifacts for testing
+      uses: actions/upload-artifact@v7
+      with:
+        if-no-files-found: error
+        name: ${{ needs.pre-setup.outputs.dists-artifact-name  }}
+        # NOTE: Exact expected file names are specified here
+        # NOTE: as a safety measure — if anything weird ends
+        # NOTE: up being in this dir or not all dists will be
+        # NOTE: produced, this will fail the workflow.
+        path: |
+          dist/${{ steps.dist-filenames-detection.outputs.sdist-filename }}
+          dist/${{ steps.dist-filenames-detection.outputs.wheel-filename }}
+        retention-days: 15
+
+  lint:
+    uses: ./.github/workflows/reusable-linters.yml
+
+  build-wheels-for-tested-arches:
+    name: >-  # ${{ '' } is a hack to nest jobs under the same sidebar category
+      📦 Build wheels for tested arches${{ '' }}
+    needs:
+    - build-pure-python-dists
+    - pre-setup  # transitive, for accessing settings
+    strategy:
+      matrix:
+        runner-vm-os:
+        - ubuntu-latest
+        - windows-latest
+        - windows-11-arm
+        - macos-latest
+        tag:
+        - ''
+        - 'musllinux'
+        exclude:
+        - runner-vm-os: windows-latest
+          tag: 'musllinux'
+        - runner-vm-os: windows-11-arm
+          tag: 'musllinux'
+        - runner-vm-os: macos-latest
+          tag: 'musllinux'
+        - runner-vm-os: ubuntu-latest
+          tag: >-
+           ${{
+           (github.event_name != 'push' || github.ref_type != 'tag')
+           && 'musllinux' || 'none'
+           }}
+    uses: ./.github/workflows/reusable-cibuildwheel.yml
+    with:
+      check-name: >-
+        Build ${{ matrix.tag }} wheels on ${{ matrix.runner-vm-os }}
+      runner-vm-os: ${{ matrix.runner-vm-os }}
+      timeout-minutes: 25
+      source-tarball-name: >-
+        ${{ needs.build-pure-python-dists.outputs.sdist-filename }}
+      dists-artifact-name: ${{ needs.pre-setup.outputs.dists-artifact-name }}
+      environment-variables: |-
+        CIBW_ARCHS_MACOS=x86_64 arm64 universal2
+
+        CIBW_SKIP<<EOF
+        ${{
+          (github.event_name != 'push' || !contains(github.ref, 'refs/tags/'))
+          && '*_i686
+          *-macosx_universal2
+          *-musllinux_*
+          *-win32'
+          || (matrix.tag == 'musllinux') && '*-manylinux_*'
+        || '*-musllinux_*'
+        }}
+        pp*
+        EOF
+
+  test:
+    name: >-
+      Test ${{ matrix.os }}
+      ${{ matrix.pyver }}
+      ${{ matrix.no-extensions == 'Y' && ' ' || 'ext' }}
+      ${{ matrix.debug == 'Y' && 'debug' || '' }}
+    needs:
+    - build-pure-python-dists  # transitive, for accessing settings
+    - build-wheels-for-tested-arches
+    - pre-setup  # transitive, for accessing settings
+    strategy:
+      matrix:
+        pyver:
+        - 3.14t
+        - 3.14
+        - 3.13t
+        - 3.13
+        - 3.12
+        - 3.11
+        - "3.10"
+        - 3.9
+        no-extensions: ['', 'Y']
+        os: [ubuntu, macos, windows]
+        debug: ['', 'Y']
+        exclude:
+        - no-extensions: Y
+          debug: Y
+        - os: macos
+          no-extensions: Y
+        - os: windows
+          no-extensions: Y
+        - os: macos
+          pyver: 3.13t  # this is still tested within cibuildwheel
+        - os: windows
+          pyver: 3.13t  # this is still tested within cibuildwheel
+        - no-extensions: Y
+          debug: Y
+        include:
+        - pyver: pypy-3.9
+          no-extensions: Y
+          os: ubuntu
+          debug: ''
+      fail-fast: false
+    runs-on: ${{ matrix.os }}-latest
+    timeout-minutes: 15
+
+    continue-on-error: >-
+      ${{
+        endsWith(matrix.pyver, '-dev')
+        && true
+        || false
+      }}
+
+    steps:
+    - name: Determine build type
+      id: build_type
+      run: |
+        echo "build_type=${{
+          (contains(matrix.pyver, '-dev') || matrix.debug == 'Y') &&
+          'source' || 'wheel'
+        }}" >> "$GITHUB_OUTPUT"
+      shell: sh
+    - name: Retrieve the project source from an sdist inside the GHA artifact
+      uses: re-actors/checkout-python-sdist@release/v2
+      with:
+        source-tarball-name: >-
+          ${{ needs.build-pure-python-dists.outputs.sdist-filename }}
+        workflow-artifact-name: >-
+          ${{ needs.pre-setup.outputs.dists-artifact-name }}
+    - name: Download distributions
+      if: steps.build_type.outputs.build_type == 'wheel'
+      uses: actions/download-artifact@v8
+      with:
+        pattern: ${{ needs.pre-setup.outputs.dists-artifact-name }}*
+        merge-multiple: true
+        path: dist
+
+    - name: Setup Python ${{ matrix.pyver }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.pyver }}
+        allow-prereleases: true
+    - name: Compute runtime Python version
+      id: python-install
+      run: |
+        import sys
+        from os import environ
+        from pathlib import Path
+
+        FILE_APPEND_MODE = 'a'
+
+        python_version_str = ".".join(
+            map(str, sys.version_info[:3]),
+        )
+        freethreading_suffix = (
+            '' if sys.version_info < (3, 13) or sys._is_gil_enabled()
+            else 't'
+        )
+
+        with Path(environ['GITHUB_OUTPUT']).open(
+                mode=FILE_APPEND_MODE,
+        ) as outputs_file:
+            print(
+                f'python-version={python_version_str}{freethreading_suffix}',
+                file=outputs_file,
+            )
+      shell: python
+
+    - name: Get pip cache dir
+      id: pip-cache
+      run: |
+        echo "dir=$(pip cache dir)" >> "${GITHUB_OUTPUT}"
+      shell: bash
+    - name: Cache PyPI
+      uses: actions/cache@v5
+      with:
+        key: >-
+          pip-ci-${{
+            runner.os
+          }}-${{
+            matrix.pyver
+          }}-${{
+            matrix.no-extensions
+          }}-${{
+            matrix.debug
+          }}-${{
+            hashFiles('requirements/*.txt')
+          }}
+        path: ${{ steps.pip-cache.outputs.dir }}
+        restore-keys: >-
+          pip-ci-${{
+            runner.os
+          }}-${{
+            matrix.pyver
+          }}-${{
+            matrix.no-extensions
+          }}-${{
+            matrix.debug
+          }}
+    - name: Install dependencies
+      uses: py-actions/py-dependency-install@v4
+      with:
+        path: requirements/pytest.txt
+    - name: Determine pre-compiled compatible wheel
+      if: steps.build_type.outputs.build_type == 'wheel'
+      env:
+        # NOTE: When `pip` is forced to colorize output piped into `jq`,
+        # NOTE: the latter can't parse it. So we're overriding the color
+        # NOTE: preference here via https://no-color.org.
+        # NOTE: Setting `FORCE_COLOR` to any value (including 0, an empty
+        # NOTE: string, or a "YAML null" `~`) doesn't have any effect and
+        # NOTE: `pip` (through its verndored copy of `rich`) treats the
+        # NOTE: presence of the variable as "force-color" regardless.
+        #
+        # NOTE: This doesn't actually work either, so we'll resort to unsetting
+        # NOTE: in the Bash script.
+        # NOTE: Ref: https://github.com/Textualize/rich/issues/2622
+        NO_COLOR: 1
+      id: wheel-file
+      run: >
+        echo -n path= | tee -a "${GITHUB_OUTPUT}"
+
+
+        unset FORCE_COLOR
+
+
+        python
+        -X utf8
+        -u -I
+        -m pip install
+        --find-links=./dist
+        --no-index
+        '${{ env.PROJECT_NAME }}'
+        --force-reinstall
+        --no-color
+        --no-deps
+        --only-binary=:all:
+        --dry-run
+        --report=-
+        --quiet
+        | jq --raw-output .install[].download_info.url
+        | tee -a "${GITHUB_OUTPUT}"
+      shell: bash
+    - name: Ensure clean for source build
+      if: steps.build_type.outputs.build_type == 'source'
+      run: >-
+        make clean
+      shell: bash
+    - name: Self-install (from ${{ steps.build_type.outputs.build_type }})
+      env:
+        MULTIDICT_NO_EXTENSIONS: ${{ matrix.no-extensions }}
+        MULTIDICT_DEBUG_BUILD: 1  # Always on for source builds
+      run: >-
+        pip install '${{
+          steps.build_type.outputs.build_type == 'source'
+          && '.'
+          || steps.wheel-file.outputs.path
+        }}'
+    - name: Run unittests
+      run: >-
+        python -Im pytest tests -v
+        --cov-report xml
+        --junitxml=.test-results/pytest/test.xml
+        --${{ matrix.no-extensions == 'Y' && 'no-' || '' }}c-extensions
+    - name: Produce markdown test summary from JUnit
+      if: >-
+        !cancelled()
+      uses: test-summary/action@v2.4
+      with:
+        paths: .test-results/pytest/test.xml
+    - name: Append coverage results to Job Summary
+      if: >-
+        !cancelled()
+      run: >-
+        python -Im coverage report --format=markdown
+        >> "${GITHUB_STEP_SUMMARY}"
+      shell: bash
+    - name: Re-run the failing tests with maximum verbosity
+      if: >-
+        !cancelled()
+        && failure()
+      run: >-  # `exit 1` makes sure that the job remains red with flaky runs
+        python -Im
+        pytest --no-cov -vvvvv --lf -rA
+        --${{ matrix.no-extensions == 'Y' && 'no-' || '' }}c-extensions
+        && exit 1
+      shell: bash
+    - name: Prepare coverage artifact
+      # combining Linux and Windows paths is tricky, left this exercise for
+      # others multidict has no Windows or macOS specific code paths anyway
+      if: ${{ matrix.os == 'ubuntu' }}
+      uses: aio-libs/prepare-coverage@v24.9.2
+
+
+  benchmark:
+    name: Benchmark
+    needs:
+    - pre-setup  # transitive, for accessing settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout project
+      uses: actions/checkout@v6
+    - name: Setup Python 3.13
+      id: python-install
+      uses: actions/setup-python@v6
+      with:
+        python-version: 3.13
+        cache: pip
+        cache-dependency-path: requirements/*.txt
+    - name: Install dependencies
+      uses: py-actions/py-dependency-install@v4
+      with:
+        path: requirements/pytest.txt
+    - name: Self-install
+      run: python -m pip install -e .
+    - name: Run benchmarks
+      uses: CodSpeedHQ/action@v4
+      env:
+        PYTHONHASHSEED: 0
+      with:
+        token: ${{ secrets.CODSPEED_TOKEN }}
+        # Note: -I is missed, otherwise PYTHONHASHSEED is ignored
+        run: python -m pytest --no-cov -vvvvv --codspeed
+        mode: instrumentation
+
+  test-summary:
+    name: Tests status
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    needs:
+    - build-pure-python-dists  # transitive, for accessing settings
+    - lint
+    - pre-setup  # transitive, for accessing settings
+    - test
+    - benchmark
+    steps:
+    - name: Decide whether the needed jobs succeeded or failed
+      uses: re-actors/alls-green@release/v1
+      with:
+        jobs: ${{ toJSON(needs) }}
+    - name: Retrieve the project source from an sdist inside the GHA artifact
+      uses: re-actors/checkout-python-sdist@release/v2
+      with:
+        source-tarball-name: >-
+          ${{ needs.build-pure-python-dists.outputs.sdist-filename }}
+        workflow-artifact-name: >-
+          ${{ needs.pre-setup.outputs.dists-artifact-name }}
+    - name: Download artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: coverage*
+        merge-multiple: true
+        path: ${{ runner.temp }}/coverage
+    - name: Install coverage
+      run: |
+        pip install coverage
+      shell: bash
+    - name: Combine coverage reports
+      run: |
+        coverage combine '${{ runner.temp }}/coverage'
+      shell: bash
+    - name: Generate XML coverage report
+      run: |
+        coverage xml
+      shell: bash
+    - name: Send coverage data to Codecov
+      uses: codecov/codecov-action@v6
+      with:
+        fail_ci_if_error: true
+        files: coverage.xml
+        flags: >-
+          CI-GHA,
+          pytest
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+  pre-deploy:
+    name: Pre-Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    needs: test-summary
+    # Run only on pushing a tag
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    steps:
+    - name: Dummy
+      run: |
+        echo "Predeploy step"
+
+  build-wheels-for-odd-archs:
+    name: >-  # ${{ '' } is a hack to nest jobs under the same sidebar category
+      📦 Build wheels for odd arches${{ '' }}
+    needs:
+    - build-pure-python-dists
+    - pre-deploy
+    - pre-setup  # transitive, for accessing settings
+    strategy:
+      matrix:
+        qemu:
+        - aarch64
+        - ppc64le
+        - s390x
+        - armv7l
+        - riscv64
+        tag:
+        - ''
+        - musllinux
+    uses: ./.github/workflows/reusable-cibuildwheel.yml
+    with:
+      check-name: >-
+        Build ${{ matrix.tag }} wheels for ${{ matrix.qemu }}
+      qemu: true
+      timeout-minutes: 120
+      source-tarball-name: >-
+        ${{ needs.build-pure-python-dists.outputs.sdist-filename }}
+      dists-artifact-name: ${{ needs.pre-setup.outputs.dists-artifact-name }}
+      # CIBW_ARCHS_LINUX: Build emulated architectures if QEMU, else "auto"
+      environment-variables: |-
+        CIBW_ARCHS_LINUX=${{ matrix.qemu }}
+
+        CIBW_ARCHS_MACOS=x86_64 arm64 universal2
+
+        CIBW_SKIP=${{
+          (matrix.tag == 'musllinux')
+          && '*-manylinux_*'
+          || '*-musllinux_*'
+        }} pp*
+
+  deploy:
+    name: Deploy
+    needs:
+    - build-pure-python-dists
+    - build-wheels-for-odd-archs
+    - build-wheels-for-tested-arches
+    - pre-setup  # transitive, for accessing settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: write  # IMPORTANT: mandatory for making GitHub Releases
+      id-token: write  # IMPORTANT: mandatory for trusted publishing & sigstore
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/${{ env.PROJECT_NAME }}
+
+    steps:
+    - name: Retrieve the project source from an sdist inside the GHA artifact
+      uses: re-actors/checkout-python-sdist@release/v2
+      with:
+        source-tarball-name: >-
+          ${{ needs.build-pure-python-dists.outputs.sdist-filename }}
+        workflow-artifact-name: >-
+          ${{ needs.pre-setup.outputs.dists-artifact-name }}
+
+    - name: Download distributions
+      uses: actions/download-artifact@v8
+      with:
+        pattern: ${{ needs.pre-setup.outputs.dists-artifact-name }}*
+        merge-multiple: true
+        path: dist
+    - run: |
+        tree
+    - name: Login
+      run: |
+        echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+    - name: Make Release
+      uses: aio-libs/create-release@v1.6.6
+      with:
+        changes_file: CHANGES.rst
+        name: ${{ env.PROJECT_NAME }}
+        version_file: ${{ env.PROJECT_NAME }}/__init__.py
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        artifact: >-
+          ${{ needs.pre-setup.outputs.dists-artifact-name }}
+        head_line: >-
+          {version}\n=+\n\n\*\({date}\)\*\n
+        fix_issue_regex: >-
+          :issue:`(\d+)`
+        fix_issue_repl: >-
+          #\1
+
+    - name: >-
+        Publish 🐍📦 to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+    - name: Sign the dists with Sigstore
+      uses: sigstore/gh-action-sigstore-python@v3.3.0
+      with:
+        inputs: >-
+          ./dist/${{ needs.build-pure-python-dists.outputs.sdist-filename }}
+          ./dist/*.whl
+
+    - name: Upload artifact signatures to GitHub Release
+      # Confusingly, this action also supports updating releases, not
+      # just creating them. This is what we want here, since we've manually
+      # created the release above.
+      uses: softprops/action-gh-release@v2
+      with:
+        # dist/ contains the built packages, which smoketest-artifacts/
+        # contains the signatures and certificates.
+        files: dist/**
+
+...

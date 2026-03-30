@@ -1,0 +1,71 @@
+name: Update SDK Version
+
+on:
+  release:
+    types: [published]  # Triggers when a release is published
+  workflow_dispatch: 
+    inputs:
+      version:
+        description: 'Version to update (leave empty to use latest release)'
+        required: false
+        type: string
+
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Debug Release Info
+        if: github.event_name == 'release'
+        run: |
+          echo "Release event detected!"
+          echo "Event action: ${{ github.event.action }}"
+          echo "Release tag: ${{ github.event.release.tag_name }}"
+          echo "Release name: ${{ github.event.release.name }}"
+          echo "Is prerelease: ${{ github.event.release.prerelease }}"
+          echo "Is draft: ${{ github.event.release.draft }}"
+
+      - name: Get Latest Release
+        id: latest_release
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            echo "Using manually specified version: ${{ inputs.version }}"
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            echo "Using release event version: ${{ github.event.release.tag_name }}"
+            VERSION="${{ github.event.release.tag_name }}"
+            echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+          else
+            echo "Getting latest release from API..."
+            LATEST_TAG=$(gh api repos/growthbook/growthbook-python/releases/latest --jq .tag_name)
+            echo "version=${LATEST_TAG#v}" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger Update in Main GrowthBook Repository
+        run: |
+          # Get version from latest release
+          VERSION=${{ steps.latest_release.outputs.version }}
+          echo "Triggering update for version: $VERSION"
+          
+          # Validate version format (semver)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Version '$VERSION' is not in semantic versioning format (x.y.z)"
+            exit 1
+          fi
+          
+          # Trigger repository_dispatch event in the main GrowthBook repo
+          gh api repos/growthbook/growthbook/dispatches \
+            --method POST \
+            --field event_type='update-sdk-version' \
+            --field client_payload='{"version":"'$VERSION'","sdk":"python","source_repo":"growthbook/growthbook-python"}'
+            
+          echo "✅ Successfully triggered update workflow in growthbook/growthbook"
+          echo "📋 Version: $VERSION"
+          echo "🔗 Check progress at: https://github.com/growthbook/growthbook/actions"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

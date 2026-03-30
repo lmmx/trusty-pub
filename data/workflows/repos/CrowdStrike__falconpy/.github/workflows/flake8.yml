@@ -1,0 +1,59 @@
+name: Flake8
+
+permissions:
+  contents: read
+
+on:
+  push:
+    paths:
+      - '**.py'
+    branches:
+      - main
+      - dev
+      - samples
+      - 'ver_*'
+  pull_request:
+    paths:
+      - '**.py'
+    branches: 
+      - main
+      - dev
+      - samples
+      - 'ver_*'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0
+      with:
+        persist-credentials: false
+    
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip==24.0
+        python -m pip install flake8
+        pip install -r requirements.txt
+    
+    - name: Lint package source with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 src/falconpy --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        # Stop the build on all linting errors - 04.02.21 / jshcodes@CrowdStrike
+        flake8 src/falconpy --count --statistics
+    
+    - name: Lint samples with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 samples --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 samples --exit-zero --count --statistics

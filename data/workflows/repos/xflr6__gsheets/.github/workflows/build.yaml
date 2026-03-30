@@ -1,0 +1,82 @@
+name: Build
+on: [push, pull_request]
+jobs:
+  build:
+    name: run-tests (${{ matrix.os || 'linux' }}-${{ matrix.python-version }})
+    runs-on: ${{ matrix.os || 'ubuntu' }}-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.14"
+          - {os: windows, python-version: "3.14"}
+          - {os: macos, python-version: "3.14"}
+          - python-version: "3.13"
+          - python-version: "3.12"
+          - python-version: "3.11"
+          - python-version: "3.10"
+          - python-version: pypy-3.11
+          - python-version: pypy-3.10
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v6
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Pip install . --group test
+        run: |
+          echo "::group::Run python -m pip install --upgrade pip setuptools wheel"
+          python -m pip install --upgrade pip setuptools wheel
+          echo "::endgroup::"
+          echo "::group::Run pip install . --group test"
+          pip install . --group test
+          echo "::endgroup::"
+      - name: Run tests
+        run: python run-tests.py
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  lint-code:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - python-version: "3.14"
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v6
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Pip install --group lint
+        run: pip install --group lint
+      - name: Run flake8
+        run: |
+          FAILED=0
+          python -m flake8 || FAILED=$?
+          [ $FAILED -eq 0 ] || echo "::warning::flake8 failed with exit code $FAILED"
+        shell: bash
+  typecheck-code:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - python-version: "3.14"
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v6
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Pip install --group typing
+        run: pip install --group typing
+      - name: Run mypy
+        run: |
+          FAILED=0
+          python -m mypy || FAILED=$?
+          [ $FAILED -eq 0 ] || echo "::warning::mypy failed with exit code $FAILED"
+        shell: bash

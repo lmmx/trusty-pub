@@ -1,0 +1,108 @@
+name: Generate MISTRAL-PYTHON-SDK-GOOGLE-CLOUD
+permissions:
+  checks: write
+  contents: write
+  pull-requests: write
+  statuses: write
+"on":
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Force generation of SDKs
+        type: boolean
+        default: false
+      set_version:
+        description: optionally set a specific SDK version
+        type: string
+jobs:
+  resolve-speakeasy-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Resolve Speakeasy version from workflow config
+        id: resolve
+        run: |
+          set -euo pipefail
+          VERSION=$(awk '/^speakeasyVersion:/{print $2; exit}' .speakeasy/workflow.yaml | tr -d '"')
+          if [ -z "${VERSION:-}" ]; then
+            echo "Could not resolve speakeasyVersion from .speakeasy/workflow.yaml"
+            exit 1
+          fi
+          echo "Resolved Speakeasy version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  generate:
+    needs: resolve-speakeasy-version
+    uses: speakeasy-api/sdk-generation-action/.github/workflows/workflow-executor.yaml@7951d9dce457425b900b2dd317253499d98c2587 # v15
+    with:
+      force: ${{ github.event.inputs.force }}
+      mode: pr
+      set_version: ${{ github.event.inputs.set_version }}
+      speakeasy_version: ${{ needs.resolve-speakeasy-version.outputs.version }}
+      target: mistralai-gcp-sdk
+    secrets:
+      github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      pypi_token: ${{ secrets.PYPI_TOKEN }}
+      speakeasy_api_key: ${{ secrets.SPEAKEASY_API_KEY }}
+
+  align-version:
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find PR branch
+        id: find-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_BRANCH=$(gh pr list --repo ${{ github.repository }} --author "app/github-actions" \
+            --json headRefName,updatedAt --jq 'sort_by(.updatedAt) | reverse | .[0].headRefName // empty')
+          echo "branch=$PR_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout PR branch
+        if: steps.find-pr.outputs.branch != ''
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ steps.find-pr.outputs.branch }}
+
+      - name: Install uv
+        if: steps.find-pr.outputs.branch != ''
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+
+      - name: Align version using uv
+        if: steps.find-pr.outputs.branch != ''
+        run: |
+          set -euo pipefail
+
+          VERSION=$(grep 'releaseVersion:' packages/gcp/.speakeasy/gen.lock | head -1 | awk '{print $2}' | tr -d '"')
+          if [ -z "$VERSION" ]; then
+            echo "No releaseVersion found in gen.lock"
+            exit 0
+          fi
+          echo "Found version: $VERSION"
+
+          CURRENT=$(grep '^version = ' packages/gcp/pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ "$CURRENT" = "$VERSION" ]; then
+            echo "Version already aligned to $VERSION"
+            exit 0
+          fi
+
+          echo "Updating version from $CURRENT to $VERSION"
+          uv version "$VERSION" --directory packages/gcp
+
+      - name: Commit and push
+        if: steps.find-pr.outputs.branch != ''
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add packages/gcp/pyproject.toml packages/gcp/uv.lock
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            VERSION=$(grep '^version = ' packages/gcp/pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+            git commit -m "chore: align GCP pyproject.toml and uv.lock to version $VERSION"
+            git push
+          fi

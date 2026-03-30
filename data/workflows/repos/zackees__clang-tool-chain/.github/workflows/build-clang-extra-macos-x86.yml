@@ -1,0 +1,160 @@
+name: Build clang-extra macOS x86_64
+
+# Builds clang-format, clang-tidy, and clang-query for macOS x86_64 (Intel)
+# These tools are not available as pre-built binaries from LLVM for macOS x64.
+# Uses macos-15-large runner (Intel) - expensive (~10x Linux costs)
+# Runtime: ~60-90 minutes (cmake build from source)
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_version:
+        description: 'LLVM version tag (e.g., llvmorg-21.1.6)'
+        required: true
+        default: 'llvmorg-21.1.6'
+
+concurrency:
+  group: clang-extra-macos-x86-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15-large
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install zstandard
+          brew install cmake ninja
+
+      - name: Clone LLVM source
+        run: |
+          git clone --depth 1 --branch ${{ github.event.inputs.llvm_version }} \
+            https://github.com/llvm/llvm-project.git llvm-src
+
+      - name: Build clang-tools-extra
+        run: |
+          mkdir llvm-build
+          cd llvm-build
+          cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra" \
+            -DLLVM_TARGETS_TO_BUILD="X86" \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64" \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_DOCS=OFF \
+            -DCLANG_INCLUDE_TESTS=OFF \
+            ../llvm-src/llvm
+
+          # Build only the tools we need
+          ninja clang-format clang-tidy clang-query
+
+      - name: Verify binaries
+        run: |
+          echo "=== Built binaries ==="
+          ls -lh llvm-build/bin/clang-format llvm-build/bin/clang-tidy llvm-build/bin/clang-query
+          echo ""
+          echo "=== Architecture check ==="
+          file llvm-build/bin/clang-query
+          echo ""
+          echo "=== Version ==="
+          llvm-build/bin/clang-format --version
+          llvm-build/bin/clang-query --version
+
+      - name: Package clang-extra archive
+        run: |
+          VERSION=$(echo "${{ github.event.inputs.llvm_version }}" | sed 's/llvmorg-//')
+          ARCHIVE_NAME="clang-extra-${VERSION}-darwin-x86_64"
+          OUTPUT_DIR="downloads-bins/assets/clang-extra/darwin/x86_64"
+          mkdir -p "${OUTPUT_DIR}"
+
+          # Copy helper scripts from source tree
+          STAGING="staging/bin"
+          mkdir -p "${STAGING}"
+          cp llvm-build/bin/clang-format "${STAGING}/"
+          cp llvm-build/bin/clang-tidy "${STAGING}/"
+          cp llvm-build/bin/clang-query "${STAGING}/"
+          cp llvm-src/clang-tools-extra/clang-tidy/tool/run-clang-tidy.py "${STAGING}/run-clang-tidy"
+          cp llvm-src/clang/tools/clang-format/git-clang-format "${STAGING}/git-clang-format"
+          chmod +x "${STAGING}"/*
+
+          # Create tar
+          tar -cf "work-${ARCHIVE_NAME}.tar" -C staging bin/
+
+          # Compress with zstd-22
+          python3 -c "
+          import zstandard, hashlib
+          cctx = zstandard.ZstdCompressor(level=22)
+          with open('work-${ARCHIVE_NAME}.tar', 'rb') as fin:
+              with open('${OUTPUT_DIR}/${ARCHIVE_NAME}.tar.zst', 'wb') as fout:
+                  cctx.copy_stream(fin, fout)
+          sha = hashlib.sha256()
+          with open('${OUTPUT_DIR}/${ARCHIVE_NAME}.tar.zst', 'rb') as f:
+              for chunk in iter(lambda: f.read(8192), b''):
+                  sha.update(chunk)
+          with open('${OUTPUT_DIR}/${ARCHIVE_NAME}.tar.zst.sha256', 'w') as f:
+              f.write(f'{sha.hexdigest()} *${ARCHIVE_NAME}.tar.zst\n')
+          print(f'SHA256: {sha.hexdigest()}')
+          "
+
+      - name: Display results
+        run: |
+          VERSION=$(echo "${{ github.event.inputs.llvm_version }}" | sed 's/llvmorg-//')
+          OUTPUT_DIR="downloads-bins/assets/clang-extra/darwin/x86_64"
+          echo "=== Archive ==="
+          ls -lh "${OUTPUT_DIR}"/*.tar.zst
+          echo ""
+          echo "=== Checksum ==="
+          cat "${OUTPUT_DIR}"/*.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-extra-darwin-x86_64
+          path: |
+            downloads-bins/assets/clang-extra/darwin/x86_64/*.tar.zst
+            downloads-bins/assets/clang-extra/darwin/x86_64/*.sha256
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          VERSION=$(echo "${{ github.event.inputs.llvm_version }}" | sed 's/llvmorg-//')
+          OUTPUT_DIR="downloads-bins/assets/clang-extra/darwin/x86_64"
+          ARCHIVE=$(ls ${OUTPUT_DIR}/*.tar.zst 2>/dev/null | head -1)
+
+          echo "# clang-extra macOS x86_64 Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**LLVM Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tools:** clang-format, clang-tidy, clang-query" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "$ARCHIVE" ]; then
+            SIZE=$(ls -lh "$ARCHIVE" | awk '{print $5}')
+            echo "**Status:** Success" >> $GITHUB_STEP_SUMMARY
+            echo "**Archive Size:** $SIZE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## SHA256" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat "${OUTPUT_DIR}"/*.sha256 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Status:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download artifact from this run" >> $GITHUB_STEP_SUMMARY
+          echo "2. Copy to \`downloads-bins/assets/clang-extra/darwin/x86_64/\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Update \`manifest.json\` with SHA256 and version" >> $GITHUB_STEP_SUMMARY
+          echo "4. Add darwin x86_64 to root \`manifest.json\`" >> $GITHUB_STEP_SUMMARY
+          echo "5. Commit and push downloads-bins" >> $GITHUB_STEP_SUMMARY

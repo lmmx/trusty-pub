@@ -1,0 +1,24 @@
+name: PR Label Check
+on:
+  pull_request:
+    types: [opened, labeled, unlabeled, synchronize]
+
+jobs:
+  check-labels:
+    name: Check PR Labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for Module label
+        run: |
+          # Get the labels using GitHub API
+          LABELS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
+          | jq -r '.labels[].name')
+
+          # Check for Module label
+          if ! echo "$LABELS" | grep -i "module:" > /dev/null; then
+            echo "::error::This PR requires at least one label starting with 'module:'. Available modules can be found at: https://github.com/pytorch/ao/labels?q=module"
+            exit 1
+          fi
+
+          echo "PR has required module label"

@@ -1,0 +1,81 @@
+name: changelog-bot
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  changelog:
+    if: >
+      github.event.comment.body == '/changelog' &&
+      github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check commenter permissions
+        id: check-perms
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PERMISSION=$(gh api \
+            repos/${{ github.repository }}/collaborators/${{ github.event.comment.user.login }}/permission \
+            --jq '.permission')
+          echo "permission=$PERMISSION"
+          if [[ "$PERMISSION" != "write" && "$PERMISSION" != "admin" ]]; then
+            echo "User ${{ github.event.comment.user.login }} does not have write/admin permission"
+            exit 1
+          fi
+
+      - name: Get PR info
+        id: pr-info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.issue.number }}
+          PR_JSON=$(gh pr view $PR_NUMBER \
+            --repo ${{ github.repository }} \
+            --json headRefName,headRepository,headRepositoryOwner)
+          HEAD_BRANCH=$(echo "$PR_JSON" | jq -r '.headRefName')
+          HEAD_OWNER=$(echo "$PR_JSON" | jq -r '.headRepositoryOwner.login')
+          HEAD_REPO=$(echo "$PR_JSON" | jq -r '.headRepository.name')
+          echo "branch=$HEAD_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "head_repo=$HEAD_OWNER/$HEAD_REPO" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: pip install anthropic
+
+      - name: Run changelog bot
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python .github/workflows/changelog_bot.py \
+            --pr-number ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} \
+            --token ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit and push if changelog changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/changelog.rst docs/credits.rst
+          if git diff --cached --quiet; then
+            echo "No changes, skipping commit"
+          else
+            git commit -m "Update changelog for PR #${{ github.event.issue.number }}"
+            HEAD_REPO="${{ steps.pr-info.outputs.head_repo }}"
+            HEAD_BRANCH="${{ steps.pr-info.outputs.branch }}"
+            PUSH_URL="https://x-access-token:${GH_TOKEN}@github.com/${HEAD_REPO}.git"
+            git push "$PUSH_URL" "HEAD:refs/heads/${HEAD_BRANCH}"
+          fi

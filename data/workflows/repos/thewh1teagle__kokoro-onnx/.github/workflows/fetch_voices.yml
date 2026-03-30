@@ -1,0 +1,27 @@
+name: fetch voices
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch-voices:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: fetch voices
+        run: |
+          uv run scripts/fetch_voices.py
+          latestTag=$(gh release list --json isPrerelease,tagName --jq 'map(select(.isPrerelease)) | first | .tagName')
+          gh release upload $latestTag voices-v1.0.bin --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+        shell: bash

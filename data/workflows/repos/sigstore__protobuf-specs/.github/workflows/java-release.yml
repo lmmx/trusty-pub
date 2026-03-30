@@ -1,0 +1,73 @@
+name: Build Java Release
+on:
+  push:
+    tags:
+      # if you change this pattern, make sure jobs.strip-tag still works
+      - 'release/java/v[0-9]+.[0-9]+.[0-9]+'
+
+permissions: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/java-build.yml
+
+  strip-tag:
+    name: Compute version from tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: process tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          echo "version=${TAG#"release/java/v"}" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build, Sign, and Release Java artifacts
+    runs-on: ubuntu-latest
+    needs: [ci, strip-tag]
+    permissions:
+      contents: read  # to checkout code
+      id-token: write # to sign with sigstore
+    steps:
+      - name: checkout tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version: 25
+          distribution: 'temurin'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/306323169285/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
+          service_account: protobuf-specs-releaser@sigstore-secrets.iam.gserviceaccount.com
+
+      - uses: google-github-actions/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262 # v3.0.0
+        id: secrets
+        with:
+          secrets: |-
+            signing_key:sigstore-secrets/sigstore-java-pgp-priv-key
+            signing_password:sigstore-secrets/sigstore-java-pgp-priv-key-password
+            sonatype_username:sigstore-secrets/sigstore-sonatype-central-portal-username
+            sonatype_password:sigstore-secrets/sigstore-sonatype-central-portal-password
+
+      - name: Build, Sign and Push to Maven Central
+        # TODO: someone still needs to close and release this, but that can be automated next
+        working-directory: ./java
+        env:
+          VERSION: ${{ needs.strip-tag.outputs.version }}
+          ORG_GRADLE_PROJECT_signingKey: ${{ steps.secrets.outputs.signing_key }}
+          ORG_GRADLE_PROJECT_signingPassword: ${{ steps.secrets.outputs.signing_password }}
+          CENTRAL_PORTAL_USERNAME: ${{ steps.secrets.outputs.sonatype_username }}
+          CENTRAL_PORTAL_PASSWORD: ${{ steps.secrets.outputs.sonatype_password }}
+        run: |
+          ./gradlew clean :publishAggregationToCentralPortal -Pversion=${VERSION} -Prelease

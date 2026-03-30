@@ -1,0 +1,108 @@
+name: publish
+on:
+  # on pull request, run build step to catch errors earlier, but do not publish
+  pull_request:
+  # on push
+  # ... to any branch, just build and check package
+  # ... to master, publish to test PyPI registry
+  # ... to version tag, publish to production PyPI registry
+  push:
+    branches: ["**"]
+    tags: ["v[0-9]*"]
+permissions: {}
+jobs:
+  build:
+    # https://github.community/t/duplicate-checks-on-push-and-pull-request-simultaneous-event/18012/5
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.fork }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements*.txt
+            setup.py
+      - name: install tools
+        run: pip install --upgrade build check-manifest setuptools twine wheel
+
+      - name: build package
+        run: python -m build
+      - name: check manifest
+        run: check-manifest
+      - name: twine check
+        run: twine check dist/*
+      - name: script/test install_check_version
+        run: stages=check_version script/test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-prod:
+    if: ${{ github.event_name == 'push' && github.repository == 'httplib2/httplib2' && startsWith(github.ref, 'refs/tags/') }}
+    needs: [build]
+    environment:
+      name: pypi-public
+      url: https://pypi.org/p/httplib2
+    permissions:
+      attestations: write
+      id-token: write # for trusted publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: 'dist/*'
+
+      - name: publish to public PyPI
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  publish-test:
+    if: ${{ github.event_name == 'push' && github.repository == 'httplib2/httplib2' && github.ref == 'refs/heads/master' }}
+    needs: [build]
+    environment:
+      name: pypi-test
+      url: https://test.pypi.org/p/httplib2
+    permissions:
+      attestations: write
+      id-token: write # for trusted publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: 'dist/*'
+
+      - name: publish to test.PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true

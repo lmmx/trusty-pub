@@ -1,0 +1,46 @@
+# Based off https://github.com/Electrostatics/mmcif_pdbx/blob/master/.github/workflows/python-package.yml
+# Also credit to https://github.com/commitizen-tools/commitizen/tree/master/.github/workflows
+
+# Coverage only required for pytest
+# We don't need these checks in both python versions
+
+name: Tests
+on: [push, pull_request]
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11']
+        test-section: [dependencies, format, pytest, type-checking]
+        exclude:  # See https://github.community/t/improve-matrix-exclusion-feature/16340
+          - {test-section: dependencies, python-version: '3.7'}
+          - {test-section: dependencies, python-version: '3.8'}
+          - {test-section: dependencies, python-version: '3.9'}
+          - {test-section: dependencies, python-version: '3.10'}
+          - {test-section: format, python-version: '3.7'}
+          - {test-section: format, python-version: '3.8'}
+          - {test-section: format, python-version: '3.9'}
+          - {test-section: format, python-version: '3.10'}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4.5.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: x64
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip poetry
+          poetry --version
+          poetry install
+      - name: Test ${{ matrix.test-section }}
+        run: make ${{ matrix.test-section }}
+      - name: Upload coverage to Codecov
+        if: matrix.test-section == 'pytest'
+        uses: codecov/codecov-action@v3.1.1
+        with:
+          file: ./coverage.xml
+          flags: unittests

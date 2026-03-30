@@ -1,0 +1,18 @@
+name: "Build and publish package"
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    uses: ./.github/workflows/wheels.yml
+    with:
+      publish: true
+    secrets: inherit
+    permissions:
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+      contents: write  # IMPORTANT: mandatory for adding artifacts to GitHub Releases

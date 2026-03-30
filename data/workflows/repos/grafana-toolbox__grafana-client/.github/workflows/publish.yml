@@ -1,0 +1,62 @@
+name: Publish
+
+on:
+  push:
+
+  # Allow job to be triggered manually.
+  workflow_dispatch:
+
+# Cancel in-progress jobs when pushing to the same branch.
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Acquire sources
+      uses: actions/checkout@v6
+
+      # Fixup for `setuptools_scm`
+      # https://github.com/pypa/setuptools_scm/issues/480
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+        cache: 'pip'
+        cache-dependency-path: 'setup.cfg'
+
+    - name: Install pypa/build
+      run: pip install build
+
+    - name: Build a binary wheel and a source tarball
+      run: python -m build
+
+    - name: Publish distribution 📦 to Test PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.TEST_PYPI_TOKEN }}
+        skip-existing: true
+        repository-url: https://test.pypi.org/legacy/
+
+    - name: Publish distribution 📦 to PyPI
+      if: startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_TOKEN }}
+        skip-existing: true
+
+    #- name: publish-to-conda
+    #  if: startsWith(github.ref, 'refs/tags')
+    #  uses: m0nhawk/conda-package-publish-action@master
+    #  with:
+    #    subDir: './conda'
+    #    AnacondaUsername: ${{ secrets.ANACONDA_USERNAME }}
+    #    AnacondaPassword: ${{ secrets.ANACONDA_PASSWORD }}

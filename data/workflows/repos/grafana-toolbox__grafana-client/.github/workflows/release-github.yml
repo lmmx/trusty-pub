@@ -1,0 +1,43 @@
+name: "Release: GitHub"
+
+on:
+
+  push:
+    tags:
+      - '*'
+
+  # Allow job to be triggered manually.
+  workflow_dispatch:
+
+# Cancel in-progress jobs when pushing to the same branch.
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: tags
+      run: |
+        git fetch --tags --force
+    - name: version
+      id: version
+      run: |
+        echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    - name: install
+      run: |
+        go install github.com/github-release/github-release@latest
+    - name: release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        $(go env GOPATH)/bin/github-release -v release \
+          --user grafana-toolbox \
+          --repo grafana-client \
+          --tag ${{ steps.version.outputs.VERSION }} \
+          --name ${{ steps.version.outputs.VERSION }}

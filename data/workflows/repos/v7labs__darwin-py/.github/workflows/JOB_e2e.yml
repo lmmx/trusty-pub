@@ -1,0 +1,120 @@
+name: E2E Tests
+
+permissions:
+  contents: read
+  id-token: write # Required for OIDC authentication with AWS
+
+on:
+  schedule:
+    - cron: "0 3 * * mon-fri"
+  repository_dispatch:
+    types: [backend-master-merge]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "e2e_tests/**"
+  workflow_call:
+    secrets:
+      E2E_API_KEY:
+        required: true
+      E2E_ENVIRONMENT:
+        required: true
+      E2E_TEAM:
+        required: true
+      E2E_VIDEO_AWS_ROLE:
+        required: true
+      E2E_STORAGE_NAME:
+        required: true
+      E2E_STORAGE_REGION:
+        required: true
+
+concurrency:
+  group: e2e-tests-${{ (github.event_name == 'repository_dispatch' && 'backend-triggered') || github.ref }}
+  cancel-in-progress: false # Don't cancel running E2E tests, just queue them
+
+jobs:
+  e2e:
+    name: End to End Testing
+    permissions:
+      contents: read
+      id-token: write # Required for OIDC authentication with AWS
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+        poetry-version: ["1.7.1"]
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Free Disk space
+        shell: bash
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo rm -rf /usr/local/lib/android  # will release about 10 GB if you don't need Android
+          sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
+      - name: Harden Runner
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Setup base Python tools
+        run: |
+          python -m pip install --upgrade pip>=24.0
+          python -m pip install --upgrade "setuptools>=69.0.3" wheel
+      - name: Setup Poetry
+        uses: abatilo/actions-poetry@0dd19c9498c3dc8728967849d0d2eae428a8a3d8
+        with:
+          poetry-version: ${{ matrix.poetry-version }}
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --all-extras -vvv
+
+      # Install ffmpeg (required for readonly video registration)
+      - name: Install ffmpeg (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install ffmpeg -y
+
+      # Configure AWS credentials via OIDC for readonly video tests
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: ${{ secrets.E2E_VIDEO_AWS_ROLE }}
+          role-session-name: darwin-py-e2e-tests
+          aws-region: ${{ secrets.E2E_STORAGE_REGION }}
+
+      - name: Run Tests
+        run: poetry run pytest e2e_tests --reruns 3 --reruns-delay 10 -W ignore::DeprecationWarning
+        env:
+          E2E_API_KEY: ${{ secrets.E2E_API_KEY }}
+          E2E_ENVIRONMENT: ${{ secrets.E2E_ENVIRONMENT }}
+          E2E_TEAM: ${{ secrets.E2E_TEAM }}
+          E2E_STORAGE_NAME: ${{ secrets.E2E_STORAGE_NAME }}
+          AWS_REGION: ${{ secrets.E2E_STORAGE_REGION }}
+
+  slack-notifier:
+    name: Slack Notifier Bot
+    needs: e2e
+    if: failure() && github.event_name == 'schedule'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/JOB_slack_message.yml
+    with:
+      message: |
+        *Nightly E2E run failed*
+
+        :link:
+          - https://github.com/v7labs/darwin-py/actions/runs/${{ github.run_id }}
+        :warning: ${{ github.workflow }} failed.
+      icon: ":warning:"
+      at_team: true
+    secrets: inherit

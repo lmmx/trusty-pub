@@ -1,0 +1,216 @@
+name: typescript-checks
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/typescript-tests.yml'
+      - '.eslintrc.js'
+      - 'biome.json'
+      - '**.ts'
+      - '**.tsx'
+      - 'optuna_dashboard/package.json'
+      - 'optuna_dashboard/package-lock.json'
+      - 'vscode/package.json'
+      - 'vscode/package-lock.json'
+      - 'standalone_app/package.json'
+      - 'standalone_app/package-lock.json'
+      - 'tslib/react/package.json'
+      - 'tslib/react/package-lock.json'
+      - 'tslib/storage/package.json'
+      - 'tslib/storage/package-lock.json'
+      - 'rustlib/Cargo.toml'
+      - 'rustlib/Cargo.lock'
+      - 'rustlib/**.rs'
+      - 'optuna_dashboard/tsconfig.json'
+      - 'optuna_dashboard/tsconfig.pkg.json'
+      - 'optuna_dashboard/webpack.config.js'
+jobs:
+  lint:
+    name: Lint checking on Ubuntu
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@master
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - run: npm install
+      - run: npm run lint
+
+  type-check:
+    name: Type checking on optuna-dashboard & standalone_app
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@master
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Rust toolchains
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build rustlib
+        working-directory: rustlib
+        run: |
+          WASM_BINDGEN_VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "wasm-bindgen") | .version')
+          cargo install wasm-bindgen-cli --version $WASM_BINDGEN_VERSION
+          cargo install wasm-opt
+          ./build.sh
+      
+      - name: Setup tslib
+        run: make tslib
+      
+      - name: Type Check optuna_dashboard
+        working-directory: optuna_dashboard
+        run: |
+          npm install
+          npm run type-check
+
+      - name: Build rustlib for standalone_app
+        working-directory: rustlib
+        run: ./build.sh
+
+      - name: Type Check standalone_app
+        working-directory: standalone_app
+        run: |
+          npm install
+          npm run type-check
+
+  check-package-lock-json:
+    name: Check package-lock.json
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@master
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - working-directory: tslib/types
+        run: npm install
+      - working-directory: tslib/storage
+        run: npm install
+      - working-directory: tslib/react
+        run: npm install
+      - working-directory: optuna_dashboard
+        run: npm install
+      - working-directory: standalone_app
+        run: npm install
+      - working-directory: vscode
+        run: npm install
+      - run: git diff --exit-code
+
+  build:
+    name: JS build check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@master
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust toolchains
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build rustlib for standalone_app
+        working-directory: rustlib
+        run: |
+          WASM_BINDGEN_VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "wasm-bindgen") | .version')
+          cargo install wasm-bindgen-cli --version $WASM_BINDGEN_VERSION
+          cargo install wasm-opt
+          ./build.sh
+
+      - name: Setup tslib
+        run: make tslib
+
+      - name: Build standalone_app for vscode extension
+        working-directory: standalone_app
+        run: |
+          npm install
+          npm run build:vscode
+
+      - name: Build standalone_app for GitHub pages
+        working-directory: standalone_app
+        run: |
+          npm install
+          npx vite build --out-dir ./gh-pages
+
+      - name: Build bundle.js
+        working-directory: optuna_dashboard
+        run: |
+          npm install
+          npm run build:dev
+          npm run build:prd
+
+      - name: Build optuna_dashboard package (for Jupyter Lab extension)
+        working-directory: optuna_dashboard
+        run: |
+          npm run build:pkg
+
+  test-tslib:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@master
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          architecture: x64
+
+      - name: Generate test asset for storage
+        working-directory: tslib/storage/test/
+        run: |
+          python -m pip install --upgrade pip setuptools
+          pip install optuna
+          python generate_assets.py
+      
+      - name: Generate test asset for react
+        working-directory: tslib/react/test/
+        run: |
+          python generate_assets.py
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Build test
+        run: make tslib
+
+      - name: Run tslib test for storage
+        working-directory: tslib/storage
+        run: |
+          npm run test
+      
+      - name: Install Playwright Browsers
+        working-directory: tslib/react
+        run: |
+          npx playwright install --with-deps
+
+      - name: Run tslib test for react
+        working-directory: tslib/react
+        run: |
+          npm run test

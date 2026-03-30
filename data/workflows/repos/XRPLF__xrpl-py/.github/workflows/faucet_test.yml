@@ -1,0 +1,60 @@
+name: Faucet tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      git_ref:
+        description: "Git ref (branch, tag, or SHA) to test"
+        required: false
+        type: string
+        default: ""
+
+env:
+  POETRY_VERSION: 2.1.1
+
+jobs:
+  faucet-test:
+    name: Faucet test
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref != '' && inputs.git_ref || github.ref }}
+
+      - name: Load cached .local
+        id: cache-poetry
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.local
+          key: dotlocal-${{ env.POETRY_VERSION }}
+
+      - name: Install poetry
+        if: steps.cache-poetry.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL https://install.python-poetry.org/ | python - --version ${{ env.POETRY_VERSION }}
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install Python + Retrieve Poetry dependencies from cache
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "poetry"
+
+      - name: Display Python version
+        run: |
+          python -c "import sys; print(sys.version)"
+
+      - name: Install poetry dependencies
+        run: poetry install
+
+      - name: Run Faucet tests
+        run: poetry run poe test_faucet

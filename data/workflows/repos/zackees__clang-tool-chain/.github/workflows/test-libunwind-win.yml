@@ -1,0 +1,103 @@
+name: libunwind-win
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-libunwind-win:
+    name: Libunwind (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        irm https://astral.sh/uv/install.ps1 | iex
+        $env:PATH += ";$env:USERPROFILE\.local\bin"
+
+    - name: Install package
+      shell: bash
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Display platform information
+      shell: bash
+      run: |
+        echo "Platform: Windows x64"
+        uname -a
+        python --version
+
+    - name: Download and install toolchain
+      shell: bash
+      run: |
+        uv run clang-tool-chain-c --version
+      timeout-minutes: 20
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        uv run clang-tool-chain info
+
+    - name: Verify MinGW sysroot libunwind exists
+      shell: bash
+      run: |
+        # Check that MinGW sysroot libunwind headers exist
+        CLANG_ROOT=$(uv run python -c "from clang_tool_chain.platform.detection import get_platform_binary_dir; print(get_platform_binary_dir().parent)")
+        echo "Clang root: $CLANG_ROOT"
+
+        echo "Checking for MinGW sysroot libunwind headers..."
+        ls -la "$CLANG_ROOT/generic-w64-mingw32/include/libunwind.h" 2>/dev/null && echo "OK: libunwind.h found" || echo "WARNING: libunwind.h not found"
+        ls -la "$CLANG_ROOT/generic-w64-mingw32/include/unwind.h" 2>/dev/null && echo "OK: unwind.h found" || echo "WARNING: unwind.h not found"
+
+        echo "Checking for MinGW sysroot libunwind libraries..."
+        ls -la "$CLANG_ROOT/generic-w64-mingw32/lib/libunwind"* 2>/dev/null || echo "No libunwind libraries found in sysroot (may be expected)"
+
+    - name: Test libunwind header compilation
+      shell: bash
+      run: |
+        # Test that we can compile code using libunwind.h from MinGW sysroot
+        cat > test_unwind.c << 'EOF'
+        // UNW_LOCAL_ONLY enables local unwinding symbols (_ULx86_64_*)
+        // Without this, the header uses remote unwinding symbols (_Ux86_64_*)
+        // which require libunwind-ptrace
+        #define UNW_LOCAL_ONLY
+        #include <libunwind.h>
+        #include <stdio.h>
+
+        void print_backtrace(void) {
+            unw_cursor_t cursor;
+            unw_context_t context;
+            unw_getcontext(&context);
+            unw_init_local(&cursor, &context);
+            printf("Backtrace initialized successfully\n");
+        }
+
+        int main() {
+            print_backtrace();
+            return 0;
+        }
+        EOF
+
+        echo "Compiling with MinGW sysroot libunwind..."
+        uv run clang-tool-chain-c test_unwind.c -o test_unwind.exe -lunwind
+
+        echo "Running test..."
+        ./test_unwind.exe
+
+    - name: Run libunwind tests
+      shell: bash
+      run: |
+        # Run comprehensive libunwind tests for Windows
+        uv run pytest tests/test_libunwind_headers.py -v -x

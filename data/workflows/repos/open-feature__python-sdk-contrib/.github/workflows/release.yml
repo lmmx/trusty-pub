@@ -1,0 +1,74 @@
+name: Run Release Please
+
+on:
+  workflow_dispatch:
+    inputs:
+
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  TARGET_PYTHON_VERSION: "3.14"
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # for googleapis/release-please-action to create release commit
+      pull-requests: write # for googleapis/release-please-action to create release PR
+    # Release-please creates a PR that tracks all changes
+    steps:
+      - uses: googleapis/release-please-action@a02a34c4d625f9be7cb89156071d8567266a2445 # v4
+        id: release
+        with:
+          token: ${{secrets.GITHUB_TOKEN}}
+          target-branch: main
+      - name: Dump Release Please Output
+        env:
+          RELEASE_PLEASE_OUTPUT: ${{ toJson(steps.release.outputs) }}
+        run: |
+          echo "$RELEASE_PLEASE_OUTPUT"
+    outputs:
+      release_created: ${{ steps.release.outputs.releases_created }}
+      all: ${{ toJSON(steps.release.outputs) }}
+      paths_released: ${{ steps.release.outputs.paths_released }}
+
+  pypi-release:
+    needs: release-please
+    runs-on: ubuntu-latest
+    if: ${{ fromJSON(needs.release-please.outputs.release_created || false) }}
+    strategy:
+      matrix:
+        path: ${{ fromJSON(needs.release-please.outputs.paths_released || '[]') }}
+    environment: publish
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing to pypi
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          submodules: recursive
+
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a # v7
+        with:
+          python-version: ${{ env.TARGET_PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.path }}
+        run: uv sync --frozen
+
+      - name: Build a binary wheel and a source tarball
+        working-directory: ${{ matrix.path }}
+        run: uv build
+
+      - name: Publish a Python distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # `uv` stores the build packages in the root `dist` folder
+          packages-dir: dist

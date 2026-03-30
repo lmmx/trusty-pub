@@ -1,0 +1,38 @@
+name: CI Build Wheel Windows
+on: workflow_dispatch
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest]
+    env:
+      CIBW_BUILD: "cp39-*"
+      CIBW_BUILD_VERBOSITY: 1
+      RUSTFLAGS: "-Ctarget-feature=+crt-static"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.71.1
+          profile: minimal
+
+      - uses: actions/setup-python@v4
+        name: Install Python
+        with:
+          python-version: 3.9
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.23.0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifact-windows
+          path: ./wheelhouse/*.whl

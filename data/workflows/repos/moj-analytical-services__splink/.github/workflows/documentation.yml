@@ -1,0 +1,88 @@
+name: Documentation
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+    paths:
+      # files that affect the docs build:
+      - docs/**
+      - CONTRIBUTING.md
+      - mkdocs.yml
+      # and potentially dependencies - build is quick so shouldn't be too much pain to run this:
+      - pyproject.toml
+      - uv.lock
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup uv (with cache)
+        id: setup_uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install Python 3.13
+        id: install_python313
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        id: install_dependencies
+        run: uv sync --python 3.13 --group docs
+
+      - name: Build documentation
+        id: build_documentation
+        run: uv run mkdocs build
+
+      - name: Check links
+        id: check_links
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
+        with:
+          fail: false
+          args: --offline site/ --root-dir site --exclude-path '.*404.*' --verbose './site/**/*.html'
+
+      - name: Upload built site
+        id: upload_built_site
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    name: Deploy Documentation to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy_pages.outputs.page_url }}
+    permissions:
+      contents: read
+      id-token: write
+      pages: write
+    steps:
+      - name: Configure Pages
+        id: configure_pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+      - name: Deploy to GitHub Pages
+        id: deploy_pages
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

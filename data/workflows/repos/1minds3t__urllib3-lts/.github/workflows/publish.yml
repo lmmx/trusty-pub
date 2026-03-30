@@ -1,0 +1,95 @@
+name: Publish to PyPI
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      python_version:
+        description: 'Target to build'
+        required: true
+        type: choice
+        options:
+          - 'dispatcher'
+          - 'py37'
+          - 'py38'
+          - 'py39'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - name: Determine Python version and branch
+        id: python_info
+        run: |
+          BRANCH="main"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            INPUT="${{ github.event.inputs.python_version }}"
+            if [ "$INPUT" == "dispatcher" ]; then BRANCH="lts-dispatcher"; else BRANCH="lts-$INPUT"; fi
+          else
+            TAG_NAME="${{ github.event.release.tag_name }}"
+            if [[ "$TAG_NAME" =~ -py37$ ]]; then BRANCH="lts-py37";
+            elif [[ "$TAG_NAME" =~ -py38$ ]]; then BRANCH="lts-py38";
+            elif [[ "$TAG_NAME" =~ -py39$ ]]; then BRANCH="lts-py39";
+            else BRANCH="lts-dispatcher"; fi
+          fi
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout correct branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.python_info.outputs.branch }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: pip install --upgrade pip build setuptools wheel twine
+
+      - name: Build package
+        run: |
+          python -m build
+          echo "📦 Artifacts created:"
+          ls -lh dist/
+
+      # STRATEGY 1: OIDC (Trusted Publisher) - preferred, no secrets needed
+      - name: Publish via OIDC (Trusted Publisher)
+        id: oidc_publish
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+      # STRATEGY 2: PAT fallback if OIDC fails or not configured
+      - name: Publish via API Token (fallback)
+        id: pat_publish
+        if: steps.oidc_publish.outcome == 'failure'
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
+      # STRATEGY 3: Print manual instructions if both fail
+      - name: Manual push instructions (last resort)
+        if: steps.oidc_publish.outcome == 'failure' && steps.pat_publish.outcome == 'failure'
+        run: |
+          echo "❌ Both OIDC and API token publish failed."
+          echo ""
+          echo "📦 To publish manually from your local machine:"
+          echo "   pip install twine"
+          echo "   twine upload dist/*"
+          echo ""
+          echo "   Or with explicit token:"
+          echo "   TWINE_USERNAME=__token__ TWINE_PASSWORD=<your-pypi-token> twine upload dist/*"
+          echo ""
+          echo "📁 Build artifacts are in dist/:"
+          ls -lh dist/
+          exit 1

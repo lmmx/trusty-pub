@@ -1,0 +1,96 @@
+name: Build wheels
+
+on: [push, pull_request, workflow_dispatch]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build_wheels:
+    name: py${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # cibuildwheel builds linux wheels inside a manylinux container
+        # it also takes care of procuring the correct python version for us
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: [39, 310, 311, 312, 313, 313t, 314, 314t]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pypa/cibuildwheel@v3.1.4
+        env:
+          CIBW_BUILD: "cp${{ matrix.python-version}}-*"
+          CIBW_ENABLE: cpython-freethreading
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_wheels_aarch64:
+    name: py${{ matrix.python-version }} on ${{ matrix.os }} (aarch64)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm]
+        python-version: [39, 310, 311, 312, 313, 313t, 314, 314t]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.1.4
+        env:
+          CIBW_BUILD: "cp${{ matrix.python-version}}-*"
+          CIBW_ARCHS: aarch64
+          CIBW_BUILD_VERBOSITY: 3
+          # https://github.com/rust-lang/cargo/issues/10583
+          CIBW_ENVIRONMENT_LINUX: PATH="$PATH:$HOME/.cargo/bin" CARGO_NET_GIT_FETCH_WITH_CLI=true
+          CIBW_ENABLE: cpython-freethreading
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cibw-wheels-aarch64-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: "3.9"
+      - name: Run check-manifest
+        run: |
+          pip install check-manifest
+          check-manifest -v
+      - name: Build sdist
+        run: |
+          pip install --upgrade build
+          python -m build --sdist
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./dist/*.tar.gz
+
+  join_artifacts:
+    name: Join artifacts
+    runs-on: ubuntu-latest
+    needs: [build_wheels, build_wheels_aarch64, build_sdist]
+    steps:
+     - name: Merge artifacts
+       uses: actions/upload-artifact/merge@v4
+       with:
+         name: cibw-wheels
+         pattern: cibw-wheels-*
+         delete-merged: true

@@ -1,0 +1,40 @@
+name: Test
+on: [pull_request]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          # Use oldest supported Python version for linting to ensure compatibility
+          python-version: "3.9"
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Run ruff linting
+        run: uv run ruff check
+      - name: Check code formatting
+        run: uv run ruff format --check
+      - name: Run mypy type checking
+        run: uv run mypy urlpath/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v5
+      - name: Install uv and set Python version
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Run unit tests
+        run: uv run pytest tests/
+      - name: Run README tests
+        run: uv run pytest README.md --markdown-docs

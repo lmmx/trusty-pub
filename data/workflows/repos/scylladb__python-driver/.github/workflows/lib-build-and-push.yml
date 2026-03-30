@@ -1,0 +1,195 @@
+name: Build and upload to PyPi
+
+on:
+  workflow_call:
+    inputs:
+      upload:
+        description: 'Upload to PyPI'
+        type: boolean
+        required: false
+        default: false
+
+      python-version:
+        description: 'Python version to run on'
+        type: string
+        required: false
+        default: "3.13"
+
+      target:
+        description: "Target os to build for: linux,macos,windows"
+        type: string
+        required: false
+        default: "linux,macos-x86,macos-arm,windows,linux-aarch64"
+
+      target_tag:
+        description: "Publish particular tag"
+        type: string
+        required: false
+        default: ""
+
+      ignore_tests:
+        description: "Don't run tests"
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  prepare-matrix:
+    name: "Prepare matrix to run for ${{ inputs.python-version }} on `${{ inputs.target }}`"
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.prepare.outputs.matrix }}
+    steps:
+      - name: Prepare matrix json from input matrix list
+        id: prepare
+        run: |
+          echo -n "[" > /tmp/matrix.json
+          was_added=""
+          for target in $(echo "${{ inputs.target }}" | tr -d " " | tr "," "\n")
+          do
+           if [[ "${target}" == "linux" ]]; then
+             [ -n "$was_added" ] && echo -n ","  >> /tmp/matrix.json
+             echo -n '{"os":"ubuntu-24.04", "target": "linux"}' >> /tmp/matrix.json
+             was_added=1
+           elif [[ "${target}" == "linux-aarch64" ]]; then
+             [ -n "$was_added" ] && echo -n ","  >> /tmp/matrix.json
+             echo -n  '{"os":"ubuntu-24.04-arm", "target": "linux-aarch64"}' >> /tmp/matrix.json
+             was_added=1
+           elif [[ "${target}" == "windows" ]]; then
+             [ -n "$was_added" ] && echo -n ","  >> /tmp/matrix.json
+             echo -n  '{"os":"windows-2022", "target": "windows"}' >> /tmp/matrix.json
+             was_added=1
+           elif [[ "${target}" == "macos-x86" ]]; then
+             [ -n "$was_added" ] && echo -n ","  >> /tmp/matrix.json
+             echo -n  '{"os":"macos-15-intel", "target": "macos-x86"}' >> /tmp/matrix.json
+             was_added=1
+           elif [[ "${target}" == "macos-arm" ]]; then
+             [ -n "$was_added" ] && echo -n ","  >> /tmp/matrix.json
+             echo -n  '{"os":"macos-14", "target": "macos-arm"}' >> /tmp/matrix.json
+             was_added=1
+           fi
+          done
+          echo -n "]" >> /tmp/matrix.json
+          echo -e "Resulted matrix json:\n$(cat /tmp/matrix.json)"
+          echo "matrix=$(cat /tmp/matrix.json)" >> $GITHUB_OUTPUT
+
+  build-wheels:
+    name: Build wheels for ${{ matrix.target }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: prepare-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Checkout tag ${{ inputs.target_tag }}
+        if: inputs.target_tag != ''
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_tag }}
+
+      - name: Disable tests
+        if: inputs.ignore_tests
+        shell: bash
+        run: |
+          echo "CIBW_TEST_COMMAND=true" >> $GITHUB_ENV;
+          echo "CIBW_TEST_COMMAND_WINDOWS=(exit 0)" >> $GITHUB_ENV;
+          echo "CIBW_TEST_SKIP=*" >> $GITHUB_ENV;
+          echo "CIBW_BEFORE_TEST=true" >> $GITHUB_ENV;
+          echo "CIBW_BEFORE_TEST_WINDOWS=(exit 0)" >> $GITHUB_ENV;
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install cibuildwheel
+        run: |
+          uv tool install 'cibuildwheel==3.2.1'
+
+      - name: Install OpenSSL for Windows
+        if: runner.os == 'Windows'
+        run: |
+          choco install openssl.light --no-progress -y
+
+      - name: Install Conan
+        if: runner.os == 'Windows'
+        uses: turtlebrowser/get-conan@main
+
+      - name: Configure libev for Windows
+        if: runner.os == 'Windows'
+        run: |
+          conan profile detect
+          conan install conanfile.py
+
+      - name: Install libev for MacOS
+        if: runner.os == 'MacOs'
+        run: |
+          brew install libev
+
+      - name: Overwrite for MacOS
+        if: runner.os == 'MacOS'
+        run: |
+          ##### Set MACOSX_DEPLOYMENT_TARGET
+          if [ "${{ matrix.os }}" == "macos-15-intel" ]; then
+            echo "MACOSX_DEPLOYMENT_TARGET=15.0" >> $GITHUB_ENV;
+            echo "Enforcing target deployment for 15.0"
+          elif [ "${{ matrix.os }}" == "macos-14" ]; then
+            echo "MACOSX_DEPLOYMENT_TARGET=14.0" >> $GITHUB_ENV;
+            echo "Enforcing target deployment for 14.0"
+          fi
+
+      - name: Build wheels
+        if: matrix.target != 'linux-aarch64'
+        shell: bash
+        run: |
+          GITHUB_WORKFLOW_REF="scylladb/python-driver/.github/workflows/lib-build-and-push.yml@refs/heads/master" cibuildwheel --output-dir wheelhouse
+
+      - name: Build wheels for linux aarch64
+        if: matrix.target == 'linux-aarch64'
+        run: |
+          GITHUB_WORKFLOW_REF="scylladb/python-driver/.github/workflows/lib-build-and-push.yml@refs/heads/master" CIBW_BUILD="cp3*" cibuildwheel --archs aarch64 --output-dir wheelhouse
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: wheels-${{ matrix.target }}-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Build sdist
+        run: uv build --sdist
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: source-dist
+          path: dist/*.tar.gz
+
+  upload_pypi:
+    if: inputs.upload
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

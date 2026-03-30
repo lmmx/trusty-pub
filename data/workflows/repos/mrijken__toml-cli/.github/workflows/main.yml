@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+
+    - name: Install ruff
+      uses: astral-sh/ruff-action@v3
+      
+    - name: Ruff check
+      run: ruff check
+      
+    - name: Ruff format
+      run: ruff format --check
+
+    - name: "Set up Python"
+      uses: actions/setup-python@v5
+      with:
+        python-version-file: ".python-version"      
+
+    - name: Install the project
+      run: uv sync --locked --all-extras --dev
+        
+    - name: Run tests
+      run: |
+        uv run pytest tests --junit-xml=tests-results.xml
+
+    - name: Render test results
+      if: success() || failure()
+      uses: dorny/test-reporter@v1
+      continue-on-error: true
+      with:
+        name: Test results
+        path: '**/tests-results.xml'
+        reporter: java-junit
+

@@ -1,0 +1,55 @@
+name: Conformance Tests
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  pull_request:
+  schedule:
+    - cron: "45 7 * * 1,4"
+
+permissions: {}
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.x"
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+
+      - name: install sigstore-python
+        run: python -m pip install .
+
+      - uses: sigstore/sigstore-conformance@9611941d54398f2e3f6383b6f744442a56d2fb2a # v0.0.26
+        with:
+          entrypoint: ${{ github.workspace }}/test/integration/sigstore-python-conformance
+          xfail: "test_verify*intoto-with-custom-trust-root] test_verify*managed-key-happy-path] test_verify*managed-key-and-trusted-root]" # see issues 1442, 1244
+
+  file-issue-on-failure:
+    needs: [conformance]
+    if: failure() && github.event_name == 'schedule' && github.repository == 'sigstore/sigstore-python'
+    permissions:
+      issues: write # required to file an issue
+    runs-on: ubuntu-latest
+    steps:
+      - name: File an issue for conformance test failure
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[CI] Scheduled conformance test failed`,
+              body: `
+            A scheduled conformance test failed, see [run details](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).
+            `
+            });

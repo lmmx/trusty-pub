@@ -1,0 +1,39 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["**/pyproject.toml"]
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths: ["**/pyproject.toml"]
+
+jobs:
+  package-deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: ["actions-python-core", "actions-python-github"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: eifinger/setup-rye@v1
+        with:
+          version: "0.15.2"
+
+      - name: Build package
+        run: rye build
+        working-directory: packages/${{ matrix.workspace }}
+
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: ${{ github.event_name == 'push' }}
+        with:
+          skip-existing: true

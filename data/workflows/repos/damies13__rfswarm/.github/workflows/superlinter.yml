@@ -1,0 +1,34 @@
+---
+name: Super-Linter
+
+on:
+  push:
+    paths-ignore:
+      - '**.png'
+      - '**.jpg'
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  super-lint:
+    name: Lint code base
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Get Branch Name
+        run: |
+          branchname=$(git rev-parse --abbrev-ref HEAD)
+          echo "branchname=$branchname" >> "$GITHUB_ENV"
+      - name: Run Super-Linter
+        uses: super-linter/super-linter@v6
+        env:
+          DEFAULT_BRANCH: ${{ env.branchname }}
+          FILTER_REGEX_EXCLUDE: (.*sh|.git/.*|.Doc/Images/.*|.Tests/.*/Logs/.*|.Tests/.*/testdata/.*)
+          VALIDATE_PYTHON_BLACK: false
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_CSS: false
+          VALIDATE_HTML: false
+          VALIDATE_JSCPD: false
+          VALIDATE_CHECKOV: false
+            # checkov:skip=CKV2_GHA_1:Ensure top-level permissions are not set to write-all is irrelevant to lint only job

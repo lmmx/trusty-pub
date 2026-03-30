@@ -1,0 +1,26 @@
+name: Run tests
+
+on: [pull_request, workflow_dispatch]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        env: ["py310", "py311", "py312", "py313", "py314"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.6.11
+
+      - name: Install project
+        run: uv sync --group dev
+
+      - name: Test with pytest
+        run: uv run tox -e ${{ matrix.env }}

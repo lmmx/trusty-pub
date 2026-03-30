@@ -1,0 +1,37 @@
+name: test-manylinux
+
+on:
+  push:
+
+jobs:
+  test_linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+        include:
+          - python-version: '3.9'
+            py-short: '39'
+            py-short2: '39'
+          - python-version: '3.10'
+            py-short: '310'
+            py-short2: '310'
+          - python-version: '3.11'
+            py-short: 311
+            py-short2: 311
+          - python-version: '3.12'
+            py-short: 312
+            py-short2: 312
+          - python-version: '3.13'
+            py-short: 313
+            py-short2: 313
+          - python-version: '3.14'
+            py-short: 314
+            py-short2: 314
+    env:
+      PYTHON: /opt/python/cp${{ matrix.py-short }}-cp${{ matrix.py-short2 }}/bin/python
+    steps:
+    - uses: actions/checkout@v3
+    - run: docker build -t fugashi .
+    - name: setup and test
+      run: docker run -v $(pwd):/workdir -w /workdir fugashi sh -c "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/ && $PYTHON -m pip install cython pytest wheel unidic-lite ipadic && $PYTHON -m pip install -e . && $PYTHON -m pytest"

@@ -1,0 +1,75 @@
+name: test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    runs-on: ${{ matrix.os }}
+
+    name: ${{ matrix.os }}, Python ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Install tox
+        run: uv tool install --with tox-gh-actions --with tox-uv tox
+
+      - name: Run tests with PyTest 9
+        run: tox
+        env:
+          PYTEST_MAJOR_VERSION: 9
+          PYTEST_PLUGINS: pytest_github_actions_annotate_failures
+
+      - name: Run tests with PyTest 8
+        run: tox
+        env:
+          PYTEST_MAJOR_VERSION: 8
+          PYTEST_PLUGINS: pytest_github_actions_annotate_failures
+
+      - name: Run tests with PyTest 7
+        run: tox
+        if: runner.os != 'Windows'
+        env:
+          PYTEST_MAJOR_VERSION: 7
+          PYTEST_PLUGINS: pytest_github_actions_annotate_failures
+
+  post-test:
+    name: All tests passed
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

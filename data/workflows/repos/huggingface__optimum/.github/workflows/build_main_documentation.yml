@@ -1,0 +1,76 @@
+name: Build main documentation
+
+on:
+  push:
+    branches:
+      - main
+      - doc-builder*
+      - v*-release
+  workflow_dispatch:
+
+env:
+  UV_SYSTEM_PYTHON: 1
+  UV_TORCH_BACKEND: auto
+
+jobs:
+  build_documentation:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache-dependency-path: "kit/package-lock.json"
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - uses: actions/checkout@v2
+        with:
+          repository: "huggingface/optimum"
+          path: optimum
+
+      - name: Set environment variables
+        run: |
+          cd optimum
+          version=`echo "$(grep '^__version__ =' optimum/version.py | cut -d '=' -f 2- | xargs)"`
+
+          if [[ $version == *.dev0 ]]
+          then
+            echo "VERSION=main" >> $GITHUB_ENV
+          else
+            echo "VERSION=v$version" >> $GITHUB_ENV
+          fi
+
+          cd ..
+
+      - name: Setup environment
+        run: |
+          pip install --upgrade pip uv
+          uv pip install git+https://github.com/huggingface/doc-builder
+
+      - name: Make Optimum documentation
+        run: |
+          cd optimum
+          uv pip install . accelerate --prerelease=allow
+          make doc BUILD_DIR=optimum-doc-build VERSION=${{ env.VERSION }}
+          cd ..
+
+      - name: Combine subpackage documentation
+        run: |
+          cd optimum
+          sudo python docs/combine_docs.py --subpackages nvidia habana intel neuron tpu furiosa executorch onnx --version ${{ env.VERSION }}
+          cd ..
+
+      - name: Push to repositories
+        run: |
+          cd optimum/optimum-doc-build
+          sudo chown -R $USER:$USER .
+          doc-builder push optimum \
+           --token "${{ secrets.HF_DOC_BUILD_PUSH }}" \
+           --doc_build_repo_id "hf-doc-build/doc-build" \
+           --commit_msg "Updated with commit ${{ github.sha }} See: https://github.com/huggingface/optimum/commit/${{ github.sha }}" \
+           --upload_version_yml \
+           --n_retries 5

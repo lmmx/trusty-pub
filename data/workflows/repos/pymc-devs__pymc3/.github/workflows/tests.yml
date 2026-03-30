@@ -1,0 +1,403 @@
+name: tests
+
+permissions: {}
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Cancel running workflows for updated PRs
+# https://turso.tech/blog/simple-trick-to-save-environment-and-money-when-using-github-actions
+concurrency:
+  group: ${{ github.workflow}}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Tests are split into multiple jobs to accelerate the CI.
+# Different jobs should be organized to take approximately the same
+# time to complete (and not be prohibitely slow).
+# Because GitHub Actions don't support YAML anchors, we have to place the
+# splitting of testfiles into groups in the strategy/matrix/test-subset
+# and can't re-use the groups across jobs.
+# A pre-commit hook (scripts/check_all_tests_are_covered.py)
+# enforces that test run just once per OS / floatX setting.
+
+jobs:
+  changes:
+    name: "Check for changes"
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.changes.outputs.src }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: changes
+        with:
+          filters: |
+            src:
+              - ".github/workflows/tests.yml"
+              - "pymc/**/*.py"
+              - "tests/**/*.py"
+              - "*.py"
+              - "conda-envs/*"
+              - "requirements*.txt"
+              - "codecov.yml"
+              - "scripts/*.sh"
+
+  ubuntu:
+    needs: changes
+    if: ${{ needs.changes.outputs.changes == 'true' }}
+    strategy:
+      matrix:
+        linker: [cvm, numba]
+        python-version: ["3.14"]
+        test-subset:
+          - |
+            tests/test_util.py
+            tests/test_pytensorf.py
+            tests/test_math.py
+            tests/backends/test_base.py
+            tests/backends/test_ndarray.py
+            tests/step_methods/hmc/test_hmc.py
+            tests/test_func_utils.py
+            tests/distributions/test_shape_utils.py
+            tests/distributions/test_mixture.py
+            tests/test_testing.py
+            tests/progress_bar/test_manager.py
+            tests/progress_bar/test_marimo.py
+
+          - |
+            tests/distributions/test_continuous.py
+            tests/distributions/test_multivariate.py
+            tests/distributions/moments/test_means.py
+
+          - |
+            tests/distributions/test_censored.py
+            tests/distributions/test_custom.py
+            tests/distributions/test_simulator.py
+            tests/sampling/test_deterministic.py
+            tests/sampling/test_forward.py
+            tests/sampling/test_population.py
+            tests/stats/test_convergence.py
+            tests/stats/test_log_density.py
+            tests/distributions/test_distribution.py
+            tests/distributions/test_discrete.py
+
+          - |
+            tests/tuning/test_scaling.py
+            tests/tuning/test_starting.py
+            tests/distributions/test_dist_math.py
+            tests/distributions/test_transform.py
+            tests/sampling/test_mcmc.py
+            tests/sampling/test_parallel.py
+            tests/test_printing.py
+
+          - |
+            tests/distributions/test_timeseries.py
+            tests/gp/test_cov.py
+            tests/gp/test_hsgp_approx.py
+            tests/gp/test_gp.py
+            tests/gp/test_mean.py
+            tests/gp/test_util.py
+            tests/model/test_core.py
+            tests/model/test_fgraph.py
+            tests/model/transform/test_basic.py
+            tests/model/transform/test_conditioning.py
+            tests/model/transform/test_optimization.py
+            tests/test_model_graph.py
+            tests/ode/test_ode.py
+            tests/ode/test_utils.py
+            tests/step_methods/hmc/test_quadpotential.py
+            tests/step_methods/test_state.py
+
+          - |
+            tests/backends/test_mcbackend.py
+            tests/backends/test_zarr.py
+            tests/distributions/test_truncated.py
+            tests/logprob/test_abstract.py
+            tests/logprob/test_arithmetic.py
+            tests/logprob/test_basic.py
+            tests/logprob/test_binary.py
+            tests/logprob/test_checks.py
+            tests/logprob/test_censoring.py
+            tests/logprob/test_composite_logprob.py
+            tests/logprob/test_cumsum.py
+            tests/logprob/test_linalg.py
+            tests/logprob/test_mixture.py
+            tests/logprob/test_order.py
+            tests/logprob/test_rewriting.py
+            tests/logprob/test_scan.py
+            tests/logprob/test_tensor.py
+            tests/logprob/test_switch.py
+            tests/logprob/test_transform_value.py
+            tests/logprob/test_transforms.py
+            tests/logprob/test_utils.py
+
+          - |
+            tests/dims/distributions/test_core.py
+            tests/dims/distributions/test_censored.py
+            tests/dims/distributions/test_scalar.py
+            tests/dims/distributions/test_vector.py
+            tests/dims/test_model.py
+
+      fail-fast: false
+    runs-on: ubuntu-latest
+    env:
+      TEST_SUBSET: ${{ matrix.test-subset }}
+      PYTENSOR_FLAGS: linker=${{ matrix.linker }}
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-file: conda-envs/environment-test.yml
+          create-args: >-
+            python=${{matrix.python-version}}
+          environment-name: pymc-test
+          init-shell: bash
+          cache-environment: true
+      - name: Install-pymc
+        run: |
+          pip install "pytensor @ git+https://github.com/pymc-devs/pytensor.git@v3" --no-deps
+          pip install -e . --no-deps
+          python --version
+          micromamba list
+      - name: Run tests
+        run: |
+          python -m pytest -vv --cov=pymc --cov-report=xml --no-cov-on-fail --cov-report term --durations=50 $TEST_SUBSET
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          env_vars: TEST_SUBSET
+          name: Ubuntu py${{ matrix.python-version }} linker=${{ matrix.linker }}
+          fail_ci_if_error: false
+
+  windows:
+    needs: changes
+    if: ${{ needs.changes.outputs.changes == 'true' }}
+    strategy:
+      matrix:
+        linker: [cvm, numba]
+        python-version: ["3.11"]
+        test-subset:
+          - tests/variational/test_approximations.py tests/variational/test_callbacks.py tests/variational/test_inference.py tests/variational/test_opvi.py tests/test_initial_point.py
+          - tests/model/test_core.py tests/sampling/test_mcmc.py
+          - tests/gp/test_cov.py tests/gp/test_gp.py tests/gp/test_mean.py tests/gp/test_util.py tests/ode/test_ode.py tests/ode/test_utils.py tests/smc/test_smc.py tests/sampling/test_parallel.py
+          - tests/step_methods/test_metropolis.py tests/step_methods/test_slicer.py tests/step_methods/hmc/test_nuts.py tests/step_methods/test_compound.py tests/step_methods/hmc/test_hmc.py tests/step_methods/test_state.py
+
+      fail-fast: false
+    runs-on: windows-latest
+    env:
+      TEST_SUBSET: ${{ matrix.test-subset }}
+      PYTENSOR_FLAGS: linker=${{ matrix.linker }}
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-file: conda-envs/windows-environment-test.yml
+          create-args: >-
+            python=${{matrix.python-version}}
+          environment-name: pymc-test
+          init-shell: bash
+          cache-environment: true
+      - name: Install-pymc
+        run: |
+          pip install "pytensor @ git+https://github.com/pymc-devs/pytensor.git@v3" --no-deps
+          pip install -e . --no-deps
+          python --version
+          micromamba list
+      - name: Run tests
+        run: |
+          python -m pytest -vv --cov=pymc --cov-report=xml --no-cov-on-fail --cov-report term --durations=50 $TEST_SUBSET
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          env_vars: TEST_SUBSET
+          name: Windows py${{ matrix.python-version }} linker=${{ matrix.linker }}
+          fail_ci_if_error: false
+
+  macos:
+    needs: changes
+    if: ${{ needs.changes.outputs.changes == 'true' }}
+    strategy:
+      matrix:
+        linker: [cvm, numba]
+        python-version: ["3.14"]
+        test-subset:
+          - |
+            tests/sampling/test_parallel.py
+            tests/test_data.py
+            tests/variational/test_minibatch_rv.py
+            tests/model/test_core.py
+
+          - |
+            tests/sampling/test_mcmc.py
+
+          - |
+            tests/backends/test_arviz.py
+            tests/backends/test_zarr.py
+            tests/variational/test_updates.py
+      fail-fast: false
+    runs-on: macos-latest
+    env:
+      TEST_SUBSET: ${{ matrix.test-subset }}
+      PYTENSOR_FLAGS: linker=${{ matrix.linker }}
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-file: conda-envs/environment-test.yml
+          create-args: >-
+            python=${{matrix.python-version}}
+          environment-name: pymc-test
+          init-shell: bash
+          cache-environment: true
+      - name: Install pymc
+        run: |
+          pip install "pytensor @ git+https://github.com/pymc-devs/pytensor.git@v3" --no-deps
+          pip install -e . --no-deps
+          python --version
+          micromamba list
+      - name: Run tests
+        run: |
+          python -m pytest -vv --cov=pymc --cov-report=xml --no-cov-on-fail --cov-report term --durations=50 $TEST_SUBSET
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }} # use token for more robust uploads
+          env_vars: TEST_SUBSET
+          name: MacOS py${{ matrix.python-version }} linker=${{ matrix.linker }}
+          fail_ci_if_error: false
+
+  alternative_backends:
+    needs: changes
+    if: ${{ needs.changes.outputs.changes == 'true' }}
+    strategy:
+      matrix:
+        linker: [cvm, numba]
+        # nutpie depends on PyMC, and it will require an extra release cycle to support
+        # the next PyMC release and therefore Python 3.14.
+        python-version: ["3.13"]
+        test-subset:
+          - |
+            tests/distributions/test_random_alternative_backends.py
+            tests/sampling/test_jax.py
+            tests/sampling/test_mcmc_external.py
+
+      fail-fast: false
+    runs-on: ubuntu-latest
+    env:
+      TEST_SUBSET: ${{ matrix.test-subset }}
+      PYTENSOR_FLAGS: linker=${{ matrix.linker }}
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-file: conda-envs/environment-alternative-backends.yml
+          create-args: >-
+            python=${{matrix.python-version}}
+          environment-name: pymc-test
+          init-shell: bash
+          cache-environment: true
+      - name: Install pymc
+        run: |
+          pip install "pytensor @ git+https://github.com/pymc-devs/pytensor.git@v3" --no-deps
+          pip install -e . --no-deps
+          python --version
+          micromamba list
+      - name: Run tests
+        run: |
+          python -m pytest -vv --cov=pymc --cov-report=xml --no-cov-on-fail --cov-report term --durations=50 $TEST_SUBSET
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }} # use token for more robust uploads
+          env_vars: TEST_SUBSET
+          name: Alternative backends py${{ matrix.python-version }} linker=${{ matrix.linker }}
+          fail_ci_if_error: false
+
+  float32:
+    needs: changes
+    if: ${{ needs.changes.outputs.changes == 'true' }}
+    strategy:
+      matrix:
+        linker: [cvm, numba]
+        os: [windows-latest]
+        python-version: ["3.14"]
+        test-subset:
+          - tests/sampling/test_mcmc.py tests/ode/test_ode.py tests/ode/test_utils.py tests/distributions/test_transform.py
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    env:
+      TEST_SUBSET: ${{ matrix.test-subset }}
+      PYTENSOR_FLAGS: floatX=float32
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-file: conda-envs/windows-environment-test.yml
+          create-args: >-
+            python=${{matrix.python-version}}
+          environment-name: pymc-test
+          init-shell: bash
+          cache-environment: true
+      - name: Install-pymc
+        run: |
+          pip install "pytensor @ git+https://github.com/pymc-devs/pytensor.git@v3" --no-deps
+          pip install -e . --no-deps
+          python --version
+          micromamba list
+      - name: Run tests
+        run: |
+          python -m pytest -vv --cov=pymc --cov-report=xml --no-cov-on-fail --cov-report term --durations=50 $TEST_SUBSET
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }} # use token for more robust uploads
+          env_vars: TEST_SUBSET
+          name: float32 ${{ matrix.os }} py${{ matrix.python-version }} linker=${{ matrix.linker }}
+          fail_ci_if_error: false
+
+  all_tests:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    needs: [changes, ubuntu, windows, macos, alternative_backends, float32]
+    steps:
+      - name: Check build matrix status
+        if: ${{ needs.changes.outputs.changes == 'true' &&
+          ( needs.ubuntu.result != 'success' ||
+          needs.windows.result != 'success' ||
+          needs.macos.result != 'success' ||
+          needs.alternative_backends.result != 'success' ||
+          needs.float32.result != 'success' ) }}
+        run: exit 1

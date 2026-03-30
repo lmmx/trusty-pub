@@ -1,0 +1,67 @@
+name: Issue Status Labels
+
+on:
+  issues:
+    types: [opened, closed]
+
+jobs:
+  update-status:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Set up Python (needed by GitHub Actions)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Update issue status
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueLabels = {
+              open: 'status: open',
+              completed: 'status: completed'
+            };
+
+            async function removeOldStatusLabels(issue_number) {
+              const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+                ...context.repo,
+                issue_number
+              });
+
+              for (const label of labels) {
+                if (label.name.startsWith('status:')) {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      ...context.repo,
+                      issue_number,
+                      name: label.name
+                    });
+                  } catch (e) {
+                    // ignore errors
+                  }
+                }
+              }
+            }
+
+            // Handle issues only (own labels)
+            if (context.eventName === 'issues') {
+              const issueNumber = context.payload.issue.number;
+              await removeOldStatusLabels(issueNumber);
+
+              if (context.payload.action === 'opened') {
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: issueNumber,
+                  labels: [issueLabels.open]
+                });
+              } else if (context.payload.action === 'closed') {
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: issueNumber,
+                  labels: [issueLabels.completed]
+                });
+              }
+            }

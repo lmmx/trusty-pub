@@ -1,0 +1,360 @@
+name: build
+
+on: [workflow_call, workflow_dispatch]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.14"
+  SDL2_VERSION: "2.32.0"
+
+jobs:
+  build-winmac:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            arch: x64
+
+          - target: i686-pc-windows-msvc
+            os: windows-2022
+            arch: x86
+
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+            arch: x64
+            min_macos: "10.13"
+
+          - target: aarch64-apple-darwin
+            os: macos-15
+            arch: arm64
+            min_macos: "11.0"
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - &resolve-rust-version
+        name: Resolve Rust version
+        shell: bash
+        run: |
+          RUST_VERSION="$(awk -F'"' '/^channel = / { print $2; exit }' rust-toolchain.toml)"
+          test -n "$RUST_VERSION"
+          echo "RUST_VERSION=$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - &install-rust
+        name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rust-src, rustfmt, clippy
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: ${{ matrix.arch }}
+
+      - &install-build-deps
+        name: Install build dependencies
+        run: pip install -r python/requirements.txt
+
+      - name: Build wheel
+        shell: bash
+        run: |
+          export MACOSX_DEPLOYMENT_TARGET=${{ matrix.min_macos }}
+          make TARGET=${{ matrix.target }}
+
+      - &upload-wheel
+        name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyxel-${{ matrix.target }}
+          path: dist/*
+
+  build-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            image: messense/manylinux_2_28-cross:x86_64
+
+          - target: aarch64-unknown-linux-gnu
+            image: messense/manylinux_2_28-cross:aarch64
+
+          - target: armv7-unknown-linux-gnueabihf
+            image: messense/manylinux_2_28-cross:armv7l
+
+    runs-on: ubuntu-22.04
+    container: ${{ matrix.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - *resolve-rust-version
+
+      - *install-rust
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - *install-build-deps
+
+      - name: Install SDL2 build dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            cmake pkg-config \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev \
+            libxrandr-dev libxfixes-dev libxss-dev libxcb1-dev \
+            libwayland-dev libxkbcommon-dev libdecor-0-dev \
+            libegl-dev libgl-dev libgles-dev \
+            libasound2-dev libpulse-dev \
+            libdbus-1-dev
+
+      - name: Prepare cross-compilation sysroot
+        run: |
+          SYSROOT=/usr/${{ matrix.target }}/${{ matrix.target }}/sysroot
+          PREFIX=/usr/${{ matrix.target }}
+          echo "SYSROOT=$SYSROOT" >> "$GITHUB_ENV"
+          echo "PREFIX=$PREFIX" >> "$GITHUB_ENV"
+
+          # X11/XCB headers (only copy if missing)
+          [ ! -d "$SYSROOT/usr/include/X11" ] && cp -r /usr/include/X11 $SYSROOT/usr/include/
+          [ ! -d "$SYSROOT/usr/include/xcb" ] && [ -d /usr/include/xcb ] && cp -r /usr/include/xcb $SYSROOT/usr/include/
+
+          # Wayland / xkbcommon / libdecor
+          cp /usr/include/wayland-*.h $SYSROOT/usr/include/
+          cp -r /usr/include/xkbcommon $SYSROOT/usr/include/
+          cp -r /usr/include/libdecor-0 $SYSROOT/usr/include/
+
+          # OpenGL/EGL/GLES (required for Wayland)
+          for dir in EGL GL GLES GLES2 GLES3 KHR; do
+            [ -d "/usr/include/$dir" ] && cp -r /usr/include/$dir $SYSROOT/usr/include/
+          done
+
+          # ALSA / PulseAudio
+          cp -r /usr/include/alsa $SYSROOT/usr/include/
+          cp -r /usr/include/pulse $SYSROOT/usr/include/
+
+          # D-Bus (including arch-specific dbus-arch-deps.h)
+          cp -r /usr/include/dbus-1.0 $SYSROOT/usr/include/
+          DBUS_ARCH_DIR=$(find /usr/lib -path "*/dbus-1.0/include" -type d 2>/dev/null | head -1)
+          if [ -n "$DBUS_ARCH_DIR" ]; then
+            cp "$DBUS_ARCH_DIR/dbus/dbus-arch-deps.h" $SYSROOT/usr/include/dbus-1.0/dbus/
+          fi
+
+          # Copy pkg-config .pc files to sysroot
+          mkdir -p $SYSROOT/usr/lib/pkgconfig
+          cp /usr/lib/x86_64-linux-gnu/pkgconfig/*.pc $SYSROOT/usr/lib/pkgconfig/ 2>/dev/null || true
+          cp /usr/share/pkgconfig/*.pc $SYSROOT/usr/lib/pkgconfig/ 2>/dev/null || true
+
+          # Normalize arch-specific lib paths so pkg-config works without
+          # PKG_CONFIG_SYSROOT_DIR (which double-prefixes with CMAKE_FIND_ROOT_PATH)
+          sed -i 's|/lib/[a-z0-9_]*-linux-gnu[a-z]*/|/lib/|g' $SYSROOT/usr/lib/pkgconfig/*.pc
+          sed -i 's|/lib/[a-z0-9_]*-linux-gnu[a-z]*$|/lib|g' $SYSROOT/usr/lib/pkgconfig/*.pc
+
+          # Override EGL .pc file with minimal definition
+          # (host copy has Requires.private chains that fail to resolve)
+          cat > $SYSROOT/usr/lib/pkgconfig/egl.pc <<'PCEOF'
+          prefix=/usr
+          includedir=${prefix}/include
+          libdir=${prefix}/lib
+          Name: EGL
+          Description: EGL library and headers
+          Version: 1.5
+          Cflags: -I${includedir}
+          Libs: -L${libdir} -lEGL
+          PCEOF
+
+          # Create stub .so files with SONAMEs for cmake to resolve
+          # (not linked against; SDL uses dlopen at runtime)
+          mkdir -p $SYSROOT/usr/lib
+          stub_lib() {
+            echo "" | $TARGET_CC -shared -Wl,-soname,"lib${1}.so.${2}" \
+              -nostdlib -x c - -o "$SYSROOT/usr/lib/lib${1}.so.${2}"
+            ln -sf "lib${1}.so.${2}" "$SYSROOT/usr/lib/lib${1}.so"
+          }
+          stub_lib X11 6
+          stub_lib Xext 6
+          stub_lib Xcursor 1
+          stub_lib Xi 6
+          stub_lib Xrandr 2
+          stub_lib Xfixes 3
+          stub_lib Xss 1
+          stub_lib asound 2
+          stub_lib pulse 0
+          stub_lib wayland-client 0
+          stub_lib wayland-cursor 0
+          stub_lib wayland-egl 1
+          stub_lib xkbcommon 0
+          stub_lib decor-0 0
+          stub_lib EGL 1
+
+      - name: Build SDL2
+        run: |
+          curl -sqLO https://www.libsdl.org/release/SDL2-${{ env.SDL2_VERSION }}.tar.gz
+          tar xzf SDL2-${{ env.SDL2_VERSION }}.tar.gz
+
+          # Create cmake toolchain file for cross-compilation
+          TARGET_CXX=$(echo "$TARGET_CC" | sed 's/gcc/g++/')
+          TOOLCHAIN=/tmp/toolchain.cmake
+          echo "set(CMAKE_SYSTEM_NAME Linux)" > "$TOOLCHAIN"
+          echo "set(CMAKE_C_COMPILER $TARGET_CC)" >> "$TOOLCHAIN"
+          echo "set(CMAKE_CXX_COMPILER $TARGET_CXX)" >> "$TOOLCHAIN"
+          echo "set(CMAKE_AR $TARGET_AR CACHE FILEPATH Archiver)" >> "$TOOLCHAIN"
+          echo "set(CMAKE_RANLIB $TARGET_RANLIB CACHE FILEPATH Ranlib)" >> "$TOOLCHAIN"
+          echo "set(CMAKE_FIND_ROOT_PATH $SYSROOT)" >> "$TOOLCHAIN"
+          echo "set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)" >> "$TOOLCHAIN"
+          echo "set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)" >> "$TOOLCHAIN"
+          echo "set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)" >> "$TOOLCHAIN"
+          echo "set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)" >> "$TOOLCHAIN"
+
+          export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig"
+          export PKG_CONFIG_PATH=""
+
+          cmake -S SDL2-${{ env.SDL2_VERSION }} -B sdl2-build \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_C_FLAGS="-std=gnu99 -I$SYSROOT/usr/include -I$SYSROOT/usr/include/dbus-1.0" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-ldl -lpthread" \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DHAVE_XGENERICEVENT=1 \
+            -DSDL_X11=ON -DSDL_X11_SHARED=ON \
+            -DSDL_WAYLAND=ON -DSDL_WAYLAND_SHARED=ON \
+            -DSDL_WAYLAND_LIBDECOR=ON -DSDL_WAYLAND_LIBDECOR_SHARED=ON \
+            -DWAYLAND_SCANNER=/usr/bin/wayland-scanner \
+            -DSDL_OPENGL=ON \
+            -DSDL_OPENGLES=ON \
+            -DSDL_VULKAN=OFF \
+            -DSDL_ALSA=ON -DSDL_ALSA_SHARED=ON \
+            -DSDL_PULSEAUDIO=ON -DSDL_PULSEAUDIO_SHARED=ON \
+            -DSDL_DBUS=ON
+
+          cmake --build sdl2-build -j$(nproc)
+          cmake --install sdl2-build
+
+          # Verify expected drivers are present
+          echo "=== Verifying built SDL2 ==="
+          FAIL=0
+          for pattern in libX11 libwayland-client libasound libpulse; do
+            if strings "$PREFIX/lib/libSDL2.so" | grep -q "$pattern"; then
+              echo "PASS: $pattern found"
+            else
+              echo "FAIL: $pattern NOT found"
+              FAIL=1
+            fi
+          done
+          [ $FAIL -eq 0 ] || exit 1
+
+          # Verify Wayland protocol code was compiled
+          echo "=== Verifying Wayland protocol support ==="
+          if strings "$PREFIX/lib/libSDL2.so" | grep -q "wl_compositor"; then
+            echo "PASS: Wayland protocol code present"
+          else
+            echo "FAIL: Wayland protocol code missing (wayland-scanner issue?)"
+            echo "wayland-scanner path: $(which wayland-scanner 2>&1 || echo 'NOT FOUND')"
+            echo "wayland-scanner version: $(wayland-scanner --version 2>&1 || echo 'UNKNOWN')"
+            exit 1
+          fi
+
+          rm -rf SDL2-${{ env.SDL2_VERSION }} sdl2-build
+
+      - name: Build wheel
+        run: |
+          export BINDGENFLAGS="-I$PREFIX/include/SDL2 -I$SYSROOT/usr/include"
+          export RUSTFLAGS="-L$PREFIX/lib"
+          export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
+
+          # Bundle SDL2 for X11/Wayland (other backends use system SDL2)
+          mkdir -p python/pyxel/libs
+          cp $PREFIX/lib/libSDL2-2.0.so.0 python/pyxel/libs/
+          make TARGET=${{ matrix.target }} MATURIN_OPTS="--manylinux 2_28 --auditwheel skip"
+          rm -rf python/pyxel/libs
+
+      - *upload-wheel
+
+  verify:
+    needs: [build-winmac, build-linux]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+
+          - target: aarch64-apple-darwin
+            os: macos-15
+
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04
+            skip_import: true
+
+          - target: armv7-unknown-linux-gnueabihf
+            os: ubuntu-24.04
+            skip_import: true
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install Python
+        if: ${{ !matrix.skip_import }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: pyxel-${{ matrix.target }}
+          path: dist
+
+      - name: List wheel contents
+        shell: bash
+        run: |
+          unzip -l dist/*.whl | grep -iE '\.so|\.dll|\.dylib|sdl' || echo "No shared libraries found"
+
+      - name: Verify import
+        if: ${{ !matrix.skip_import }}
+        shell: bash
+        run: |
+          pip install dist/*.whl
+          python -c "import pyxel; print(f'Pyxel {pyxel.VERSION} imported successfully')"
+
+      - name: Verify SDL2 bundle (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p /tmp/wheel-contents
+          unzip -o dist/*.whl -d /tmp/wheel-contents
+          SDL2_LIB=$(find /tmp/wheel-contents -path "*/libs/libSDL2*" -name "*.so*" 2>/dev/null | head -1)
+
+          if [ -z "$SDL2_LIB" ]; then
+            echo "FAIL: Could not find bundled SDL2 in libs/ directory"
+            exit 1
+          fi
+
+          echo "Found SDL2 library: $SDL2_LIB"
+          FAIL=0
+          for pattern in libX11.so libwayland-client.so libasound.so libpulse.so; do
+            if strings "$SDL2_LIB" | grep -q "$pattern"; then
+              echo "PASS: $pattern dlopen target found"
+            else
+              echo "FAIL: $pattern dlopen target NOT found"
+              FAIL=1
+            fi
+          done
+          [ $FAIL -eq 0 ] || exit 1

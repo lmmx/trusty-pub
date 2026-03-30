@@ -1,0 +1,136 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  build_wheels:
+    env:
+      CIBW_ARCHS: native
+      CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation"
+      CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+      CIBW_ENVIRONMENT_PASS_LINUX: CI SCCACHE_GHA_ENABLED ACTIONS_RESULTS_URL ACTIONS_RUNTIME_TOKEN ACTIONS_CACHE_SERVICE_V2 ONNXSIM_RELEASE
+      CIBW_BEFORE_BUILD: "python3 -m pip install --break-system-packages cmake ninja setuptools sccache"
+      CIBW_TEST_REQUIRES: pytest flake8 onnxruntime onnxscript==0.6.2 timm==1.0.26
+      CIBW_BEFORE_TEST: pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cpu/
+      CIBW_TEST_COMMAND: pytest -v {project}/tests && onnxsim -h
+      # Only build on Python 3 and skip 32-bit or musl builds
+      CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
+      CIBW_ENVIRONMENT: CMAKE_ARGS="-DONNX_USE_PROTOBUF_SHARED_LIBS=OFF" CMAKE_GENERATOR=Ninja CMAKE_CXX_COMPILER_LAUNCHER=sccache
+      SCCACHE_GHA_ENABLED: on
+      ACTIONS_CACHE_SERVICE_V2: on
+    name: Build wheel ${{ matrix.py_ver }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-15]
+        py_ver: [cp310, cp312, cp313]
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: mozilla-actions/sccache-action@v0.0.9
+    - name: Update version
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: echo "ONNXSIM_RELEASE=${{ github.ref_name }}" >> ${GITHUB_ENV}
+    - name: Update version
+      if: startsWith(github.ref, 'refs/tags/v') && matrix.os == 'windows-2025'
+      run: echo "ONNXSIM_RELEASE=${{ github.ref_name }}" >> $env:GITHUB_ENV
+    - uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+      if: ${{ matrix.os == 'windows-2025' }}
+    - name: Build onnxsim wheels
+      uses: pypa/cibuildwheel@v3.3.1
+      env:
+        CIBW_BUILD: "${{ matrix.py_ver }}-*"
+    - name: Check ABI3
+      run: |
+        pip install abi3audit
+        abi3audit --strict -v --report ./wheelhouse/*.whl
+      if: ${{ contains(fromJSON('["cp312", "cp313"]'), matrix.py_ver) }}
+    - uses: actions/upload-artifact@v4
+      with:
+        name: python-dist-${{ matrix.os }}-${{ matrix.py_ver }}
+        path: ./wheelhouse/*.whl
+      if: ${{ !contains(fromJSON('["cp313"]'), matrix.py_ver) }}
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    env:
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: mozilla-actions/sccache-action@v0.0.9
+
+    - name: Update version
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: echo "ONNXSIM_RELEASE=${{ github.ref_name }}" >> ${GITHUB_ENV}
+
+    - name: Build sdist
+      run: |
+        pushd scripts/onnx-simplifier
+        pipx run build --sdist
+        mv dist ../..
+        popd
+        pipx run build --sdist
+
+    - name: Install and test sdist
+      run: |
+        # It's important to leave the project directory where a 'onnxsim' subdirectory exists
+        cd dist
+        python3 -m pip install onnxruntime ninja sccache
+        python3 -m pip install onnxsim-*.tar.gz
+        python3 -c "import onnxsim; print(dir(onnxsim))"
+        python3 -m pip uninstall -y onnxsim
+        python3 -m pip install onnx_simplifier-*.tar.gz
+        python3 -c "import onnxsim; print(dir(onnxsim))"
+        python3 -m pip uninstall -y onnx-simplifier
+
+        # Disable publish of alias package
+        rm onnx_simplifier-*.tar.gz
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: python-dist-sdist
+        path: dist/*.tar.gz
+
+  upload_pypi:
+    if: (github.repository == 'onnxsim/onnxsim') && (github.event_name == 'push' || github.event_name == 'release')
+    name: Upload to PyPI
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/onnxsim
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        # unpacks python-dist artifact into dist/
+        # if `name: python-dist` is omitted, the action will create extra parent dir
+        pattern: python-dist-*
+        path: dist
+        merge-multiple: true
+    - name: Publish distribution 📦 to Test PyPI
+      if: ${{ github.ref == 'refs/heads/master' }}
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository_url: https://test.pypi.org/legacy/
+        verbose: true
+    - name: Publish distribution 📦 to PyPI
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,32 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - runner
+      - master
+
+jobs:
+  python:
+    name: "Python"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          # IMPORTANT: update the documentation file ../../docs/source/getting-started.rst when adding more python versions to the list above
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: Test with PyTest
+      run: make tests
+
+    - name: Test with Sure Runner
+      run: make run

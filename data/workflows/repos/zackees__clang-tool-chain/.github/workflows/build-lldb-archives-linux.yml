@@ -1,0 +1,227 @@
+name: Build LLDB Archives (Linux)
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_version:
+        description: 'LLVM version to build (e.g., 21.1.5)'
+        required: true
+        default: '21.1.5'
+      architectures:
+        description: 'Architectures to build (comma-separated: x86_64,arm64 or just one)'
+        required: true
+        default: 'x86_64,arm64'
+
+jobs:
+  build-lldb-linux-x86_64:
+    if: contains(github.event.inputs.architectures, 'x86_64')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours max
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyzstd
+
+      - name: Download LLVM 21.1.5 Linux x86_64
+        run: |
+          cd downloads-bins/work
+          mkdir -p lldb/linux/x86_64
+          cd lldb/linux/x86_64
+
+          echo "Downloading LLVM 21.1.5 for Linux x86_64..."
+          wget -q --show-progress \
+            https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ github.event.inputs.llvm_version }}/LLVM-${{ github.event.inputs.llvm_version }}-Linux-X64.tar.xz \
+            -O LLVM-${{ github.event.inputs.llvm_version }}-Linux-X64.tar.xz
+
+          echo "Download complete. File size:"
+          ls -lh LLVM-${{ github.event.inputs.llvm_version }}-Linux-X64.tar.xz
+        shell: bash
+
+      - name: Extract LLVM archive
+        run: |
+          cd downloads-bins/work/lldb/linux/x86_64
+
+          echo "Extracting LLVM archive (this may take 5-10 minutes)..."
+          mkdir -p extracted
+          tar -xJf LLVM-${{ github.event.inputs.llvm_version }}-Linux-X64.tar.xz -C extracted
+
+          echo "Extraction complete. Directory structure:"
+          ls -la extracted/
+        shell: bash
+
+      - name: Build LLDB archive with Python modules
+        run: |
+          cd downloads-bins/tools
+
+          # Get the extracted LLVM directory
+          LLVM_ROOT=$(find ../work/lldb/linux/x86_64/extracted -maxdepth 1 -type d -name "LLVM-*" | head -1)
+          echo "Using LLVM root: $LLVM_ROOT"
+
+          # Build LLDB archive with Python 3.10 modules
+          python create_lldb_archives.py \
+            --platform linux \
+            --arch x86_64 \
+            --source-dir "$LLVM_ROOT" \
+            --with-python \
+            --python-dir ../work/python_linux_x64
+        shell: bash
+
+      - name: Verify archive was created
+        run: |
+          echo "Checking for created archive..."
+          ls -lh downloads-bins/assets/lldb/linux/x86_64/
+
+          echo "Archive contents:"
+          file downloads-bins/assets/lldb/linux/x86_64/*.tar.zst
+
+          echo "Checksums:"
+          cat downloads-bins/assets/lldb/linux/x86_64/*.sha256
+        shell: bash
+
+      - name: Upload Linux x86_64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: lldb-linux-x86_64
+          path: |
+            downloads-bins/assets/lldb/linux/x86_64/lldb-*.tar.zst
+            downloads-bins/assets/lldb/linux/x86_64/lldb-*.tar.zst.sha256
+          retention-days: 30
+
+  build-lldb-linux-arm64:
+    if: contains(github.event.inputs.architectures, 'arm64')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours max
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyzstd
+
+      - name: Download LLVM 21.1.5 Linux ARM64
+        run: |
+          cd downloads-bins/work
+          mkdir -p lldb/linux/arm64
+          cd lldb/linux/arm64
+
+          echo "Downloading LLVM 21.1.5 for Linux ARM64..."
+          wget -q --show-progress \
+            https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ github.event.inputs.llvm_version }}/clang+llvm-${{ github.event.inputs.llvm_version }}-aarch64-linux-gnu.tar.xz \
+            -O clang+llvm-${{ github.event.inputs.llvm_version }}-aarch64-linux-gnu.tar.xz
+
+          echo "Download complete. File size:"
+          ls -lh clang+llvm-${{ github.event.inputs.llvm_version }}-aarch64-linux-gnu.tar.xz
+        shell: bash
+
+      - name: Extract LLVM archive
+        run: |
+          cd downloads-bins/work/lldb/linux/arm64
+
+          echo "Extracting LLVM archive (this may take 5-10 minutes)..."
+          mkdir -p extracted
+          tar -xJf clang+llvm-${{ github.event.inputs.llvm_version }}-aarch64-linux-gnu.tar.xz -C extracted
+
+          echo "Extraction complete. Directory structure:"
+          ls -la extracted/
+        shell: bash
+
+      - name: Build LLDB archive with Python modules
+        run: |
+          cd downloads-bins/tools
+
+          # Get the extracted LLVM directory
+          LLVM_ROOT=$(find ../work/lldb/linux/arm64/extracted -maxdepth 1 -type d -name "clang+llvm-*" | head -1)
+          echo "Using LLVM root: $LLVM_ROOT"
+
+          # Build LLDB archive with Python 3.10 modules
+          python create_lldb_archives.py \
+            --platform linux \
+            --arch arm64 \
+            --source-dir "$LLVM_ROOT" \
+            --with-python \
+            --python-dir ../work/python_linux_arm64
+        shell: bash
+
+      - name: Verify archive was created
+        run: |
+          echo "Checking for created archive..."
+          ls -lh downloads-bins/assets/lldb/linux/arm64/
+
+          echo "Archive contents:"
+          file downloads-bins/assets/lldb/linux/arm64/*.tar.zst
+
+          echo "Checksums:"
+          cat downloads-bins/assets/lldb/linux/arm64/*.sha256
+        shell: bash
+
+      - name: Upload Linux ARM64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: lldb-linux-arm64
+          path: |
+            downloads-bins/assets/lldb/linux/arm64/lldb-*.tar.zst
+            downloads-bins/assets/lldb/linux/arm64/lldb-*.tar.zst.sha256
+          retention-days: 30
+
+  summary:
+    needs: [build-lldb-linux-x86_64, build-lldb-linux-arm64]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Job summary
+        run: |
+          echo "# LLDB Archive Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**LLVM Version:** ${{ github.event.inputs.llvm_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Architectures:** ${{ github.event.inputs.architectures }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.build-lldb-linux-x86_64.result }}" == "success" ]; then
+            echo "✅ **Linux x86_64:** Built successfully" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.build-lldb-linux-x86_64.result }}" == "skipped" ]; then
+            echo "⏭️ **Linux x86_64:** Skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Linux x86_64:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.build-lldb-linux-arm64.result }}" == "success" ]; then
+            echo "✅ **Linux ARM64:** Built successfully" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.build-lldb-linux-arm64.result }}" == "skipped" ]; then
+            echo "⏭️ **Linux ARM64:** Skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Linux ARM64:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download artifacts from this workflow run" >> $GITHUB_STEP_SUMMARY
+          echo "2. Extract archives to \`downloads-bins/assets/lldb/linux/{arch}/\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Update manifests with new SHA256 checksums" >> $GITHUB_STEP_SUMMARY
+          echo "4. Commit to downloads-bins submodule" >> $GITHUB_STEP_SUMMARY
+          echo "5. Update main repository submodule reference" >> $GITHUB_STEP_SUMMARY
+          echo "6. Test with \`clang-tool-chain-lldb --version\`" >> $GITHUB_STEP_SUMMARY
+        shell: bash

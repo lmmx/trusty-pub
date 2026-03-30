@@ -1,0 +1,153 @@
+name: Build Windows
+
+on:
+  workflow_call:
+    inputs:
+      edgar_ref:
+        description: 'Arelle/EDGAR branch, tag or SHA to checkout (blank for default)'
+        required: false
+        type: string
+      python_version:
+        default: '3.14.2'
+        description: 'Python version to use'
+        required: false
+        type: string
+      xule_ref:
+        description: 'xbrlus/xule branch, tag or SHA to checkout (blank for default)'
+        required: false
+        type: string
+    outputs:
+      exe_artifact_versioned_name:
+        description: 'The file name of the installer including the version, e.g. "arelle-win-1.0.0.exe".'
+        value: ${{ jobs.build-windows.outputs.exe_artifact_versioned_name }}
+      zip_artifact_versioned_name:
+        description: 'The file name of the ZIP build including the version, e.g. "arelle-win-1.0.0.zip".'
+        value: ${{ jobs.build-windows.outputs.zip_artifact_versioned_name }}
+      exe_uploaded_artifact_name:
+        description: 'The name of the GitHub Actions artifact for the installer.'
+        value: ${{ jobs.build-windows.outputs.exe_uploaded_artifact_name }}
+      zip_uploaded_artifact_name:
+        description: 'The name of the GitHub Actions artifact for the ZIP build.'
+        value: ${{ jobs.build-windows.outputs.zip_uploaded_artifact_name }}
+  workflow_dispatch:
+    inputs:
+      edgar_ref:
+        description: 'Arelle/EDGAR branch, tag or SHA to checkout (blank for default)'
+        required: false
+        type: string
+      python_version:
+        default: '3.14.2'
+        description: 'Python version to use'
+        required: true
+        type: string
+      xule_ref:
+        description: 'xbrlus/xule branch, tag or SHA to checkout (blank for default)'
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  build-windows:
+    runs-on: windows-2025
+    outputs:
+      exe_artifact_versioned_name: ${{ steps.define-artifact-names.outputs.exe_artifact_versioned_name }}
+      zip_artifact_versioned_name: ${{ steps.define-artifact-names.outputs.zip_artifact_versioned_name }}
+      exe_uploaded_artifact_name: ${{ steps.define-artifact-names.outputs.exe_uploaded_artifact_name }}
+      zip_uploaded_artifact_name: ${{ steps.define-artifact-names.outputs.zip_uploaded_artifact_name }}
+
+    steps:
+    - name: Set Python version variables
+      run: |
+        $version = "${{ inputs.python_version }}"
+        $majorMinor = ($version -split '\.')[0..1] -join '.'
+        echo "PYTHON_MAJOR_MINOR=$majorMinor" >> $env:GITHUB_ENV
+        echo "BUILD_PATH=build\exe.win-amd64-$majorMinor" >> $env:GITHUB_ENV
+    - name: Checkout arelle
+      uses: actions/checkout@v6.0.2
+      with:
+        fetch-depth: 0
+    - name: Checkout EDGAR
+      uses: actions/checkout@v6.0.2
+      with:
+        repository: Arelle/EDGAR
+        path: arelle/plugin/EDGAR
+        ref: ${{ inputs.edgar_ref }}
+    - shell: cmd
+      run: rmdir /s /q arelle\plugin\EDGAR\.git
+    - name: Checkout xule
+      uses: actions/checkout@v6.0.2
+      with:
+        repository: xbrlus/xule
+        path: xule
+        ref: ${{ inputs.xule_ref }}
+    - name: Move plugins
+      run: |
+        mv xule\plugin\validate\* arelle\plugin\validate\
+        rmdir xule\plugin\validate
+        mv xule\plugin\* arelle\plugin\
+    - shell: cmd
+      run: rmdir /s /q xule
+    - name: Set up Python ${{ inputs.python_version }}
+      uses: actions/setup-python@v6.2.0
+      with:
+        cache: 'pip'
+        check-latest: true
+        python-version: ${{ inputs.python_version }}
+    - name: Install NSIS
+      run: |
+        choco install nsis
+        echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+    - name: Install requirements
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements-build.txt
+    - name: Capture build version
+      run: echo ("BUILD_VERSION=" + (python -W ignore distro.py --version)) >> $env:GITHUB_ENV
+    - name: Define artifact names
+      id: define-artifact-names
+      run: |
+        echo "exe_artifact_versioned_name=arelle-win-${{ env.BUILD_VERSION }}.exe" >> $env:GITHUB_OUTPUT
+        echo "zip_artifact_versioned_name=arelle-win-${{ env.BUILD_VERSION }}.zip" >> $env:GITHUB_OUTPUT
+        echo "exe_build_artifact_path=dist\arelle-win-${{ env.BUILD_VERSION }}.exe" >> $env:GITHUB_OUTPUT
+        echo "zip_build_artifact_path=dist\arelle-win-${{ env.BUILD_VERSION }}.zip" >> $env:GITHUB_OUTPUT
+        echo "exe_uploaded_artifact_name=windows installer distribution" >> $env:GITHUB_OUTPUT
+        echo "zip_uploaded_artifact_name=windows zip distribution" >> $env:GITHUB_OUTPUT
+    - name: Build exe
+      run: ./scripts/buildWinDist.bat
+    - name: Delete .git
+      shell: cmd
+      run: if exist "${{ env.BUILD_PATH }}\.git" rmdir /s /q ${{ env.BUILD_PATH }}\.git
+    - name: Make installer
+      run: makensis installWin64.nsi
+    - name: Version installer
+      run: mv dist\arelle-win-x64.exe ${{ steps.define-artifact-names.outputs.exe_build_artifact_path }}
+    - name: Zip distribution
+      working-directory: ${{ env.BUILD_PATH }}
+      run: 7z a -tzip ..\..\${{ steps.define-artifact-names.outputs.zip_build_artifact_path }} *
+    - name: Upload installer artifact
+      id: upload-installer-artifact
+      uses: actions/upload-artifact@v7.0.0
+      with:
+        name: ${{ steps.define-artifact-names.outputs.exe_uploaded_artifact_name }}
+        if-no-files-found: error
+        path: ${{ steps.define-artifact-names.outputs.exe_build_artifact_path }}
+    - name: Upload zip artifact
+      id: upload-zip-artifact
+      uses: actions/upload-artifact@v7.0.0
+      with:
+        name: ${{ steps.define-artifact-names.outputs.zip_uploaded_artifact_name }}
+        if-no-files-found: error
+        path: ${{ steps.define-artifact-names.outputs.zip_build_artifact_path }}
+    - name: "[Test] Test build"
+      run: |
+        pip install -r requirements-test.txt
+        pytest -s --disable-warnings --all-frozen-builds --download-cache --offline --arelle="${{ env.BUILD_PATH }}\arelleCmdLine.exe" tests/integration_tests/scripts/test_scripts.py
+    - name: "[Test] Upload test artifacts"
+      if: always()
+      uses: actions/upload-artifact@v7.0.0
+      with:
+        name: 'windows test logs'
+        if-no-files-found: error
+        include-hidden-files: true
+        path: '.test/**/*.logfile.xml'

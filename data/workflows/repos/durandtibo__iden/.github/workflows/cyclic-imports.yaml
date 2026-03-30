@@ -1,0 +1,51 @@
+name: Cyclic Imports
+on:
+  workflow_call:
+  workflow_dispatch:  # to trigger manually
+
+permissions:
+  contents: read
+
+jobs:
+  cyclic-import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup python environment
+        uses: durandtibo/setup-venv-uv-action@v0.0.3
+
+      - name: check iden
+        run: |
+          python -c "import iden"
+
+      - name: check iden.data
+        run: |
+          python -c "from iden import data"
+          python -c "from iden.data import generator"
+
+      - name: check iden.dataset
+        run: |
+          python -c "from iden import dataset"
+          python -c "from iden.dataset import generator"
+          python -c "from iden.dataset import loader"
+
+      - name: check iden.io
+        run: |
+          python -c "from iden import io"
+
+      - name: check iden.shard
+        run: |
+          python -c "from iden import shard"
+          python -c "from iden.shard import generator"
+          python -c "from iden.shard import loader"
+
+      - name: check iden.testing
+        run: |
+          python -c "from iden import testing"
+
+      - name: check iden.utils
+        run: |
+          python -c "from iden import utils"

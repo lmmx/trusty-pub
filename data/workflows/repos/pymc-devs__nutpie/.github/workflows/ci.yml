@@ -1,0 +1,294 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: ubuntu-22.04
+            target: x86_64
+          - runner: ubuntu-22.04-arm
+            target: aarch64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14 --zig
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          manylinux: auto
+          before-script-linux: |
+            dnf install -y clang-libs clang || sudo apt install llvm-dev libclang-dev clang
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-linux-${{ matrix.platform.target }}
+          path: dist
+      - name: pytest
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/bin/activate
+          uv pip install 'nutpie[stan]' --find-links dist --force-reinstall
+          uv pip install pytest pytest-timeout pytest-arraydiff
+          pytest -m "stan and not flow" --arraydiff
+          uv pip install 'nutpie[pymc]' --find-links dist --force-reinstall
+          uv pip install jax
+          pytest -m "pymc and not flow" --arraydiff
+          uv pip install 'nutpie[all]' --find-links dist --force-reinstall
+          pytest -m flow --arraydiff
+
+  # pyarrow doesn't currently seem to work on musllinux
+  #musllinux:
+  #  runs-on: ${{ matrix.platform.runner }}
+  #  strategy:
+  #    fail-fast: false
+  #    matrix:
+  #      platform:
+  #        - runner: ubuntu-22.04
+  #          target: x86_64
+  #        - runner: ubuntu-22.04
+  #          target: aarch64
+  #  steps:
+  #    - uses: actions/checkout@v6
+  #    - uses: actions/setup-python@v6
+  #      with:
+  #        python-version: "3.12"
+  #    - name: Install uv
+  #      uses: astral-sh/setup-uv@v7
+  #    - name: Build wheels
+  #      uses: PyO3/maturin-action@v1
+  #      with:
+  #        target: ${{ matrix.platform.target }}
+  #        args: --release --out dist --find-interpreter
+  #        sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  #        manylinux: musllinux_1_2
+  #        before-script-linux: |
+  #          dnf install -y clang-libs clang || apt install llvm-dev libclang-dev clang
+  #    - name: Upload wheels
+  #      uses: actions/upload-artifact@v7
+  #      with:
+  #        name: wheels-musllinux-${{ matrix.platform.target }}
+  #        path: dist
+  #    - name: pytest
+  #      if: ${{ startsWith(matrix.platform.target, 'x86_64') }}
+  #      uses: addnab/docker-run-action@v3
+  #      with:
+  #        image: alpine:latest
+  #        options: -v ${{ github.workspace }}:/io -w /io
+  #        run: |
+  #          set -e
+  #          apk add py3-pip py3-virtualenv curl make clang
+  #          curl -LsSf https://astral.sh/uv/install.sh | sh
+  #          source $HOME/.local/bin/env
+  #          python3 -m virtualenv .venv
+  #          source .venv/bin/activate
+  #          # No numba packages for alpine
+  #          uv pip install 'nutpie[stan]' --find-links dist --force-reinstall
+  #          uv pip install pytest
+  #          pytest
+  #    - name: pytest
+  #      if: ${{ !startsWith(matrix.platform.target, 'x86') }}
+  #      uses: uraimo/run-on-arch-action@v2
+  #      with:
+  #        arch: ${{ matrix.platform.target }}
+  #        distro: alpine_latest
+  #        githubToken: ${{ github.token }}
+  #        install: |
+  #          apk add py3-virtualenv curl make clang
+  #          curl -LsSf https://astral.sh/uv/install.sh | sh
+  #          source $HOME/.local/bin/env
+  #        run: |
+  #          set -e
+  #          python3 -m virtualenv .venv
+  #          source $HOME/.local/bin/env
+  #          source .venv/bin/activate
+  #          uv pip install pytest
+  #          # No numba packages for alpine
+  #          uv pip install 'nutpie[stan]' --find-links dist --force-reinstall
+  #          pytest
+
+  windows:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        platform:
+          - runner: windows-latest
+            target: x64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+          architecture: ${{ matrix.platform.target }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "15.0"
+          directory: ${{ runner.temp }}/llvm
+      - name: Set up TBB
+        if: matrix.os == 'windows-latest'
+        run: |
+          Add-Content $env:GITHUB_PATH "$(pwd)/stan/lib/stan_math/lib/tbb"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        env:
+          LIBCLANG_PATH: ${{ runner.temp }}/llvm/lib
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-windows-${{ matrix.platform.target }}
+          path: dist
+      - name: pytest
+        if: ${{ !startsWith(matrix.platform.target, 'aarch64') }}
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/Scripts/activate
+          uv pip install "nutpie[stan]" --find-links dist --force-reinstall
+          uv pip install pytest pytest-timeout pytest-arraydiff
+          pytest -m "stan and not flow" --arraydiff
+          uv pip install "nutpie[pymc]" --find-links dist --force-reinstall
+          uv pip install jax
+          pytest -m "pymc and not flow" --arraydiff
+          uv pip install "nutpie[all]" --find-links dist --force-reinstall
+          pytest -m flow --arraydiff
+
+  macos:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: macos-15-intel
+            target: x86_64
+          - runner: macos-14
+            target: aarch64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-macos-${{ matrix.platform.target }}
+          path: dist
+      - name: pytest
+        run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/bin/activate
+          uv pip install 'nutpie[stan]' --find-links dist --force-reinstall
+          uv pip install pytest pytest-timeout pytest-arraydiff
+          pytest -m "stan and not flow" --arraydiff
+          # Skip on x86_64 due to lack of numba support
+          if [ "${{ matrix.platform.target }}" != "x86_64" ]; then
+            uv pip install 'nutpie[pymc]' --find-links dist --force-reinstall
+            uv pip install jax
+            pytest -m "pymc and not flow" --arraydiff
+            uv pip install 'nutpie[all]' --find-links dist --force-reinstall
+            pytest -m flow --arraydiff
+          fi
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: Upload sdist
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: dist
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    needs: [linux, windows, macos, sdist]
+    environment:
+      name: pypi
+    permissions:
+      # Use to sign the release artifacts
+      id-token: write
+      # Used to upload release artifacts
+      contents: write
+      # Used to generate artifact attestation
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: "wheels-*/*"
+      - name: Publish to PyPI
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        uses: PyO3/maturin-action@v1
+        with:
+          command: upload
+          args: --non-interactive --skip-existing wheels-*/*
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            wasm-wheels/*.whl
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}

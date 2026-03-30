@@ -1,0 +1,76 @@
+name: GH Actions CI
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  schedule:
+    # 3 am Tuesdays and Fridays
+    - cron: "0 3 * * 2,5"
+
+concurrency:
+  group: "${{ github.ref }}-${{ github.head_ref }}-${{ github.workflow }}"
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  unittests:
+    if: "github.repository == 'MDAnalysis/GridDataFormats'"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.14"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: setup_micromamba
+      uses: mamba-org/setup-micromamba@v2
+      with:
+        environment-name: mda
+        create-args: >-
+          python=${{ matrix.python-version }}
+          pip
+        condarc: |
+          channels:
+            - conda-forge
+
+    - name: install package deps
+      run: |
+        micromamba install numpy scipy mrcfile pytest pytest-cov codecov
+
+    - name: check install
+      run: |
+        which python
+        which pip
+        micromamba info
+        micromamba list
+
+    - name: install package
+      run: |
+        pip install -v .
+
+    - name: run unit tests
+      run: |
+        pytest -v --cov=gridData --cov-report=xml --color=yes ./gridData/tests
+
+    - name: codecov
+      uses: codecov/codecov-action@v4
+      if: github.event_name != 'schedule'
+      with:
+        file: coverage.xml
+        fail_ci_if_error: True
+        verbose: True
+        token: ${{ secrets.CODECOV_TOKEN }}

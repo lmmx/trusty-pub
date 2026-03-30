@@ -1,0 +1,576 @@
+name: Test - Dependencies
+on:
+  workflow_call:
+  workflow_dispatch:  # to trigger manually
+
+permissions:
+  contents: read
+
+jobs:
+  coola:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        coola-version: [ 0.9.0, 0.8.7 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'coola'
+          package-version: ${{ matrix.coola-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  iden:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        iden-version: [ 0.2.0 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'iden'
+          package-version: ${{ matrix.iden-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  objectory:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        objectory-version: [ 0.2.0 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'objectory'
+          package-version: ${{ matrix.objectory-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  polars:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        polars-version: [ 1.32.0, 1.0.0 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'polars'
+          package-version: ${{ matrix.polars-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  #################################
+  #     Optional dependencies     #
+  #################################
+
+
+  clickhouse-connect:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        clickhouse-connect-version: [ 0.8.18, 0.7.19, 0.7.0 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'clickhouse-connect'
+          package-version: ${{ matrix.clickhouse-connect-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  colorlog:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.12', '3.11', '3.10', '3.9' ]
+        colorlog-version: [ 6.9.0, 6.7.0 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'colorlog'
+          package-version: ${{ matrix.colorlog-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  numpy:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        numpy-version: [
+          2.3.4,
+          2.2.6,
+          2.1.3,
+          2.0.2,
+          1.26.4,
+          1.25.2,
+          1.24.3,
+        ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'numpy'
+          package-version: ${{ matrix.numpy-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  pyarrow:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        pyarrow-version: [
+          21.0.0,
+          20.0.0,
+          19.0.1,
+          18.1.0,
+          17.0.0,
+          16.1.0,
+          15.0.2,
+          14.0.2,
+          13.0.0,
+          12.0.1,
+          11.0.0,
+          10.0.1,
+        ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'pyarrow'
+          package-version: ${{ matrix.pyarrow-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  scikit-learn:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.12', '3.11', '3.10', '3.9' ]
+        scikit-learn-version: [
+          1.7.1,
+          1.6.1,
+          1.5.2,
+          1.4.2,
+          1.3.2,
+          1.3.0,
+        ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'scikit-learn'
+          package-version: ${{ matrix.scikit-learn-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  scipy:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        scipy-version: [
+          1.16.1,
+          1.15.0,
+          1.14.1,
+          1.13.1,
+          1.12.0,
+          1.11.4,
+          1.10.1,
+        ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'scipy'
+          package-version: ${{ matrix.scipy-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov
+
+
+  tqdm:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ '3.13', '3.12', '3.11', '3.10', '3.9' ]
+        tqdm-version: [ 4.67.1, 4.66.5, 4.65.2 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Set environment variable
+        run: |
+          echo $(poetry run poetry env info --path)/bin >> $GITHUB_PATH
+
+      - name: Install packages
+        run: |
+          make install
+
+      - name: Install valid package version
+        uses: durandtibo/pip-install-package-action@v0.4.1
+        with:
+          package-name: 'tqdm'
+          package-version: ${{ matrix.tqdm-version }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show installed packages
+        run: |
+          poetry show
+          poetry show --tree
+
+      - name: Run unit tests
+        run: |
+          make unit-test-cov

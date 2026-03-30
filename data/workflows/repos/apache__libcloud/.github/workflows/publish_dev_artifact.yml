@@ -1,0 +1,66 @@
+# Workflow which builds .tar.gz and .whl development artifact on each push to
+# trunk and stores it as a Github Actions workflow artifact
+# NOTE: Those artifacts are not persisted long term and are mostly meant to be
+# used for testing and similar
+name: Publish dev release bundle
+
+on:
+  workflow_run:
+    workflows:
+      - "CI"
+    branches:
+      - trunk
+    types:
+      - completed
+
+permissions:
+  contents: read  # for actions/checkout to fetch code
+
+jobs:
+  generate_and_publish_dev_release_artifacts:
+    name: Generate and Publish Dev Release Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Use Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Install uv
+        uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867
+
+      - name: Print Environment Info
+        run: printenv | sort
+      - name: Install Dependencies
+        run: |
+          uv sync --group build --no-dev
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Create Dev Artifacts
+        run: |
+          python -m build
+          ls -la dist
+
+          # Ensure artifacts have been created
+          ls -la dist | grep .tar.gz
+          ls -la dist | grep .whl
+
+      - name: Store dev artifacts - .tar.gz
+        uses: actions/upload-artifact@v6
+        with:
+          name: libcloud-dev-tarball
+          retention-days: 60
+          compression-level: 0
+          path: |
+            dist/*.tar.gz
+
+      - name: Store dev artifacts - .whl
+        uses: actions/upload-artifact@v6
+        with:
+          name: libcloud-dev-wheel
+          retention-days: 60
+          compression-level: 0
+          path: |
+            dist/*.whl

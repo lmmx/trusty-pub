@@ -1,0 +1,77 @@
+name: "Test"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+env:
+  MPLBACKEND: "Agg"
+
+jobs:
+  released:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is arm
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+
+    name: OS ${{ matrix.os }} - Python ${{ matrix.python-version }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project dependencies
+        uses: ./.github/setup
+        with:
+          os: ${{ matrix.os }}
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run mypy on 'tests' (using the local stubs) and on the local stubs
+        run: poetry run poe mypy
+
+      - name: Run ty on 'pandas-stubs' (using the local stubs) and on the local stubs
+        run: poetry run poe ty
+
+      - name: Run pyrefly on the local stubs
+        run: poetry run poe pyrefly
+
+      - name: Run pyright on 'tests' (using the local stubs) and on the local stubs
+        run: poetry run poe pyright
+
+      - name: Run pytest
+        run: poetry run poe pytest
+
+      - name: Install pandas-stubs and run tests on the installed stubs
+        run: poetry run poe test_dist
+
+  precommit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pre-commit/action@v3.0.1
+
+  type_completeness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project dependencies
+        uses: ./.github/setup
+        with:
+          # This is quite slow (2-3 minutes) so we don't run it for all OSs / Python versions.
+          os: ubuntu-latest
+          python-version: 3.14
+
+      - name: Verify type completeness using Pyright
+        run: poetry run poe type_completeness

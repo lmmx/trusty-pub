@@ -1,0 +1,36 @@
+name: Publish Production Release
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    timeout-minutes: 45
+    environment: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0
+
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pipx install hatch==1.16.5
+
+    - name: Build
+      run: |
+        sed -i 's/!\[CrowdStrike FalconPy\](https:\/\/raw.githubusercontent.com\/CrowdStrike\/falconpy\/main\/docs\/asset\/cs-logo-red.png#gh-dark-mode-only)//g' README.md
+        hatch build
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0

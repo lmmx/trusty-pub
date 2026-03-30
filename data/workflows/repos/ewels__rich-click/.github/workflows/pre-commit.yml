@@ -1,0 +1,21 @@
+name: Lint code
+on:
+  push:
+  pull_request:
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: 3
+          activate-environment: true
+      - name: Install dependencies
+        run:  |
+          uv pip install ".[dev]"
+          uv pip install "mypy<1.16"  # later versions don't work with python 3.8
+      - name: Run pre-commit
+        run: pre-commit run -a

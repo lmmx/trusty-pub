@@ -1,0 +1,38 @@
+name: Py3 Test
+
+on:
+  pull_request: {}
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+        netbox: ["4.2", "4.3", "4.4"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dev requirements
+        run: pip install -r requirements-dev.txt .
+
+      - name: Free up Docker resources
+        run: |
+          docker system prune -af --volumes
+          docker network prune -f
+
+      - name: Run Linter
+        run: ruff check pynetbox/ tests/
+          
+      - name: Run Tests
+        run: pytest --netbox-versions=${{ matrix.netbox }}

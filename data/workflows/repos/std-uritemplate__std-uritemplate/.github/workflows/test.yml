@@ -1,0 +1,124 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths-ignore:
+      - '**.md'
+
+jobs:
+  test:
+    name: Test
+    # TODO: Waiting for Swift to update the tooling for ubuntu 24
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - java
+          - python
+          - typescript
+          - typescript-mjs
+          - go
+          - ruby
+          - csharp
+          - php
+          - swift
+          - dart
+        php-version:
+          - '7.4'
+          - '8.2'
+        exclude:
+          - php-version: '8.2'
+        include:
+          - language: php
+            php-version: '7.4'
+          - language: php
+            php-version: '8.2'
+    steps:
+      - name: Common - Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: 'true'
+      # Language specific setup
+
+      # Java setup
+      - name: Java - Set up JDK
+        if: matrix.language == 'java'
+        uses: actions/setup-java@v5
+        with:
+          java-version: "8"
+          distribution: "temurin"
+      - name: Java - Install jbang
+        if: matrix.language == 'java'
+        uses: jbangdev/setup-jbang@v0.1.1
+
+      # Python setup
+      - name: Python - Install Poetry
+        if: matrix.language == 'python'
+        uses: snok/install-poetry@v1
+      - name: Python - Add Poetry to PATH
+        if: matrix.language == 'python'
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      # Typescript setup
+      - name: Typescript - Setup Node
+        uses: actions/setup-node@v6
+        if: matrix.language == 'typescript'
+        with:
+          node-version: 22
+
+      # Typescript mjs setup
+      - name: Typescript mjs - Setup Node
+        uses: actions/setup-node@v6
+        if: matrix.language == 'typescript-mjs'
+        with:
+          node-version: 22
+
+      # Go setup
+      - name: Go - Setup Go
+        uses: actions/setup-go@v6
+        if: matrix.language == 'go'
+        with:
+          go-version: '1.20'
+
+      # C# setup
+      - name: C# - Setup .NET
+        uses: actions/setup-dotnet@v5
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: 9
+
+      # Ruby setup
+      - name: Ruby - Setup Ruby
+        uses: ruby/setup-ruby@v1
+        if: matrix.language == 'ruby'
+        with:
+          ruby-version: '3.0'
+
+      # PHP setup
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        if: matrix.language == 'php'
+        with:
+          php-version: ${{ matrix.php-version }}
+
+      # Swift setup
+      # WORKAROUND for: https://github.com/swift-actions/setup-swift/issues/591
+      # - uses: swift-actions/setup-swift@v2
+      - uses: redsun82/setup-swift@b2b6f77ab14f6a9b136b520dc53ec8eca27d2b99
+        if: matrix.language == 'swift'
+        with:
+          swift-version: "5.8"
+
+      # Dart setup
+      - uses: dart-lang/setup-dart@v1
+        if: matrix.language == 'dart'
+        with:
+          sdk: "stable"
+
+      # Common testing
+      - name: Common - Run Tests for ${{ matrix.language }}
+        run: ./tests/test.sh ${{ matrix.language }}

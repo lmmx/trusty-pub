@@ -1,0 +1,294 @@
+name: 18. Global Market Barometer
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Run Details'
+        required: false
+        default: 'PKScreener - Barometer'
+      targetPythonVersion:
+        description: 'Target Python version: 3.9 , 3.10, 3.11 ?'
+        required: false
+        type: string
+        default: '3.11'
+      runson:
+        description: 'Runner OS. e.g: ubuntu-latest, windows-latest or macos-latest'
+        required: false
+        default: 'macos-latest'
+  schedule:
+  - cron: '30 1 * * 0-5'
+
+jobs:
+
+  NIFTY_Barometer_Alert:
+
+    runs-on: ${{ inputs.runson || 'macos-latest' }}
+    
+    # Add concurrency to prevent multiple runs overlapping
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.runson }}
+      cancel-in-progress: false
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+    
+    - name: setup git config
+      run: |
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+
+    - name: Set up Python 
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.targetPythonVersion || 3.12 }}
+        cache: 'pip'  # Built-in pip caching
+        cache-dependency-path: |
+          **/requirements*.txt
+          setup.py
+
+    # Platform-specific Python cache
+    - name: Cache Python packages (Linux/Mac)
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    # Virtual environment cache for faster activation
+    - name: Cache virtual environment
+      id: cache-venv
+      uses: actions/cache@v4
+      with:
+        path: |
+          .venv
+          venv
+        key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements*.txt', 'setup.py') }}-${{ inputs.targetPythonVersion }}
+        restore-keys: |
+          ${{ runner.os }}-venv-
+
+    # Create and cache virtual environment if not exists
+    - name: Create virtual environment (if not cached)
+      if: steps.cache-venv.outputs.cache-hit != 'true'
+      run: |
+        python3 -m venv .venv
+        echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+        
+    - name: Activate virtual environment
+      run: |
+        if [ -d ".venv" ]; then
+          echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+          echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> $GITHUB_ENV
+        elif [ -d "venv" ]; then
+          echo "${{ github.workspace }}/venv/bin" >> $GITHUB_PATH
+          echo "VIRTUAL_ENV=${{ github.workspace }}/venv" >> $GITHUB_ENV
+        fi
+
+    - name: Cache TA-Lib (Linux)
+      if: startsWith(runner.os, 'Linux')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/talib
+          /usr/lib/libta_lib.so*
+          /usr/include/ta-lib
+        key: ${{ runner.os }}-talib-${{ hashFiles('.github/dependencies/ta-lib_*.deb') }}
+        restore-keys: |
+          ${{ runner.os }}-talib-
+
+    - name: Install TA-Lib (Linux) - if not cached
+      if: startsWith(runner.os, 'Linux') && steps.cache-talib.outputs.cache-hit != 'true'
+      run: |
+        cd .github/dependencies/
+        sudo dpkg -i ta-lib_0.6.4_amd64.deb
+        cd /home/runner/work/PKScreener/PKScreener/
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .
+
+    - name: Environment setup to get latest EXE
+      shell: bash
+      id: releaseurlsetter
+      run: |
+        pip install requests
+        python3 .github/workflows/githubutilities.py -d
+
+    # Binary caching with version-specific keys
+    - name: Cache PKScreener Binary (Linux)
+      if: startsWith(runner.os, 'Linux')
+      uses: actions/cache@v4
+      id: binary-cache-linux
+      with:
+        path: /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin
+        key: ${{ runner.os }}-pkscreener-bin-${{ steps.releaseurlsetter.outputs.VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-pkscreener-bin-
+
+    - name: Cache PKScreener Binary (Mac)
+      if: startsWith(runner.os, 'MacOS')
+      uses: actions/cache@v4
+      id: binary-cache-mac
+      with:
+        path: /Users/runner/work/PKScreener/PKScreener/pkscreenercli_x64.run
+        key: ${{ runner.os }}-pkscreener-bin-${{ steps.releaseurlsetter.outputs.VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-pkscreener-bin-
+
+    - name: Download latest executable on Linux
+      if: startsWith(runner.os, 'Linux') && steps.binary-cache-linux.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        exe_path: ${{ steps.releaseurlsetter.outputs.DOWNLOAD_URL }}
+      run: |
+        curl -o /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin -JL $exe_path
+        chmod +x /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin
+        
+    - name: Download latest executable on Mac
+      if: startsWith(runner.os, 'MacOS') && steps.binary-cache-mac.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        exe_path: ${{ steps.releaseurlsetter.outputs.DOWNLOAD_URL }}
+      run: |
+        curl -o /Users/runner/work/PKScreener/PKScreener/pkscreenercli_x64.run -JL $exe_path
+        chmod +x /Users/runner/work/PKScreener/PKScreener/pkscreenercli_x64.run
+
+    - name: Validate Linux binary
+      if: startsWith(runner.os, 'Linux')
+      run: |
+        BINARY_PATH="/home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin"
+        if ! file "$BINARY_PATH" | grep -q "ELF 64-bit"; then
+          echo "ERROR: Invalid Linux binary"
+          file "$BINARY_PATH"
+          exit 1
+        fi
+        echo "✓ Linux binary validated"
+
+    - name: Validate Mac binary
+      if: startsWith(runner.os, 'MacOS')
+      run: |
+        BINARY_PATH="/Users/runner/work/PKScreener/PKScreener/pkscreenercli_x64.run"
+        if ! file "$BINARY_PATH" | grep -q "Mach-O 64-bit"; then
+          echo "ERROR: Invalid Mac binary"
+          file "$BINARY_PATH"
+          exit 1
+        fi
+        echo "✓ Mac binary validated"
+          
+    - name: Install Chromium Dependencies (Linux)
+      if: startsWith(runner.os, 'Linux')
+      continue-on-error: true
+      run: |
+        # Cache Chrome installation
+        sudo apt update
+        sudo apt install -y chromium-browser chromium-chromedriver
+        pip install pyppeteer
+        pyppeteer-install
+
+    - name: Configure env.dev file
+      shell: bash
+      env:
+          CHAT_ID_PROD : ${{secrets.CHAT_ID_PROD}}
+          CHAT_ID_DEV : ${{secrets.CHAT_ID_DEV}}
+          TOKEN_DEV : ${{secrets.TOKEN_DEV}}
+          CHAT_IDADMIN_DEV : ${{secrets.CHAT_IDADMIN_DEV}}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TOKEN: ${{ secrets.TOKEN }}
+          chat_idADMIN: ${{ secrets.chat_idADMIN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_PAT: ${{ secrets.CI_PAT }}
+          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+          TDU: ${{ secrets.TDU }}
+          TAT: ${{ secrets.TAT }}
+          MCU: ${{ secrets.MCU }}
+          MCAP: ${{ secrets.MCAP }}
+          MCL: ${{ secrets.MCL }}
+          MS: ${{ secrets.MS }}
+          PKG: ${{ secrets.PKG }}
+          REPO_URL: ${{ secrets.REPO_URL }}
+          KTOKEN: ${{ secrets.KTOKEN }}
+          KUSER: ${{ secrets.KUSER }}
+          KPWD: ${{ secrets.KPWD }}
+          KTOTP: ${{ secrets.KTOTP }}
+          DB_TYPE: "local"
+          DB_TICKS: ${{ secrets.DB_TICKS }}
+          TBTOKEN: ${{ secrets.TBTOKEN }}
+          BBTOKEN: ${{ secrets.BBTOKEN }}
+          Tel_API_ID: ${{ secrets.Tel_API_ID }}
+          Tel_API_Hash: ${{ secrets.Tel_API_Hash }}
+          Tel_Phone_Number: ${{ secrets.Tel_Phone_Number }}
+          TEL_SESSION_DATA: ${{ secrets.TEL_SESSION_DATA }}
+          SUBSCRIPTION_ENABLED: ${{ secrets.SUBSCRIPTION_ENABLED }}
+      run: |
+          # Quote all values to handle spaces properly
+          cat > .env.dev << EOF
+          CHAT_ID_PROD='$CHAT_ID_PROD'
+          CHAT_ID_DEV='$CHAT_ID_DEV'
+          TOKEN_DEV='$TOKEN_DEV'
+          CHAT_IDADMIN_DEV='$CHAT_IDADMIN_DEV'
+          CHAT_ID='$CHAT_ID'
+          TOKEN='$TOKEN'
+          chat_idADMIN='$chat_idADMIN'
+          GITHUB_TOKEN='$GITHUB_TOKEN'
+          CI_PAT='$CI_PAT'
+          TURSO_TOKEN='$TURSO_TOKEN'
+          TDU='$TDU'
+          TAT='$TAT'
+          MCU='$MCU'
+          MCAP='$MCAP'
+          MCL='$MCL'
+          MS='$MS'
+          PKG='$PKG'
+          REPO_URL='$REPO_URL'
+          KTOKEN='$KTOKEN'
+          KUSER='$KUSER'
+          KPWD='$KPWD'
+          KTOTP='$KTOTP'
+          DB_TYPE='$DB_TYPE'
+          DB_TICKS='$DB_TICKS'
+          TBTOKEN='$TBTOKEN'
+          BBTOKEN='$BBTOKEN'
+          Tel_API_ID='$Tel_API_ID'
+          Tel_API_Hash='$Tel_API_Hash'
+          Tel_Phone_Number='$Tel_Phone_Number'
+          TEL_SESSION_DATA='$TEL_SESSION_DATA'
+          SUBSCRIPTION_ENABLED='$SUBSCRIPTION_ENABLED'
+          EOF
+          
+          echo "Created .env.dev file with secrets (values quoted)"
+          cp .env.dev /home/runner/work/PKScreener/PKScreener/pkscreener/.env.dev || true
+
+    - name: Barometer alert on Linux
+      if: startsWith(runner.os, 'Linux')
+      shell: bash
+      env:
+        RUNNER : "GitHub_Actions"
+        ALERT_TRIGGER : "Y"
+      run: |
+        source .env.dev
+        /home/runner/work/PKScreener/PKScreener/pkscreenercli_x64.bin -a Y -o X:12 -e --barometer
+
+    - name: Barometer alert on Mac
+      if: startsWith(runner.os, 'MacOS')
+      shell: bash
+      timeout-minutes: 5
+      env:
+        RUNNER : "GitHub_Actions"
+        ALERT_TRIGGER : "Y"
+        PUPPETEER_EXECUTABLE_PATH : "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      run: |
+        source .env.dev
+        /Users/runner/work/PKScreener/PKScreener/pkscreenercli_x64.run -a Y -o X:12 -e --barometer
+
+    # Optional: Clean up old workflow runs
+    - name: Clean up old workflow runs
+      if: github.event_name != 'workflow_dispatch'
+      shell: bash
+      run: |
+        gh run list --limit 100 --json databaseId,status,conclusion --jq '.[] | select(.status=="completed") | .databaseId' | xargs -IID gh api "repos/${{ github.repository }}/actions/runs/ID" -X DELETE 2>/dev/null || true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,51 @@
+name: release-dev
+
+on:
+  push:
+    tags:
+      - datadog_checks_dev-*
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+
+    environment: pypi-datadog-checks-dev
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: '3.13'
+
+    - name: Upgrade Python packaging tools
+      run: pip install --disable-pip-version-check --upgrade pip setuptools wheel
+
+    - name: Install ddev
+      run: |
+        pip install -e ./datadog_checks_dev[cli]
+        pip install -e ./ddev
+
+    - name: Configure ddev
+      run: |
+        ddev config set upgrade_check false
+        ddev config set repos.core .
+        ddev config set repo core
+
+    - name: Build dev package
+      run: ddev release build datadog_checks_dev
+
+    # Publish wheels to PyPI using Trusted Publishers.
+    # https://docs.pypi.org/trusted-publishers/using-a-publisher/
+    # This job needs to run from within the pypi-datadog-checks-dev environment. PyPi
+    # validates the workflow file name, environment and repository the request is
+    # comming from to provide the valid JWT token.
+    - name: Release dev package to PyPI
+      uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+      with:
+        skip-existing: true
+        packages-dir: datadog_checks_dev/dist

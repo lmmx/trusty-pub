@@ -1,0 +1,64 @@
+name: Tests (uv)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress jobs when pushing to the same branch.
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.11"
+            resolution: "lowest-direct"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: ubuntu-latest
+            python-version: "3.13"
+            resolution: "lowest-direct"
+          - os: macos-latest
+            python-version: "3.13"
+            continue-on-error: true
+          - os: windows-latest
+            python-version: "3.13"
+            continue-on-error: true
+
+    name: Python ${{ matrix.python-version }} • ${{ matrix.os }}${{ matrix.resolution && format(' • {0}', matrix.resolution) || '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the project
+        shell: bash -el {0}
+        run: uv sync --extra extras ${{ matrix.resolution && format('--resolution {0}', matrix.resolution) || '' }}
+
+      - name: Run tests
+        shell: bash -el {0}
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: uv run pytest

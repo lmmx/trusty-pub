@@ -1,0 +1,148 @@
+name: Build yazi
+
+on:
+  - workflow_dispatch
+
+jobs:
+  sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - run: git submodule update --init -- yazi/yazi
+      - uses: astral-sh/setup-uv@v7
+
+      - run: uv build --sdist
+        working-directory: ./yazi
+
+      - run: ls yazi/dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: yazi/dist
+
+  build:
+    name: build-${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            test: true
+            post-command: uvx wheel tags --remove --platform-tag manylinux_2_17_x86_64.manylinux2014_x86_64.musllinux_1_2_x86_64 dist/*.whl
+
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            test: false
+            post-command: uvx wheel tags --remove --platform-tag manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_2_aarch64 dist/*.whl
+
+          - os: ubuntu-latest
+            target: aarch64-linux-android
+            test: false
+            # https://github.com/cross-rs/cross/blob/main/docker/Dockerfile.aarch64-linux-android
+            post-command: uvx wheel tags --remove --platform-tag android_28_arm64_v8a dist/*.whl
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            test: false
+            post-command: uvx wheel tags --remove --platform-tag macosx_10_12_x86_64 dist/*.whl
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            test: true
+            post-command: uvx wheel tags --remove --platform-tag macosx_11_0_arm64 dist/*.whl
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            test: true
+            post-command: uvx wheel tags --remove --platform-tag win_amd64 dist/*.whl
+
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            test: true
+            post-command: uvx wheel tags --remove --platform-tag win_arm64 dist/*.whl
+
+    env:
+      CROSS_CONTAINER_OPTS: "-e VERGEN_GIT_SHA=pypi"
+      VERGEN_GIT_SHA: pypi
+
+    steps:
+      - uses: actions/checkout@v6
+      - run: git submodule update --init -- yazi/yazi
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: ${{ startsWith(matrix.os, 'ubuntu') }}
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+
+          echo "CARGO=cross" >> $GITHUB_ENV
+
+      - name: Build wheel ${{ matrix.target }}
+        run: |
+          uv build --wheel -C--cargo-target=${{ matrix.target }}
+        working-directory: ./yazi
+
+      - name: Post Processing wheel
+        shell: bash
+        run: |
+          ${{ matrix.post-command }}
+        working-directory: ./yazi
+
+      - name: Test wheel
+        if: ${{ matrix.test }}
+        shell: bash
+        run: |
+          pip install --no-index -f yazi/dist/ yazi-bin
+          yazi --version
+          ya --version
+
+          ya pkg list
+          yazi --debug
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.target }}-${{ github.run_attempt }}
+          path: yazi/dist
+
+      - run: ls yazi/dist
+
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    needs: [sdist, build]
+    environment: publish
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+          path: dist
+
+      - uses: actions/attest@v4
+        with:
+          subject-path: dist/*
+
+      - run: ls dist
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true

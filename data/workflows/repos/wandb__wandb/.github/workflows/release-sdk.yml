@@ -1,0 +1,487 @@
+name: Build and Release W&B SDK
+run-name: "SDK ${{ inputs.version }} — ${{ inputs.mode }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: "Version to assign to the release"
+        required: true
+      mode:
+        type: choice
+        description: >-
+          Release mode:
+          1) test-release — TestPyPI only.
+          2) pre-release — PyPI + TestPyPI, no notes.
+          3) release — PyPI + TestPyPI, notes + PR + Slack.
+        required: true
+        default: test-release
+        options:
+          - test-release
+          - pre-release
+          - release
+
+jobs:
+  prepare-release:
+    name: Prepare release (${{ inputs.version }})
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      # Use the GHA bot credentials: https://api.github.com/users/github-actions%5Bbot%5D
+      - name: Setup git config
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git remote set-url origin https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      - name: Install Python Dependencies and uv
+        run: |
+          pip install bump2version click
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Create and Switch to Release Branch
+        run: |
+          git switch -c release-${{ github.event.inputs.version }}
+
+      - name: Bump Version
+        run: |
+          bump2version patch --no-tag --no-commit --config-file .bumpversion.cfg --new-version ${{ github.event.inputs.version }}
+
+      - name: Update CHANGELOG.md
+        if: ${{ inputs.mode == 'release' }}
+        run: |
+          python tools/changelog.py \
+            --version ${{ github.event.inputs.version }}
+
+      - name: Lint changes
+        run: |
+          uv tool install prek
+          prek install
+          # if there are linting errors, this will fix them and proceed
+          sh -c 'prek run trailing-whitespace --all-files --hook-stage pre-push' || exit 0
+
+      - name: Commit and push changes
+        run: |
+          git commit -am "Bump version and update CHANGELOG for release ${{ github.event.inputs.version }}"
+          git push --no-verify -f origin release-${{ github.event.inputs.version }}
+
+  build-linux-arm64-wheels:
+    name: Build wheels for Linux arm64
+    needs: prepare-release
+    runs-on: linux-arm64-ubuntu24.04-4core # custom runner in wandb org
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: release-${{ github.event.inputs.version }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        with:
+          package-dir: .
+          output-dir: dist
+        env:
+          CIBW_ARCHS_LINUX: aarch64
+          CIBW_BEFORE_ALL_LINUX: >
+            export DOWNLOAD_GOVERSION=$( grep '^go' core/go.mod | cut -d' ' -f2 ) &&
+            curl -L https://golang.org/dl/go$DOWNLOAD_GOVERSION.linux-arm64.tar.gz > go.tar.gz &&
+            tar -C /usr/local/ -xzf go.tar.gz &&
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          CIBW_ENVIRONMENT_LINUX: PATH=$PATH:/usr/local/go/bin:/root/.cargo/bin
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wandb-sdk-distribution-linux-arm64
+          path: ./dist
+
+  build-platform-wheels:
+    name: Build wheels on ${{ matrix.os }}
+    needs: prepare-release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - windows-2022
+          - windows-11-arm
+          - macos-14
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: release-${{ github.event.inputs.version }}
+
+      ##################################################
+      # Install Go
+      ##################################################
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      ##################################################
+      # All platforms: create wheels
+      ##################################################
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        with:
+          package-dir: .
+          output-dir: dist
+        env:
+          CIBW_ARCHS_LINUX: x86_64 # aarch64 is handled by build-linux-arm64-wheels
+          CIBW_ARCHS_MACOS: x86_64 arm64 # arm64 == aarch64
+
+          # Work around https://github.com/matthew-brett/delocate/issues/204
+          # by adding `--ignore-missing-dependencies` to cibuildwheel's default
+          # repair wheel command.
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
+            delocate-listdeps --all --depending {wheel} &&
+            delocate-wheel \
+              --require-archs {delocate_archs} \
+              --ignore-missing-dependencies \
+              -w {dest_dir} \
+              -v {wheel}
+          CIBW_ENVIRONMENT_MACOS: >
+            MACOSX_DEPLOYMENT_TARGET=12
+
+          # Install Go and Rust for Linux amd64
+          CIBW_BEFORE_ALL_LINUX: >
+            export DOWNLOAD_GOVERSION=$( grep '^go' core/go.mod | cut -d' ' -f2 ) &&
+            curl -L https://golang.org/dl/go$DOWNLOAD_GOVERSION.linux-amd64.tar.gz > go.tar.gz &&
+            tar -C /usr/local/ -xzf go.tar.gz &&
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          CIBW_ENVIRONMENT_LINUX: PATH=$PATH:/usr/local/go/bin:/root/.cargo/bin
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wandb-sdk-distribution-${{ matrix.os }}
+          path: ./dist
+
+  build-sdist:
+    name: Create source distribution
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: release-${{ github.event.inputs.version }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install Hatch
+        run: pip install hatch~=1.16
+
+      - name: Create sdist
+        run: hatch build -t sdist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wandb-sdk-distribution-sdist
+          path: ./dist
+
+  test-pypi-publish:
+    name: Publish to TestPyPI
+    needs: [build-platform-wheels, build-linux-arm64-wheels, build-sdist]
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://test.pypi.org/p/wandb
+    permissions:
+      id-token: write # trusted publishing
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Download distribution
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+          pattern: wandb-sdk-distribution-*
+
+      - name: Merge distributions
+        run: |
+          mkdir -p dist/
+          cp -r artifacts/*/* dist/
+          ls -la dist/
+
+      - name: List distribution
+        run: ls dist/
+
+      - name: Publish distribution to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          verify-metadata: true
+          verbose: true
+          skip-existing: true
+
+      # Unfortunately, there's no reliable way to do this.
+      #
+      # Looping until a `pip install --dry-run` succeeds isn't sufficient
+      # because you can still see failures after a success; TestPyPI doesn't
+      # seem to guarantee consistency.
+      - name: Wait for package to appear in TestPyPI
+        shell: bash
+        run: sleep 60
+
+  verify-test-pypi:
+    needs: test-pypi-publish
+    name: Smoke-test on ${{ matrix.os }}
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - windows-2022
+          - macos-14
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install wandb from TestPyPI
+        shell: bash
+        run: |
+          python -m pip install \
+            --extra-index-url https://test.pypi.org/simple/ \
+            wandb==${{ github.event.inputs.version }}
+
+      - name: Smoke-test wandb
+        shell: bash
+        run: |
+          WANDB_MODE=offline \
+          python -c "import wandb; run = wandb.init(); run.finish()"
+
+  verify-test-pypi-sdist:
+    needs: test-pypi-publish
+    name: Smoke-test sdist
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Checkout only go files for dependency installation
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            core/go.mod
+            core/go.sum
+
+      - name: Set up latest Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: Install wandb from TestPyPI with --no-binary
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          python -m pip install \
+            --no-binary wandb \
+            --extra-index-url https://test.pypi.org/simple/ \
+            wandb==${{ github.event.inputs.version }}
+
+      - name: Smoke-test wandb
+        shell: bash
+        run: |
+          WANDB_MODE=offline \
+          python -c "import wandb; run = wandb.init(); run.finish()"
+
+  pypi-publish:
+    if: ${{ inputs.mode != 'test-release' }}
+    name: Publish to PyPI
+    needs: [verify-test-pypi, verify-test-pypi-sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://pypi.org/p/wandb
+    steps:
+      - name: Download distribution
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+          pattern: wandb-sdk-distribution-*
+
+      - name: Merge distributions
+        run: |
+          mkdir -p dist/
+          cp -r artifacts/*/* dist/
+          ls -la dist/
+
+      - name: List distribution
+        run: ls dist/
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
+
+  create-dev-branch:
+    name: Create dev branch and PR
+    needs: pypi-publish
+    runs-on: ubuntu-latest
+    if: ${{ inputs.mode == 'release' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: release-${{ github.event.inputs.version }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install bump2version
+        run: pip install bump2version
+
+      - name: Setup git config
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Create and switch to dev branch
+        run: |
+          IFS='.' read -r major minor patch <<< "${{ github.event.inputs.version }}"
+          new_version="${major}.${minor}.$((patch + 1)).dev1"
+          git checkout -b bump-${new_version}
+          bump2version patch --no-tag --no-commit --config-file .bumpversion.cfg --new-version ${new_version}
+          git commit -am "chore(sdk): bump version to ${new_version}"
+          git push -u origin bump-${new_version}
+
+      - name: Create Pull Request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IFS='.' read -r major minor patch <<< "${{ github.event.inputs.version }}"
+          new_version="${major}.${minor}.$((patch + 1)).dev1"
+          gh pr create --base main --head bump-${new_version} --title "chore(sdk): bump version to ${new_version}" --body "This PR bumps the version to the next dev version after the release of ${{ github.event.inputs.version }}."
+
+  publish-release-notes:
+    name: Publish Release Notes
+    needs: pypi-publish
+    runs-on: ubuntu-latest
+    if: ${{ inputs.mode == 'release' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: release-${{ github.event.inputs.version }}
+      - name: Create Source Archives
+        run: |
+          git archive --format=zip --output=wandb-${{ github.event.inputs.version }}.zip HEAD
+          git archive --format=tar.gz --output=wandb-${{ github.event.inputs.version }}.tar.gz HEAD
+      - name: Extract release notes and set output
+        id: release_notes
+        run: |
+          echo "## What's Changed" > release_notes.md
+          awk '/## \[${{ github.event.inputs.version }}\]/{flag=1;next}/## \[/{flag=0}flag' CHANGELOG.md >> release_notes.md
+      - name: Create Release Notes
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ github.event.inputs.version }}
+          tag_name: v${{ github.event.inputs.version }}
+          target_commitish: release-${{ github.event.inputs.version }}
+          body_path: release_notes.md
+          files: |
+            wandb-${{ github.event.inputs.version }}.zip
+            wandb-${{ github.event.inputs.version }}.tar.gz
+          draft: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  slack:
+    if: ${{ inputs.mode == 'release' }}
+    name: Post to Slack
+    needs: publish-release-notes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install from PyPI and get version
+        id: get_version
+        run: |
+          sleep 60
+          python -m pip install --upgrade pip
+          python -m pip install wandb==${{ github.event.inputs.version }}
+      - name: Post to Slack
+        id: slack
+        uses: slackapi/slack-github-action@v3.0.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            channel: ${{ secrets.SLACK_SDK_RELEASE_CHANNEL_ID }}
+            text: |
+              W&B SDK ${{ github.event.inputs.version }} released :tada::
+              - PyPI: https://pypi.org/project/wandb/${{ github.event.inputs.version }}/
+              - Release notes: https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}
+
+  # This job exists so that there's some traceability between SDK releases and
+  # potential issues in wandb/core. core contains references to this released
+  # artifact, so we want to update those as close to the release as possible.
+  # In the event of a failure building wandb/core, the actor that ran this
+  # release will be notified.
+  notify-core:
+    if: ${{ inputs.mode != 'test-release' }}
+    name: notify wandb/core of release
+    runs-on: ubuntu-latest
+    needs: [pypi-publish]
+
+    steps:
+      - name: Create GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WANDBOT_3000_APP_ID }}
+          private-key: ${{ secrets.WANDBOT_3000_PRIVATE_KEY }}
+          owner: wandb
+          repositories: |
+            core
+
+      - name: Repository dispatch
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: "${{ steps.app-token.outputs.token }}"
+          repository: wandb/core
+          event-type: wandb-sdk-released
+          client-payload: |-
+            {
+              "version": "${{ inputs.version }}",
+              "actor": "${{ github.actor }}",
+              "actor_id": "${{ github.actor_id }}",
+              "repository": "${{ github.repository }}",
+              "workflow_ref": "${{ github.workflow_ref }}",
+              "run_id": "${{ github.run_id }}",
+              "mode": "${{ inputs.mode }}"
+            }

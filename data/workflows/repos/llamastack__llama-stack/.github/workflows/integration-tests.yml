@@ -1,0 +1,202 @@
+name: Integration Tests (Replay)
+
+run-name: Run the integration test suites from tests/integration in replay mode
+
+on:
+  push:
+    branches:
+      - main
+      - 'release-[0-9]+.[0-9]+.x'
+  pull_request:
+    branches:
+      - main
+      - 'release-[0-9]+.[0-9]+.x'
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'src/llama_stack/**'
+      - '!src/llama_stack_ui/**'
+      - 'tests/**'
+      - 'uv.lock'
+      - 'pyproject.toml'
+      - '.github/workflows/integration-tests.yml' # This workflow
+      - '.github/actions/setup-ollama/action.yml'
+      - '.github/actions/setup-test-environment/action.yml'
+      - '.github/actions/run-and-record-tests/action.yml'
+      - 'scripts/integration-tests.sh'
+      - 'scripts/generate_ci_matrix.py'
+  merge_group:
+    branches:
+      - main
+      - 'release-[0-9]+.[0-9]+.x'
+  schedule:
+    # If changing the cron schedule, update the provider in the test-matrix job
+    - cron: '0 0 * * *'  # (test latest client) Daily at 12 AM UTC
+  workflow_dispatch:
+    inputs:
+      test-all-client-versions:
+        description: 'Test against both the latest and published versions'
+        type: boolean
+        default: false
+      test-setup:
+        description: 'Test against a specific setup'
+        type: string
+        default: 'ollama'
+  workflow_call:
+    inputs:
+      sdk_install_url:
+        required: false
+        type: string
+        description: 'URL to install Python SDK from (for testing preview builds)'
+      matrix_key:
+        required: false
+        type: string
+        default: 'default'
+        description: 'Matrix configuration key from ci_matrix.json (e.g., "default", "stainless")'
+      matrix_json:
+        required: false
+        type: string
+        description: 'Pre-defined matrix JSON. If provided, skips generate_ci_matrix.py execution.'
+      pr_head_sha:
+        required: false
+        type: string
+        description: 'The SHA of the pull request head to checkout'
+      pr_head_ref:
+        required: false
+        type: string
+        description: 'The branch name of the pull request head (for recording commits)'
+      is_fork_pr:
+        required: false
+        type: boolean
+        default: false
+        description: 'Whether this is a fork PR (cannot push recordings to forks)'
+      disable_cache:
+        required: false
+        type: boolean
+        default: false
+        description: 'Disable caching (for security in pull_request_target contexts)'
+      test-all-client-versions:
+        required: false
+        type: boolean
+        default: false
+        description: 'Test against both the latest and published versions'
+
+concurrency:
+  # Skip concurrency for pushes to main - each commit should be tested independently
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+# Limit permissions of the GITHUB_TOKEN to the minimum required.
+# Default mode is 'replay' which only needs read access.
+# When called via workflow_call (e.g., from stainless-builds.yml with record-if-missing),
+# the caller's permissions apply.
+permissions:
+  contents: read
+
+jobs:
+  generate-matrix:
+    # Skip matrix generation if matrix_json is provided (e.g., from pull_request_target callers)
+    if: ${{ inputs.matrix_json == '' }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.pr_head_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Generate test matrix
+        id: set-matrix
+        run: |
+          # Generate matrix from CI_MATRIX in tests/integration/ci_matrix.json
+          # Supports schedule-based, manual input, and workflow_call overrides
+          MATRIX=$(PYTHONPATH=. python3 scripts/generate_ci_matrix.py \
+            --schedule "${{ github.event.schedule }}" \
+            --test-setup "${{ github.event.inputs.test-setup || '' }}" \
+            --matrix-key "${{ inputs.matrix_key || 'default' }}")
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "Generated matrix: $MATRIX"
+
+  run-replay-mode-tests:
+    needs: generate-matrix
+    # Always run even if generate-matrix was skipped (when matrix_json is provided)
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    # When disable_cache is true, set UV_NO_CACHE to prevent uv from using cached packages.
+    # This is a security measure for pull_request_target contexts to prevent cache poisoning.
+    env:
+      UV_NO_CACHE: ${{ inputs.disable_cache == true }}
+    name: ${{ format('Integration Tests ({0}, {1}, {2}, client={3}, {4})', matrix.client, matrix.config.setup, matrix.python-version, matrix.client-version, matrix.config.suite) }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [library, server]
+        # Use Python 3.13 only on nightly schedule (daily latest client test), otherwise use 3.12
+        python-version: ${{ github.event.schedule == '0 0 * * *' && fromJSON('["3.12", "3.13"]') || fromJSON('["3.12"]') }}
+        node-version: [22]
+        client-version: ${{ (github.event.schedule == '0 0 * * *' || github.event.inputs.test-all-client-versions == 'true' || inputs.test-all-client-versions == true) && fromJSON('["published", "latest"]') || fromJSON('["latest"]') }}
+        # Test configurations: Either from matrix_json input or generated from ci_matrix.json
+        config: ${{ fromJSON(inputs.matrix_json || needs.generate-matrix.outputs.matrix).include }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.pr_head_sha || github.event.pull_request.head.sha || github.sha }}
+
+      # Note: Using full repo path with pinned SHA ensures actions are loaded from
+      # a trusted commit, not from PR checkout. This is critical for security when
+      # called from pull_request_target workflows.
+      - name: Setup test environment
+        if: ${{ matrix.config.allowed_clients == null || contains(matrix.config.allowed_clients, matrix.client) }}
+        uses: llamastack/llama-stack/.github/actions/setup-test-environment@700b202df7e520c1b19977e97657b3aebc055e56
+        with:
+          python-version: ${{ matrix.python-version }}
+          client-version: ${{ matrix.client-version }}
+          sdk_install_url: ${{ inputs.sdk_install_url || '' }}
+          setup: ${{ matrix.config.setup }}
+          suite: ${{ matrix.config.suite }}
+          inference-mode: ${{ matrix.config.inference_mode || 'replay' }}
+
+      - name: Setup Node.js for TypeScript client tests
+        if: ${{ matrix.client == 'server' }}
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: ${{matrix.node-version}}
+          cache: ${{ inputs.disable_cache && '' || 'npm' }}
+          cache-dependency-path: tests/integration/client-typescript/package-lock.json
+          package-manager-cache: ${{ !inputs.disable_cache }}
+
+      - name: Setup TypeScript client
+        if: ${{ matrix.client == 'server' }}
+        id: setup-ts-client
+        uses: llamastack/llama-stack/.github/actions/setup-typescript-client@700b202df7e520c1b19977e97657b3aebc055e56
+        with:
+          client-version: ${{ matrix.client-version }}
+
+      - name: Run tests
+        if: ${{ matrix.config.allowed_clients == null || contains(matrix.config.allowed_clients, matrix.client) }}
+        uses: llamastack/llama-stack/.github/actions/run-and-record-tests@700b202df7e520c1b19977e97657b3aebc055e56
+        env:
+          OPENAI_API_KEY: dummy
+          AZURE_API_KEY: replay-mode-dummy-key
+          AZURE_API_BASE: https://dummy.openai.azure.com/openai/v1
+          WATSONX_API_KEY: replay-mode-dummy-key
+          WATSONX_BASE_URL: https://us-south.ml.cloud.ibm.com
+          WATSONX_PROJECT_ID: replay-mode-dummy-project
+          AWS_BEARER_TOKEN_BEDROCK: replay-mode-dummy-key
+          AWS_DEFAULT_REGION: us-west-2
+          TAVILY_SEARCH_API_KEY: ${{ secrets.TAVILY_SEARCH_API_KEY || 'replay-mode-dummy-key' }}
+          TS_CLIENT_PATH: ${{ steps.setup-ts-client.outputs.ts-client-path || '' }}
+        with:
+          stack-config: >-
+            ${{ matrix.config.stack_config
+                || (matrix.client == 'library' && 'ci-tests')
+                || (matrix.client == 'server' && 'server:ci-tests')
+                || 'docker:ci-tests' }}
+          setup: ${{ matrix.config.setup }}
+          inference-mode: ${{ matrix.config.inference_mode || 'replay' }}
+          suite: ${{ matrix.config.suite }}
+          target-branch: ${{ inputs.pr_head_ref || '' }}
+          is-fork-pr: ${{ inputs.is_fork_pr && 'true' || (github.event_name != 'merge_group' && github.event.pull_request.head.repo.full_name != github.repository && 'true' || 'false') }}

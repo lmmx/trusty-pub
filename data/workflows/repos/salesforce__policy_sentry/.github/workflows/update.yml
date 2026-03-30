@@ -1,0 +1,63 @@
+name: IAM Definition Update
+
+on:
+  schedule:
+  # Run on the first day of the month
+    - cron:  '0 0 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update-actions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          activate-environment: true
+      - run: |
+          uv sync --frozen
+          uv pip install click_log
+      - name: setup policy_sentry CLI
+        run: echo "PYTHONPATH=$(pwd)" >> "$GITHUB_ENV"
+      - name: Run initialize
+        run: |
+          python .github/scripts/update_data.py
+          if [[ $(du -m /tmp/.policy_sentry/iam-definition.json | cut -f1) -lt 3 ]]; then
+            echo "File size is less than 3 MB, something is wrong with this update"
+            exit 1
+          fi
+          cp -f /tmp/.policy_sentry/iam-definition.json "$(pwd)/policy_sentry/shared/data/iam-definition.json"
+          cp -rf /tmp/.policy_sentry/data/docs "$(pwd)/policy_sentry/shared/data/"
+      - name: Set outputs
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: PR if files were updated
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 #v8.1.0
+        with:
+          commit-message: Update database
+          title: 'Updates database'
+          body: This is an automated PR created because AWS IAM definitions have changed.
+          branch: ${{ steps.vars.outputs.sha_short }}
+          delete-branch: true
+          labels: |
+            automation
+
+  ci-after-update:
+    runs-on: ubuntu-latest
+    needs: update-actions
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          activate-environment: true
+      - run: uv sync --frozen
+
+      - run: just build-package
+      - run: just unit-tests
+      - run: just integration-tests

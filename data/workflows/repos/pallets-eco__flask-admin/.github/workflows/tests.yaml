@@ -1,0 +1,109 @@
+name: Tests
+on:
+  push:
+    branches:
+      - master
+      - '*.x'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '*.rst'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '*.rst'
+  schedule:
+    - cron: '0 3 * * 1'
+jobs:
+  tests:
+    name: ${{ matrix.tox == 'normal' && format('py{0}', matrix.python) || matrix.tox }}
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        tox: ['normal']
+        include:
+          - python: '3.10'
+            tox: 'py310-min'
+          - python: '3.14'
+            tox: 'py314-noflaskbabel'
+          - python: '3.10'
+            tox: 'py310-sqlalchemy1'
+          - python: '3.14'
+            tox: 'py314-sqlalchemy1'
+    services:
+      # Label used to access the service container
+      postgres:
+        # Docker Hub image
+        image: postgis/postgis:16-3.4  # postgres with postgis installed
+        # Provide the password for postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: flask_admin_test
+        ports:
+          - 5432:5432
+          # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mongo:
+        image: mongo:5.0.14-focal
+        ports:
+          - 27017:27017
+      azurite:
+        image: mcr.microsoft.com/azure-storage/azurite:latest
+        env:
+          executable: blob
+        ports:
+          - 10000:10000
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+          prune-cache: false
+          cache-dependency-glob: |
+            **/uv.lock
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+      - name: Install Ubuntu packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgeos-c1v5
+      - name: Check out repository code
+        uses: actions/checkout@v6
+      - name: Set up PostgreSQL hstore module
+        env:
+          PGPASSWORD: postgres
+        run: psql -U postgres -h localhost -c 'CREATE EXTENSION hstore;' flask_admin_test
+      - run: uv run --locked tox run -e ${{ matrix.tox == 'normal' && format('py{0}', matrix.python) || matrix.tox }}
+  not_tests:
+    name: ${{ matrix.tox }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tox: ['docs', 'typing', 'style']
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+          prune-cache: false
+          cache-dependency-glob: |
+            **/uv.lock
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version-file: pyproject.toml
+      - name: cache mypy
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ./.mypy_cache
+          key: mypy|${{ hashFiles('pyproject.toml') }}
+      - run: uv run --locked tox run -e ${{ matrix.tox }}

@@ -1,0 +1,114 @@
+name: Bindings Node.js
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup
+        with:
+          cache-key: bindings-nodejs-integration
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Corepack
+        working-directory: bindings/nodejs
+        run: npm i -g --force corepack && corepack enable
+      - name: Install dependencies
+        working-directory: bindings/nodejs
+        run: pnpm install
+      - name: Check format
+        working-directory: bindings/nodejs
+        run: pnpm prettier --check .
+
+  build:
+    needs: check
+    name: build-${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-22.04 }
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-latest }
+          # resolve it after: https://github.com/actions/setup-node/issues/1222
+          # - { target: x86_64-pc-windows-msvc, runner: windows-latest }
+          # - { target: aarch64-pc-windows-msvc, runner: windows-latest }
+          - { target: x86_64-apple-darwin, runner: macos-latest }
+          - { target: aarch64-apple-darwin, runner: macos-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup
+        with:
+          cache-key: bindings-nodejs-${{ matrix.target }}
+          target: ${{ matrix.target }}
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install ziglang
+        if: contains(matrix.target, '-unknown-linux-')
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.11.0
+      - name: Corepack
+        working-directory: bindings/nodejs
+        run: npm i -g --force corepack && corepack enable
+      - name: Install dependencies
+        working-directory: bindings/nodejs
+        run: pnpm install
+      - name: build
+        working-directory: bindings/nodejs
+        shell: bash
+        env:
+          NAPI_TARGET: ${{ matrix.target }}
+          MACOSX_DEPLOYMENT_TARGET: 10.12
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            pnpm napi build --platform --target=$NAPI_TARGET --js generated.js
+          else
+            pnpm napi build --platform --target=$NAPI_TARGET --release --js generated.js
+          fi
+          pnpm node ./scripts/header.js
+      - name: strip for macos
+        if: endsWith(matrix.target, '-apple-darwin')
+        working-directory: bindings/nodejs
+        run: |
+          strip -x *.node
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-nodejs-${{ matrix.target }}
+          path: bindings/nodejs/*.node
+
+  integration:
+    name: integration-${{ matrix.ver }}
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ver: ["18", "20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.ver }}
+      - name: Corepack
+        working-directory: bindings/nodejs
+        run: npm i -g --force corepack && corepack enable
+      - name: Install dependencies
+        working-directory: bindings/nodejs
+        run: pnpm install
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-nodejs-x86_64-unknown-linux-gnu
+          path: bindings/nodejs
+      - run: make -C tests test-bindings-nodejs

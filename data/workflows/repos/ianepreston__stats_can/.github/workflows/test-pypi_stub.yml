@@ -1,0 +1,12 @@
+name: TestPyPI
+on:
+  pull_request:
+    paths-ignore:
+      - 'src/**'
+      - 'pyproject.toml'
+
+jobs:
+  test_pypi:
+    runs-on: ubuntu-latest
+    steps:
+    - run: 'echo "No build required" '

@@ -1,0 +1,97 @@
+name: Build windows wheels
+
+on:
+  push:
+    branches: ["main", "ci"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      CONNECTOR_VERSION: "3.4.8"
+    steps:
+      - name: Cache Connector
+        id: cache-connector
+        uses: actions/cache@v4
+        with:
+          path: c:/mariadb-connector
+          key: mariadb-connector-c-${{ env.CONNECTOR_VERSION }}-win-2
+
+      - name: Download and Unzip Connector
+        if: steps.cache-connector.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          curl -LO "https://dlm.mariadb.com/4516912/Connectors/c/connector-c-${CONNECTOR_VERSION}/mariadb-connector-c-${CONNECTOR_VERSION}-src.zip"
+          unzip "mariadb-connector-c-${CONNECTOR_VERSION}-src.zip" -d c:/
+          mv "c:/mariadb-connector-c-${CONNECTOR_VERSION}-src" c:/mariadb-connector-src
+
+      - name: make build directory
+        if: steps.cache-connector.outputs.cache-hit != 'true'
+        shell: cmd
+        working-directory: c:/mariadb-connector-src
+        run: |
+          mkdir build
+
+      - name: cmake
+        if: steps.cache-connector.outputs.cache-hit != 'true'
+        shell: cmd
+        working-directory: c:/mariadb-connector-src/build
+        run: |
+          cmake -A x64 .. -DCMAKE_BUILD_TYPE=Release -DCLIENT_PLUGIN_DIALOG=static -DCLIENT_PLUGIN_SHA256_PASSWORD=static -DCLIENT_PLUGIN_CACHING_SHA2_PASSWORD=static -DDEFAULT_SSL_VERIFY_SERVER_CERT=0
+
+      - name: cmake build
+        if: steps.cache-connector.outputs.cache-hit != 'true'
+        shell: cmd
+        working-directory: c:/mariadb-connector-src/build
+        run: |
+          cmake --build . -j 8 --config Release
+
+      - name: cmake install
+        if: steps.cache-connector.outputs.cache-hit != 'true'
+        shell: cmd
+        working-directory: c:/mariadb-connector-src/build
+        run: |
+          cmake -DCMAKE_INSTALL_PREFIX=c:/mariadb-connector -DCMAKE_INSTALL_COMPONENT=Development -DCMAKE_BUILD_TYPE=Release -P cmake_install.cmake
+
+      - name: Checkout mysqlclient
+        uses: actions/checkout@v4
+        with:
+          path: mysqlclient
+
+      - name: Site Config
+        shell: bash
+        working-directory: mysqlclient
+        run: |
+          pwd
+          find .
+          cat <<EOF >site.cfg
+          [options]
+          static = True
+          connector = C:/mariadb-connector
+          EOF
+          cat site.cfg
+
+      - uses: actions/setup-python@v5
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel
+      - name: Build wheels
+        working-directory: mysqlclient
+        env:
+          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.10"
+          CIBW_ARCHS: "AMD64"
+          CIBW_TEST_COMMAND: 'python -c "import MySQLdb; print(MySQLdb.version_info)" '
+        run: "python -m cibuildwheel --output-dir dist"
+
+      - name: Build sdist
+        working-directory: mysqlclient
+        run: |
+          python -m pip install build
+          python -m build -s -o dist
+
+      - name: Upload Wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-wheels
+          path: mysqlclient/dist/*.*

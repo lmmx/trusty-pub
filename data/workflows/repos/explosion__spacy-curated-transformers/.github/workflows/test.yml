@@ -1,0 +1,118 @@
+name: Test
+
+on: [push, pull_request, workflow_call]
+
+permissions:
+  contents: read
+env:
+  hf-transformers-pip: transformers[sentencepiece]>=3.4.0,<4.32.0
+
+jobs:
+  validate:
+    name: Validate
+    if: github.repository_owner == 'explosion'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+
+      - name: Configure Python version
+        uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4
+        with:
+          python-version: "3.8"
+          architecture: x64
+
+      - name: black
+        run: |
+          python -m pip install black -c requirements.txt
+          python -m black spacy_curated_transformers --check
+      - name: isort
+        run: |
+          python -m pip install isort -c requirements.txt
+          python -m isort spacy_curated_transformers --check
+      - name: flake8
+        run: |
+          python -m pip install flake8 -c requirements.txt
+          python -m flake8 spacy_curated_transformers --count --select=E901,E999,F821,F822,F823,W605 --show-source --statistics
+  test:
+    name: Run tests
+    needs: Validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10"]
+        include:
+          - os: ubuntu-latest
+            hf-path: ~/.cache/huggingface/hub
+          - os: macos-latest
+            hf-path: ~/.cache/huggingface/hub
+          # - os: windows-latest
+          #   hf-path: $HOME\\.cache\\huggingface\\hub
+    steps:
+      - uses: actions/checkout@0b496e91ec7ae4428c3ed2eeb4c3a40df431f2cc # v1
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          # Disabled as this seems to randomly break builds on Windows.
+          # cache: "pip"
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+          python -m pip install -r requirements.txt
+
+      - name: Install optional dependencies for Japanese models
+        run: python -m pip install fugashi[unidic-lite] spacy[ja]
+
+      - name: Build sdist
+        run: python -m build --sdist
+
+      - name: Delete source directory
+        run: |
+          cp spacy_curated_transformers/tests/conftest.py .
+          rm -rf spacy_curated_transformers
+        shell: bash
+
+      - name: Uninstall all packages
+        run: |
+          python -m pip freeze
+          python -m pip freeze --exclude pywin32 > installed.txt
+          python -m pip uninstall -y -r installed.txt
+
+      - name: Install from sdist
+        run: |
+          SDIST=$(python -c "import os;print(os.listdir('./dist')[-1])" 2>&1)
+          python -m pip install dist/$SDIST
+        shell: bash
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install fugashi[unidic-lite] spacy[ja]
+
+      - name: Run pytest
+        run: python -m pytest --pyargs spacy_curated_transformers --slow
+
+      - name: Install HF transformers and SentencePiece
+        id: init-hf-transformers
+        run: |
+          python -m pip install '${{ env.hf-transformers-pip }}'
+          echo "version=$(python -m pip show transformers | grep -i version:)" >> $GITHUB_OUTPUT
+        shell: bash
+
+      # Disabled for Windows as the models appear to
+      # be stored at a non-standard location.
+      - name: Cache HF pre-trained models
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c # v3
+        if: startsWith(runner.os, 'Windows') == false
+        with:
+          path: ${{ matrix.hf-path }}
+          key: hf-cache-${{ steps.init-hf-transformers.outputs.version }}
+          enableCrossOsArchive: true
+
+      - name: Run pytest (w/t HF transformers)
+        run: python -m pytest --pyargs spacy_curated_transformers --slow

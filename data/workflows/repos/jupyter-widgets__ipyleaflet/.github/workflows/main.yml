@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  run:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: [3.11]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup conda
+        uses: mamba-org/setup-micromamba@main
+        with:
+          environment-file: environment-dev.yml
+          init-shell: bash
+          cache-environment: true
+          create-args: python=${{ matrix.python-version }}
+
+      - name: Install ipyleaflet
+        run: pip install python/jupyter_leaflet python/ipyleaflet --no-deps
+
+      - name: Check installation files
+        run: |
+          test -d $CONDA_PREFIX/share/jupyter/nbextensions/jupyter-leaflet
+          test -f $CONDA_PREFIX/share/jupyter/nbextensions/jupyter-leaflet/extension.js
+          test -f $CONDA_PREFIX/share/jupyter/nbextensions/jupyter-leaflet/index.js
+          test -f $CONDA_PREFIX/share/jupyter/nbextensions/jupyter-leaflet/index.js
+          test -f $CONDA_PREFIX/share/jupyter/labextensions/jupyter-leaflet/package.json
+
+      - name: Python Linters
+        run: ruff check --output-format=github --exclude "examples,ui-tests" --ignore "E501,E731,F403" .
+
+      - name: JS Linters
+        run: |
+          yarn install
+          yarn run lint:check
+        working-directory: python/jupyter_leaflet
+
+      - name: Import check
+        run: python -c 'import ipyleaflet'

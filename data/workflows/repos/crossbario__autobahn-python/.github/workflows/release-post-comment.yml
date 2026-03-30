@@ -1,0 +1,588 @@
+name: release-post-comment
+
+on:
+  # Trigger after release workflow completes (ensures all 4 base workflows finished)
+  # release.yml waits for: wheels, wheels-docker, wstest, main
+  workflow_run:
+    workflows: ["release"]
+    types: [completed]
+
+  # Manual dispatch for debugging
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to post summary for"
+        required: false
+        type: string
+      discussion_category_id:
+        description: "GitHub Discussions category ID for CI-CD notifications"
+        required: false
+        type: string
+        default: "DIC_kwDOACA_5s4Cxk-W"  # CI-CD category in autobahn-python repo
+
+permissions:
+  pull-requests: write  # Required for posting PR comments
+  contents: read        # Required for reading artifacts
+  discussions: write    # Required for posting to discussions
+
+jobs:
+  identifiers:
+    # GitHub needs to know where .cicd/workflows/identifiers.yml lives at parse time,
+    # and submodules aren't included in that context! thus the following does NOT work:
+    # uses: ./.cicd/workflows/identifiers.yml
+    # we MUST reference the remote repo directly:
+    uses: wamp-proto/wamp-cicd/.github/workflows/identifiers.yml@main
+    # IMPORTANT: we still need .cicd as a Git submodule in the using repo though!
+    # because e.g. identifiers.yml wants to access scripts/sanitize.sh !
+
+  check-release-exists:
+    name: Check if release created (Early Exit Pattern)
+    needs: identifiers
+    runs-on: ubuntu-latest
+    outputs:
+      should_process: ${{ steps.check.outputs.should_process }}
+      release_exists: ${{ steps.check.outputs.release_exists }}
+      release_name: ${{ steps.check.outputs.release_name }}
+      release_url: ${{ steps.check.outputs.release_url }}
+
+    steps:
+      - name: Check if GitHub Release exists for this commit
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo '─────────────────────────────────────────────────'
+          echo '🔍 Checking if GitHub Release exists (Early Exit Pattern)'
+          echo '─────────────────────────────────────────────────'
+
+          RELEASE_TYPE="${{ needs.identifiers.outputs.release_type }}"
+          COMMIT_SHA="${{ needs.identifiers.outputs.head_sha }}"
+
+          echo "Release type: $RELEASE_TYPE"
+          echo "Commit SHA: $COMMIT_SHA"
+
+          # Find release by commit SHA instead of timestamp-based name
+          # This avoids timestamp mismatches between release.yml and release-post-comment.yml
+          echo ""
+          echo "Searching for releases created for commit $COMMIT_SHA..."
+
+          # Get all releases (sorted by created date, newest first)
+          RELEASES_JSON=$(gh api repos/$GITHUB_REPOSITORY/releases --paginate 2>/dev/null || echo "[]")
+
+          # Find release matching this commit's SHA
+          # For nightly: look for master-YYYYMMDDHHMMSS pattern
+          # For stable: look for vX.Y.Z pattern
+          # For development: look for prN-* pattern
+          FOUND_RELEASE_NAME=""
+          FOUND_RELEASE_URL=""
+
+          if [ "$RELEASE_TYPE" = "nightly" ]; then
+            # Search for most recent master-* release
+            echo "Checking for nightly release (master-*) created within last hour..."
+            FOUND_RELEASE_NAME=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name | startswith(\"master-\")) | .tag_name" | head -1)
+            if [ -n "$FOUND_RELEASE_NAME" ]; then
+              # Verify this release was created recently (within last hour)
+              # to avoid matching old releases from previous builds
+              RELEASE_CREATED=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name == \"$FOUND_RELEASE_NAME\") | .created_at")
+              CURRENT_TIME=$(date -u +%s)
+              RELEASE_TIME=$(date -u -d "$RELEASE_CREATED" +%s 2>/dev/null || echo "0")
+              TIME_DIFF=$((CURRENT_TIME - RELEASE_TIME))
+
+              echo "Release: $FOUND_RELEASE_NAME"
+              echo "Created: $RELEASE_CREATED"
+              echo "Age: ${TIME_DIFF}s"
+
+              if [ $TIME_DIFF -lt 3600 ]; then
+                echo "✓ Release created within last hour - proceeding"
+                FOUND_RELEASE_URL=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name == \"$FOUND_RELEASE_NAME\") | .html_url")
+              else
+                echo "✗ Release is too old (${TIME_DIFF}s > 3600s) - skipping (this is early exit)"
+                FOUND_RELEASE_NAME=""
+              fi
+            fi
+
+            # Fallback: If no nightly release found, check for fork/PR releases
+            # This handles cases where identifiers workflow couldn't determine this is a PR build
+            if [ -z "$FOUND_RELEASE_NAME" ]; then
+              echo ""
+              echo "No nightly release found - checking for fork/PR releases as fallback..."
+              FOUND_RELEASE_NAME=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name | startswith(\"fork-\") or startswith(\"pr\")) | .tag_name" | head -1)
+              if [ -n "$FOUND_RELEASE_NAME" ]; then
+                # Verify this release was created recently
+                RELEASE_CREATED=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name == \"$FOUND_RELEASE_NAME\") | .created_at")
+                CURRENT_TIME=$(date -u +%s)
+                RELEASE_TIME=$(date -u -d "$RELEASE_CREATED" +%s 2>/dev/null || echo "0")
+                TIME_DIFF=$((CURRENT_TIME - RELEASE_TIME))
+
+                echo "Found PR/fork release: $FOUND_RELEASE_NAME"
+                echo "Created: $RELEASE_CREATED"
+                echo "Age: ${TIME_DIFF}s"
+
+                if [ $TIME_DIFF -lt 3600 ]; then
+                  echo "✓ PR/fork release created within last hour - proceeding"
+                  FOUND_RELEASE_URL=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name == \"$FOUND_RELEASE_NAME\") | .html_url")
+                else
+                  echo "✗ PR/fork release is too old (${TIME_DIFF}s > 3600s) - skipping"
+                  FOUND_RELEASE_NAME=""
+                fi
+              fi
+            fi
+          elif [ "$RELEASE_TYPE" = "stable" ]; then
+            # For stable, use tag from identifiers (tags don't change)
+            TAG_NAME="${{ needs.identifiers.outputs.base_tag }}"
+            FOUND_RELEASE_NAME=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name == \"$TAG_NAME\") | .tag_name")
+            if [ -n "$FOUND_RELEASE_NAME" ]; then
+              FOUND_RELEASE_URL=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name == \"$FOUND_RELEASE_NAME\") | .html_url")
+            fi
+          elif [ "$RELEASE_TYPE" = "development" ]; then
+            # For development, look for PR-specific release
+            PR_PREFIX="${{ needs.identifiers.outputs.pr_number }}"
+            FOUND_RELEASE_NAME=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name | startswith(\"$PR_PREFIX-\")) | .tag_name" | head -1)
+            if [ -n "$FOUND_RELEASE_NAME" ]; then
+              FOUND_RELEASE_URL=$(echo "$RELEASES_JSON" | jq -r ".[] | select(.tag_name == \"$FOUND_RELEASE_NAME\") | .html_url")
+            fi
+          fi
+
+          if [ -z "$FOUND_RELEASE_NAME" ]; then
+            echo "⏳ GitHub Release not found for commit $COMMIT_SHA"
+            echo "   This is normal! Will post once release workflow creates the release."
+            echo "   (This is an early exit - release.yml probably hasn't created the release yet)"
+            {
+              echo "should_process=false"
+              echo "release_exists=false"
+              echo "release_name="
+              echo "release_url="
+            } >> $GITHUB_OUTPUT
+          else
+            echo "✅ GitHub Release found: $FOUND_RELEASE_NAME"
+            echo "   Release URL: $FOUND_RELEASE_URL"
+            {
+              echo "should_process=true"
+              echo "release_exists=true"
+              echo "release_name=$FOUND_RELEASE_NAME"
+              echo "release_url=$FOUND_RELEASE_URL"
+            } >> $GITHUB_OUTPUT
+          fi
+
+          echo '─────────────────────────────────────────────────'
+
+  check-release-complete:
+    name: Check if release is complete (Early Exit Pattern)
+    needs: [identifiers, check-release-exists]
+    # Check completion for all release types
+    if: needs.check-release-exists.outputs.should_process == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      should_process: ${{ steps.check.outputs.should_process }}
+      is_complete: ${{ steps.check.outputs.is_complete }}
+
+    steps:
+      - name: Check for completion marker in GitHub Release
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo '─────────────────────────────────────────────────'
+          echo '🔍 Checking if release is complete (Early Exit Pattern)'
+          echo '─────────────────────────────────────────────────'
+
+          RELEASE_NAME="${{ needs.check-release-exists.outputs.release_name }}"
+          RELEASE_TYPE="${{ needs.identifiers.outputs.release_type }}"
+
+          echo "Release name: $RELEASE_NAME"
+          echo "Release type: $RELEASE_TYPE"
+          echo ""
+
+          # All release types (development, nightly, stable) now create completion markers
+          echo "Attempting to download release-complete.json marker..."
+
+          if gh release download "$RELEASE_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "release-complete.json" \
+            --dir . 2>/dev/null; then
+
+            echo "✅ Completion marker found!"
+            echo ""
+            echo "Completion marker contents:"
+            cat release-complete.json
+            echo ""
+
+            # Verify the marker is for the correct release
+            MARKER_RELEASE=$(jq -r '.release_name' release-complete.json)
+            if [ "$MARKER_RELEASE" = "$RELEASE_NAME" ]; then
+              echo "✅ Completion marker matches release name - proceeding"
+              {
+                echo "should_process=true"
+                echo "is_complete=true"
+              } >> $GITHUB_OUTPUT
+            else
+              echo "⚠️  Completion marker mismatch (marker: $MARKER_RELEASE, expected: $RELEASE_NAME)"
+              {
+                echo "should_process=false"
+                echo "is_complete=false"
+              } >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⏳ Completion marker not found yet"
+            echo "   This is normal! Will post once release.yml completes the release."
+            echo "   (This is an early exit - release.yml is still building artifacts)"
+            {
+              echo "should_process=false"
+              echo "is_complete=false"
+            } >> $GITHUB_OUTPUT
+          fi
+
+          echo '─────────────────────────────────────────────────'
+
+  # Development release: Post PR summary comment for development builds
+  # DISABLED: PR comments don't work reliably for fork PRs due to workflow_run context loss
+  post-pr-comment:
+    name: Post PR Comment (Development Builds) - DISABLED
+    needs: [identifiers, check-release-exists, check-release-complete]
+    runs-on: ubuntu-latest
+
+    # Permanently disabled - fork PRs lose context in workflow_run trigger
+    # Only GitHub Discussions posts are enabled (see post-discussion job)
+    if: false
+
+    env:
+      BASE_REPO: ${{ needs.identifiers.outputs.base_repo }}
+      BASE_BRANCH: ${{ needs.identifiers.outputs.base_branch }}
+      PR_NUMBER: ${{ needs.identifiers.outputs.pr_number }}
+      PR_REPO: ${{ needs.identifiers.outputs.pr_repo }}
+      PR_BRANCH: ${{ needs.identifiers.outputs.pr_branch }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Find wstest workflow run ID
+        id: find-wstest
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitSha = context.payload.workflow_run.head_sha;
+            console.log(`Finding wstest workflow for commit: ${commitSha}`);
+
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: commitSha,
+              per_page: 100
+            });
+
+            const wstestRun = runs.workflow_runs.find(run =>
+              run.name === 'wstest' &&
+              run.status === 'completed' &&
+              run.conclusion === 'success'
+            );
+
+            if (wstestRun) {
+              console.log(`Found wstest run: ${wstestRun.id}`);
+              core.setOutput('run_id', wstestRun.id);
+            } else {
+              console.log('⚠️  wstest workflow not found');
+              core.setOutput('run_id', '');
+            }
+
+      # Download wstest conformance summary (explicit name, no pattern)
+      - name: Download wstest conformance summary (quick)
+        if: steps.find-wstest.outputs.run_id != ''
+        uses: wamp-proto/wamp-cicd/actions/download-artifact-verified@main
+        with:
+          name: conformance-summary-quick
+          run-id: ${{ steps.find-wstest.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ github.workspace }}/summary-artifact/
+        continue-on-error: true
+
+      - name: Get release notes from GitHub Release
+        id: release-details
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_NAME="${{ needs.check-release-exists.outputs.release_name }}"
+          RELEASE_URL="${{ needs.check-release-exists.outputs.release_url }}"
+
+          echo "==> Fetching release notes for: $RELEASE_NAME"
+          echo "   Release URL: $RELEASE_URL"
+
+          # Get release body via GitHub API
+          RELEASE_JSON=$(gh api repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_NAME 2>/dev/null || echo "{}")
+
+          if [ "$RELEASE_JSON" = "{}" ]; then
+            echo "⚠️  Release not found: $RELEASE_NAME"
+            echo "This should not happen - check-release-exists should have prevented this!"
+            exit 1
+          fi
+
+          # Save release body (release notes)
+          echo "$RELEASE_JSON" | jq -r '.body' > release-notes.md
+          echo "✅ Release notes retrieved"
+
+      - name: Install jinja2-cli for template rendering
+        run: |
+          pip install jinja2-cli
+
+      - name: Render PR comment from Jinja2 template
+        id: render
+        env:
+          RELEASE_URL: ${{ needs.check-release-exists.outputs.release_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==> Preparing PR comment using Jinja2 template..."
+
+          # Collect template variables
+          # Strip 'pr' prefix from PR_NUMBER for gh command
+          PR_NUMBER_CLEAN="${PR_NUMBER#pr}"
+
+          # If PR_NUMBER is a fallback (fork-XXXXXXXX), try to resolve actual PR number
+          if [[ "$PR_NUMBER" == fork-* ]]; then
+            echo "⚠️  PR_NUMBER is a fallback value: $PR_NUMBER"
+            echo "Attempting to resolve actual PR number via GitHub API..."
+
+            # Try to find PR using the branch name from identifiers
+            PR_HEAD="$PR_REPO:$PR_BRANCH"
+            echo "Searching for PR with head: $PR_HEAD"
+
+            RESOLVED_PR_NUMBER=$(gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --head "$PR_HEAD" \
+              --state all \
+              --json number \
+              --jq '.[0].number // empty' 2>/dev/null || echo "")
+
+            if [[ -n "$RESOLVED_PR_NUMBER" ]]; then
+              echo "✅ Resolved PR number: $RESOLVED_PR_NUMBER"
+              PR_NUMBER_CLEAN="$RESOLVED_PR_NUMBER"
+            else
+              echo "❌ Could not resolve PR number - will skip posting comment"
+              echo "should_comment=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          WORKFLOW_RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${{ github.event.workflow_run.id }}"
+
+          # Read release notes (already fetched)
+          RELEASE_NOTES=$(cat release-notes.md)
+
+          # Read wstest summary if available, otherwise use placeholder
+          WSTEST_SUMMARY="WebSocket conformance testing results not available."
+          SUMMARY_FILE=$(find summary-artifact/ -name "*wstest-summary.md" 2>/dev/null | head -1)
+          if [[ -n "$SUMMARY_FILE" && -f "$SUMMARY_FILE" ]]; then
+            echo "✅ Found wstest summary: $SUMMARY_FILE"
+            WSTEST_SUMMARY=$(cat "$SUMMARY_FILE")
+          else
+            echo "⚠️  No wstest summary found, using placeholder"
+          fi
+
+          # Render wrapper template using jinja2
+          jinja2 .github/templates/pr-comment.md.j2 \
+            -D pr_number="$PR_NUMBER" \
+            -D pr_repo="$PR_REPO" \
+            -D pr_branch="$PR_BRANCH" \
+            -D base_repo="$BASE_REPO" \
+            -D base_branch="$BASE_BRANCH" \
+            -D workflow_run_url="$WORKFLOW_RUN_URL" \
+            -D release_url="$RELEASE_URL" \
+            -D release_notes="$RELEASE_NOTES" \
+            -D wstest_summary="$WSTEST_SUMMARY" \
+            -o pr-comment.md
+
+          echo ""
+          echo "==> Generated PR comment:"
+          cat pr-comment.md
+
+          # Save clean PR number for posting
+          echo "pr_number_clean=$PR_NUMBER_CLEAN" >> $GITHUB_OUTPUT
+
+          # Always post comment (release notes are always available now)
+          echo "should_comment=true" >> $GITHUB_OUTPUT
+
+      - name: Post PR comment using GitHub CLI
+        if: steps.render.outputs.should_comment != 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==> Posting comment to PR #${{ steps.render.outputs.pr_number_clean }}..."
+          gh pr comment "${{ steps.render.outputs.pr_number_clean }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file pr-comment.md
+          echo "✅ PR comment posted successfully"
+
+  # Nightly and Stable releases: Post to GitHub Discussions
+  post-discussion:
+    name: Post to GitHub Discussions (Nightly & Stable)
+    needs: [identifiers, check-release-exists, check-release-complete]
+    runs-on: ubuntu-latest
+
+    # Only run for nightly or stable builds (explicit positive list)
+    # With completion marker verification in check-release-complete, only the 4th run should proceed
+    if: |
+      needs.check-release-complete.outputs.should_process == 'true' &&
+      (needs.identifiers.outputs.release_type == 'nightly' || needs.identifiers.outputs.release_type == 'stable')
+
+    env:
+      RELEASE_TYPE: ${{ needs.identifiers.outputs.release_type }}
+      RELEASE_NAME: ${{ needs.check-release-exists.outputs.release_name }}
+      RELEASE_URL: ${{ needs.check-release-exists.outputs.release_url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Find wstest workflow run ID
+        id: find-wstest
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitSha = context.payload.workflow_run.head_sha;
+            console.log(`Finding wstest workflow for commit: ${commitSha}`);
+
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: commitSha,
+              per_page: 100
+            });
+
+            const wstestRun = runs.workflow_runs.find(run =>
+              run.name === 'wstest' &&
+              run.status === 'completed' &&
+              run.conclusion === 'success'
+            );
+
+            if (wstestRun) {
+              console.log(`Found wstest run: ${wstestRun.id}`);
+              core.setOutput('run_id', wstestRun.id);
+            } else {
+              console.log('⚠️  wstest workflow not found');
+              core.setOutput('run_id', '');
+            }
+
+      # Download wstest conformance summary (explicit name, no pattern)
+      - name: Download wstest conformance summary (quick)
+        if: steps.find-wstest.outputs.run_id != ''
+        uses: wamp-proto/wamp-cicd/actions/download-artifact-verified@main
+        with:
+          name: conformance-summary-quick
+          run-id: ${{ steps.find-wstest.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ github.workspace }}/summary-artifact/
+        continue-on-error: true
+
+      - name: Get release notes from GitHub Release
+        id: release-details
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==> Fetching release notes for: $RELEASE_NAME"
+          echo "   Release URL: $RELEASE_URL"
+
+          # Get release body via GitHub API
+          RELEASE_JSON=$(gh api repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_NAME 2>/dev/null || echo "{}")
+
+          if [ "$RELEASE_JSON" = "{}" ]; then
+            echo "⚠️  Release not found: $RELEASE_NAME"
+            echo "This should not happen - check-release-exists should have prevented this!"
+            exit 1
+          fi
+
+          # Save release body (release notes)
+          echo "$RELEASE_JSON" | jq -r '.body' > release-notes.md
+          echo "✅ Release notes retrieved"
+
+      - name: Install jinja2-cli for template rendering
+        run: |
+          pip install jinja2-cli
+
+      - name: Render discussion post from Jinja2 template
+        id: render
+        run: |
+          echo "==> Preparing GitHub Discussion post..."
+          echo "Release type: $RELEASE_TYPE"
+          echo "Release name: $RELEASE_NAME"
+
+          # Read release notes (already fetched)
+          RELEASE_NOTES=$(cat release-notes.md)
+
+          # Read wstest summary if available, otherwise use placeholder
+          WSTEST_SUMMARY="WebSocket conformance testing results not available."
+          SUMMARY_FILE=$(find summary-artifact/ -name "*wstest-summary.md" 2>/dev/null | head -1)
+          if [[ -n "$SUMMARY_FILE" && -f "$SUMMARY_FILE" ]]; then
+            echo "✅ Found wstest summary: $SUMMARY_FILE"
+            WSTEST_SUMMARY=$(cat "$SUMMARY_FILE")
+          else
+            echo "⚠️  No wstest summary found, using placeholder"
+          fi
+
+          # Render wrapper template using jinja2
+          jinja2 .github/templates/discussion-post.md.j2 \
+            -D release_url="$RELEASE_URL" \
+            -D release_notes="$RELEASE_NOTES" \
+            -D wstest_summary="$WSTEST_SUMMARY" \
+            -o discussion-post.md
+
+          echo ""
+          echo "==> Generated discussion post:"
+          cat discussion-post.md
+
+      - name: Post to GitHub Discussions
+        uses: actions/github-script@v7
+        env:
+          DISCUSSION_CATEGORY_ID: ${{ github.event.inputs.discussion_category_id || 'DIC_kwDOACA_5s4Cxk-W' }}
+        with:
+          script: |
+            const fs = require('fs');
+            const discussionBody = fs.readFileSync('discussion-post.md', 'utf8');
+
+            const releaseType = '${{ env.RELEASE_TYPE }}';
+            const releaseName = '${{ env.RELEASE_NAME }}';
+
+            // Set title based on release type
+            const title = releaseType === 'stable'
+              ? `Release ${releaseName}`
+              : `Nightly Build ${releaseName}`;
+
+            console.log(`Creating discussion: ${title}`);
+            console.log(`Category ID: ${process.env.DISCUSSION_CATEGORY_ID}`);
+
+            // Create discussion using GraphQL API
+            const mutation = `
+              mutation($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
+                createDiscussion(input: {
+                  repositoryId: $repositoryId
+                  categoryId: $categoryId
+                  title: $title
+                  body: $body
+                }) {
+                  discussion {
+                    url
+                  }
+                }
+              }
+            `;
+
+            // Get repository ID
+            const { data: repo } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const repositoryId = repo.node_id;
+
+            // Create the discussion
+            const result = await github.graphql(mutation, {
+              repositoryId: repositoryId,
+              categoryId: process.env.DISCUSSION_CATEGORY_ID,
+              title: title,
+              body: discussionBody
+            });
+
+            const discussionUrl = result.createDiscussion.discussion.url;
+            console.log(`✅ Discussion created: ${discussionUrl}`);
+            core.setOutput('discussion_url', discussionUrl);

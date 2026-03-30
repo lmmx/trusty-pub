@@ -1,0 +1,52 @@
+name: Test
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
+        cache: pip
+        cache-dependency-path: pyproject.toml
+    - name: Build extension for --load-extension test
+      run: |-
+        (cd tests && gcc ext.c -fPIC -shared -o ext.so)
+    - name: Install dependencies
+      run: |
+        pip install . --group dev
+        pip freeze
+    - name: Run tests
+      run: |
+        pytest -n auto -m "not serial"
+        pytest -m "serial"
+        # And the test that exceeds a localhost HTTPS server
+        tests/test_datasette_https_server.sh
+    - name: Black
+      run: |
+        black --version
+        black --check .
+    - name: Ruff
+      run: ruff check datasette tests
+    - name: Check if cog needs to be run
+      run: |
+        cog --check docs/*.rst
+    - name: Check if blacken-docs needs to be run
+      run: |
+        # This fails on syntax errors, or a diff was applied
+        blacken-docs -l 60 docs/*.rst
+    - name: Test DATASETTE_LOAD_PLUGINS
+      run: |
+        pip install datasette-init datasette-json-html
+        tests/test-datasette-load-plugins.sh

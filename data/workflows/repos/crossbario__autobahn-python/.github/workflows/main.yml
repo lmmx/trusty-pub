@@ -1,0 +1,599 @@
+name: main
+
+on:
+  push:
+    branches: [master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
+
+jobs:
+  identifiers:
+    # GitHub needs to know where .cicd/workflows/identifiers.yml lives at parse time,
+    # and submodules aren't included in that context! thus the following does NOT work:
+    # uses: ./.cicd/workflows/identifiers.yml
+    # we MUST reference the remote repo directly:
+    uses: wamp-proto/wamp-cicd/.github/workflows/identifiers.yml@main
+    # IMPORTANT: we still need .cicd as a Git submodule in the using repo though!
+    # because e.g. identifiers.yml wants to access scripts/sanitize.sh !
+
+  quality-checks:
+    name: Code Quality Checks
+    needs: identifiers
+    runs-on: ubuntu-24.04
+
+    env:
+      BASE_REPO: ${{ needs.identifiers.outputs.base_repo }}
+      BASE_BRANCH: ${{ needs.identifiers.outputs.base_branch }}
+      PR_NUMBER: ${{ needs.identifiers.outputs.pr_number }}
+      PR_REPO: ${{ needs.identifiers.outputs.pr_repo }}
+      PR_BRANCH: ${{ needs.identifiers.outputs.pr_branch }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Just
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Install uv
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.cargo/env
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install ty (Astral type checker)
+        run: uv tool install ty
+
+      - name: Verify toolchain installation
+        run: |
+          just --version
+          uv --version
+          ty --version
+
+      - name: Setup uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key:
+            uv-cache-ubuntu-quality-${{
+            hashFiles('pyproject.toml') }}
+          restore-keys: |
+            uv-cache-ubuntu-quality-
+
+      - name: Create Python environment and install tools
+        run: |
+          just create cpy314
+          just install-tools cpy314
+
+      - name: Code formatting / linting (via ruff)
+        run: just check-format cpy314
+
+      - name: Code static typing (via ty)
+        run: just check-typing cpy314
+
+      - name: Code test coverage (Combined Twisted + asyncio) - WITH NVX
+        run: just check-coverage-combined cpy314 1
+
+      - name: Upload coverage report (with-nvx)
+        if: always()
+        uses: wamp-proto/wamp-cicd/actions/upload-artifact-verified@main
+        with:
+          name: coverage-report-combined-with-nvx
+          path: ${{ github.workspace }}/docs/_build/html/coverage-combined-with-nvx/
+          retention-days: 14
+
+      - name: Code test coverage (Combined Twisted + asyncio) - WITHOUT NVX
+        run: just check-coverage-combined cpy314 0
+
+      - name: Upload coverage report (without-nvx)
+        if: always()
+        uses: wamp-proto/wamp-cicd/actions/upload-artifact-verified@main
+        with:
+          name: coverage-report-combined-without-nvx
+          path: ${{ github.workspace }}/docs/_build/html/coverage-combined-without-nvx/
+          retention-days: 14
+
+      - name: Unit test - Twisted / trial - WITH NVX
+        run: just test-twisted cpy314 1
+
+      - name: Unit test - Twisted / trial - WITHOUT NVX
+        run: just test-twisted cpy314 0
+
+      - name: Unit test - asyncio / pytest - WITH NVX
+        run: just test-asyncio cpy314 1
+
+      - name: Unit test - asyncio / pytest - WITHOUT NVX
+        run: just test-asyncio cpy314 0
+
+  test-serdes:
+    name: SerDes Conformance Tests
+    needs: identifiers
+    runs-on: ubuntu-24.04
+
+    env:
+      BASE_REPO: ${{ needs.identifiers.outputs.base_repo }}
+      BASE_BRANCH: ${{ needs.identifiers.outputs.base_branch }}
+      PR_NUMBER: ${{ needs.identifiers.outputs.pr_number }}
+      PR_REPO: ${{ needs.identifiers.outputs.pr_repo }}
+      PR_BRANCH: ${{ needs.identifiers.outputs.pr_branch }}
+
+    strategy:
+      matrix:
+        python-env: [cpy314, cpy311, pypy311]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Just
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Install uv
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.cargo/env
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Verify toolchain installation
+        run: |
+          just --version
+          uv --version
+
+      - name: Setup uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key:
+            uv-cache-ubuntu-serdes-${{ matrix.python-env }}-${{
+            hashFiles('pyproject.toml') }}
+          restore-keys: |
+            uv-cache-ubuntu-serdes-${{ matrix.python-env }}-
+            uv-cache-ubuntu-serdes-
+
+      - name: Create Python environment
+        run: |
+          just create ${{ matrix.python-env }}
+          just install-tools ${{ matrix.python-env }}
+
+      - name: Run SerDes conformance tests
+        run: |
+          echo "==> Running WAMP message SerDes conformance tests..."
+          echo "==> Python environment: ${{ matrix.python-env }}"
+          echo "==> Test vectors from: wamp-proto/testsuite/"
+
+          # Create output directory for test results
+          mkdir -p test-results/serdes-${{ matrix.python-env }}
+
+          # Run tests and generate reports
+          VENV_PYTHON=$(just --quiet _get-venv-python ${{ matrix.python-env }})
+          ${VENV_PYTHON} -m pytest -v \
+            --junitxml=test-results/serdes-${{ matrix.python-env }}/junit.xml \
+            examples/serdes/tests/test_publish.py \
+            examples/serdes/tests/test_event.py
+
+          # Create summary
+          echo "SerDes Conformance Test Results - ${{ matrix.python-env }}" > test-results/serdes-${{ matrix.python-env }}/summary.txt
+          echo "======================================================" >> test-results/serdes-${{ matrix.python-env }}/summary.txt
+          echo "Test run completed at: $(date)" >> test-results/serdes-${{ matrix.python-env }}/summary.txt
+          echo "Python environment: ${{ matrix.python-env }}" >> test-results/serdes-${{ matrix.python-env }}/summary.txt
+
+      - name: Upload SerDes test results
+        if: always()
+        uses: wamp-proto/wamp-cicd/actions/upload-artifact-verified@main
+        with:
+          name: serdes-test-results-${{ matrix.python-env }}
+          path: ${{ github.workspace }}/test-results/serdes-${{ matrix.python-env }}/
+          retention-days: 7
+
+  documentation:
+    name: Documentation Build
+    needs: identifiers
+    runs-on: ubuntu-24.04
+
+    env:
+      BASE_REPO: ${{ needs.identifiers.outputs.base_repo }}
+      BASE_BRANCH: ${{ needs.identifiers.outputs.base_branch }}
+      PR_NUMBER: ${{ needs.identifiers.outputs.pr_number }}
+      PR_REPO: ${{ needs.identifiers.outputs.pr_repo }}
+      PR_BRANCH: ${{ needs.identifiers.outputs.pr_branch }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Just
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Install uv
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.cargo/env
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Verify toolchain installation
+        run: |
+          just --version
+          uv --version
+
+      - name: Setup uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key:
+            uv-cache-ubuntu-docs-${{ hashFiles('pyproject.toml')
+            }}
+          restore-keys: |
+            uv-cache-ubuntu-docs-
+
+      - name: Create Python environment and install tools
+        run: |
+          just create cpy314
+          just install-tools cpy314
+
+      - name: Build documentation
+        run: just docs cpy314
+
+      - name: Upload documentation artifacts
+        uses: wamp-proto/wamp-cicd/actions/upload-artifact-verified@main
+        with:
+          name: documentation
+          path: ${{ github.workspace }}/docs/_build/html/
+          retention-days: 14
+
+  # FIXME: Sphinx error:
+  # Builder name spelling not registered or available through entry point
+  # Error: Process completed with exit code 2.
+  #
+  # spellcheck:
+  #   name: Documentation Spellcheck
+  #   runs-on: ubuntu-24.04
+
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #       with:
+  #         submodules: recursive
+  #     - name: Install Just
+  #       run: |
+  #         curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+  #         echo "$HOME/bin" >> $GITHUB_PATH
+
+  #     - name: Install uv
+  #       run: |
+  #         curl -LsSf https://astral.sh/uv/install.sh | sh
+  #         source $HOME/.cargo/env
+  #         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+  #     - name: Install system dependencies for spellcheck
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y enchant-2 libenchant-2-dev
+
+  #     - name: Verify toolchain installation
+  #       run: |
+  #         just --version
+  #         uv --version
+
+  #     - name: Setup uv cache
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ${{ env.UV_CACHE_DIR }}
+  #         key:
+  #           uv-cache-ubuntu-spell-${{ hashFiles('pyproject.toml')
+  #           }}
+  #         restore-keys: |
+  #           uv-cache-ubuntu-spell-
+
+  #     - name: Create Python environment and install tools
+  #       run: |
+  #         just create cpy314
+  #         just install-tools cpy314
+
+  #     - name: Run spellcheck
+  #       run: |
+  #         # Navigate to docs directory and run sphinx spellcheck
+  #         cd docs && ../.venvs/cpy314/bin/sphinx-build -b spelling . _spelling
+
+  # FIXME: 1 warning, 52 errors in 0.82s
+  #
+  # tests:
+  #   name: Test Suite
+  #   runs-on: ubuntu-24.04
+
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #       with:
+  #         submodules: recursive
+
+  #     - name: Install Just
+  #       run: |
+  #         curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+  #         echo "$HOME/bin" >> $GITHUB_PATH
+
+  #     - name: Install uv
+  #       run: |
+  #         curl -LsSf https://astral.sh/uv/install.sh | sh
+  #         source $HOME/.cargo/env
+  #         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+  #     - name: Verify toolchain installation
+  #       run: |
+  #         just --version
+  #         uv --version
+
+  #     - name: Setup uv cache
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ${{ env.UV_CACHE_DIR }}
+  #         key:
+  #           uv-cache-ubuntu-test-${{ hashFiles('pyproject.toml')
+  #           }}
+  #         restore-keys: |
+  #           uv-cache-ubuntu-test-
+
+  #     - name: Create Python environment and install package
+  #       run: |
+  #         just create cpy314
+  #         just install-tools cpy314
+  #         just install-dev cpy314
+
+  #     - name: Run test suite
+  #       run: just test cpy314
+
+  build-schema:
+    name: FlatBuffers Schema Build
+    needs: identifiers
+    runs-on: ubuntu-24.04
+
+    env:
+      BASE_REPO: ${{ needs.identifiers.outputs.base_repo }}
+      BASE_BRANCH: ${{ needs.identifiers.outputs.base_branch }}
+      PR_NUMBER: ${{ needs.identifiers.outputs.pr_number }}
+      PR_REPO: ${{ needs.identifiers.outputs.pr_repo }}
+      PR_BRANCH: ${{ needs.identifiers.outputs.pr_branch }}
+
+    strategy:
+      matrix:
+        python-env: [cpy314, cpy311, pypy311]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Just
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Install uv (Astral)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.cargo/env
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install FlatBuffers compiler
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Install exact same version as used in development (v25.9.23)
+          FLATC_VERSION="25.9.23"
+          TEMP_DIR=$(mktemp -d)
+
+          echo "==> Installing FlatBuffers compiler v${FLATC_VERSION}..."
+          cd "${TEMP_DIR}"
+
+          # Use gh to download with proper authentication and redirect handling
+          gh release download "v${FLATC_VERSION}" \
+            --repo google/flatbuffers \
+            --pattern "Linux.flatc.binary.g++-13.zip"
+
+          # Verify download
+          if [ ! -f "Linux.flatc.binary.g++-13.zip" ]; then
+            echo "ERROR: Failed to download flatc binary"
+            exit 1
+          fi
+
+          ls -lh Linux.flatc.binary.g++-13.zip
+          unzip Linux.flatc.binary.g++-13.zip
+          sudo mv flatc /usr/local/bin/flatc
+          sudo chmod +x /usr/local/bin/flatc
+          rm -rf "${TEMP_DIR}"
+
+          # Install cloc for code statistics
+          sudo apt-get update
+          sudo apt-get install -y cloc
+
+      - name: Verify toolchain installation
+        run: |
+          just --version
+          uv --version
+          flatc --version
+
+      - name: Setup uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key:
+            uv-cache-ubuntu-fbs-${{ matrix.python-env }}-${{
+            hashFiles('pyproject.toml') }}
+          restore-keys: |
+            uv-cache-ubuntu-fbs-${{ matrix.python-env }}-
+            uv-cache-ubuntu-fbs-
+
+      - name: Create Python environment
+        run: |
+          just create ${{ matrix.python-env }}
+          just install-tools ${{ matrix.python-env }}
+
+      - name: Store original generated files checksum
+        run: |
+          echo "==> Computing checksums of committed FlatBuffers files..."
+          find src/autobahn/wamp/gen/ -name "*.py" -o -name "*.bfbs" | sort | xargs sha256sum > /tmp/original-checksums.txt
+          echo "Found $(wc -l < /tmp/original-checksums.txt) committed generated files"
+
+      - name: Build FlatBuffers binary schema & Python wrappers
+        run: just build-fbs
+
+      - name: List FlatBuffers artifacts
+        run: |
+          flatc --version
+          echo "Generated FlatBuffers binary schema & Python wrappers:"
+          echo "======================================================"
+          cloc src/autobahn/wamp/gen/
+          echo ""
+          ls -la src/autobahn/wamp/gen/schema/
+          echo ""
+          openssl sha256 src/autobahn/wamp/gen/schema/*.bfbs
+          echo ""
+
+      - name: Verify regenerated files match committed files
+        run: |
+          echo "==> Computing checksums of regenerated files..."
+          find src/autobahn/wamp/gen/ -name "*.py" -o -name "*.bfbs" | sort | xargs sha256sum > /tmp/regenerated-checksums.txt
+
+          echo "==> Comparing checksums..."
+          if diff -u /tmp/original-checksums.txt /tmp/regenerated-checksums.txt; then
+            echo "✅ SUCCESS: All regenerated FlatBuffers files match committed versions exactly!"
+            echo "This confirms the build process is reproducible and up-to-date."
+          else
+            echo "❌ FAILURE: Regenerated files differ from committed versions!"
+            echo ""
+            echo "This indicates either:"
+            echo "1. The committed files were generated with a different flatc version"
+            echo "2. The committed files were manually modified"
+            echo "3. The build process has changed since files were last committed"
+            echo ""
+            echo "Please run 'just clean-fbs && just build-fbs' locally and commit the results."
+            exit 1
+          fi
+
+      # Upload FlatBuffers artifacts (split into two uploads since verified action
+      # doesn't support multi-line paths like actions/upload-artifact@v4)
+      - name: Upload FlatBuffers generated code
+        uses: wamp-proto/wamp-cicd/actions/upload-artifact-verified@main
+        with:
+          name: flatbuffers-gen-${{ matrix.python-env }}
+          path: ${{ github.workspace }}/src/autobahn/wamp/gen/
+          retention-days: 7
+
+      - name: Upload FlatBuffers schema files
+        uses: wamp-proto/wamp-cicd/actions/upload-artifact-verified@main
+        with:
+          name: flatbuffers-schema-${{ matrix.python-env }}
+          path: ${{ github.workspace }}/src/autobahn/wamp/flatbuffers/
+          retention-days: 7
+
+  build-package:
+    name: Package Build
+    runs-on: ubuntu-24.04
+    needs: [identifiers, quality-checks, build-schema, test-serdes]
+    #    needs: [identifiers, quality-checks, tests, build-schema, test-serdes]
+
+    env:
+      BASE_REPO: ${{ needs.identifiers.outputs.base_repo }}
+      BASE_BRANCH: ${{ needs.identifiers.outputs.base_branch }}
+      PR_NUMBER: ${{ needs.identifiers.outputs.pr_number }}
+      PR_REPO: ${{ needs.identifiers.outputs.pr_repo }}
+      PR_BRANCH: ${{ needs.identifiers.outputs.pr_branch }}
+
+    strategy:
+      matrix:
+        python-env: [cpy314, cpy311, pypy311]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Just
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Install uv (Astral)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.cargo/env
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Verify toolchain installation
+        run: |
+          just --version
+          uv --version
+
+      - name: Setup uv cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.UV_CACHE_DIR }}
+          key:
+            uv-cache-ubuntu-build-${{ matrix.python-env }}-${{
+            hashFiles('pyproject.toml') }}
+          restore-keys: |
+            uv-cache-ubuntu-build-${{ matrix.python-env }}-
+            uv-cache-ubuntu-build-
+
+      - name: Create Python environment and install tools
+        run: |
+          just create ${{ matrix.python-env }}
+          just install-tools ${{ matrix.python-env }}
+
+      - name: Build package
+        run: just build ${{ matrix.python-env }}
+
+      - name: List built artifacts
+        run: |
+          echo "Built artifacts for ${{ matrix.python-env }}:"
+          ls -la dist/
+
+      - name: Upload build artifacts
+        uses: wamp-proto/wamp-cicd/actions/upload-artifact-verified@main
+        with:
+          name: package-${{ matrix.python-env }}
+          path: ${{ github.workspace }}/dist/
+          retention-days: 14

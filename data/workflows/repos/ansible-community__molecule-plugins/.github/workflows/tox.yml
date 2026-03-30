@@ -1,0 +1,45 @@
+---
+name: tox
+
+on:
+  merge_group:
+    branches:
+      - "main"
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  checks: read
+  contents: read
+  id-token: write
+  packages: write
+  pull-requests: write
+
+jobs:
+  tox:
+    uses: ansible/team-devtools/.github/workflows/tox.yml@main
+    with:
+      default_python: "3.13" # used by jobs in other_names
+      max_python: "3.13"
+      min_python: "3.10"
+      other_names: |
+        lint
+        pkg
+        devel
+        py310
+        py311
+        py312
+        py313
+      run_pre: ./tools/test-setup.sh
+      skip_explode: "1"

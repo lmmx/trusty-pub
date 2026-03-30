@@ -1,0 +1,55 @@
+name: Publish to PyPI
+
+on:
+  workflow_run:
+    workflows:
+      - Tests
+    types:
+      - completed
+    branches:
+      - main
+    workflow_dispatch:
+
+jobs:
+  autotag:
+    name: Create tag if the commit has new version implemented
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      tagcreated: ${{ steps.autotag.outputs.tagcreated }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Autotag
+        id: autotag
+        uses: butlerlogic/action-autotag@1.1.2
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        with:
+          strategy: regex
+          root: "oml/__init__.py"
+          regex_pattern: >
+            ^__version__ = ['"]([^'"]*)['"]
+          tag_prefix: "release."
+
+  build_and_publish_to_pypi:
+    name: Build and publish Python distribution to PyPI
+    needs: autotag
+    if: ${{ needs.autotag.outputs.tagcreated == 'yes' }}
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10.0"
+
+    - name: Build a binary wheel
+      run: |
+        make build_wheel
+
+    - name: Publish distribution to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}

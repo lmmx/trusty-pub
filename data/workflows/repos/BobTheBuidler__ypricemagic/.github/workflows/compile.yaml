@@ -1,0 +1,53 @@
+name: Compile
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - '.github/workflows/**'
+      - '!.github/workflows/compile.yaml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        id: checkout
+        uses: actions/checkout@v6
+        with:
+          # Check out the PR branch
+          ref: ${{ github.head_ref }}
+        continue-on-error: true
+
+      - name: Branch no longer exists on GitHub
+        if: failure() && steps.checkout.outcome == 'failure'
+        run: |
+          echo "The branch ${{ github.head_ref }} no longer exists on GitHub"
+          exit 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Mypycify
+        uses: BobTheBuidler/mypycify@v0.3.3
+        with:
+          python-version: "3.13"
+          hash-key: |
+            pyproject.toml
+            setup.py
+            ypricemagic/**/*.py
+          pip-cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+          normalize-source: true
+          push-source: true
+          commit-message: "chore: compile C files for source control"
+          trigger-pr-number: ${{ github.event.pull_request.number }}
+          trigger-branch-name: ${{ github.head_ref || github.ref_name }}

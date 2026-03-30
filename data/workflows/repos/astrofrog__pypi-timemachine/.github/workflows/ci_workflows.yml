@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@28e947497bed4d6ec3fa1d66d198e95a1d17bc63  # v2.2.1
+    with:
+      envs: |
+        - macos: py311-test
+        - macos: py312-test
+        - macos: py313-test
+        - linux: py311-test
+        - linux: py312-test
+        - linux: py313-test
+        - windows: py311-test
+        - windows: py312-test
+        - windows: py313-test
+
+  publish:
+    needs: [tests]
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/publish_pure_python.yml@v2
+    with:
+      test_extras: test
+      test_command: pytest --pyargs pypi_timemachine
+    secrets:
+      pypi_token: ${{ secrets.pypi_token }}

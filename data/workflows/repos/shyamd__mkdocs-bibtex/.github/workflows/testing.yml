@@ -1,0 +1,70 @@
+name: testing
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v1
+      with:
+        python-version: 3.12
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-testing.txt
+
+    - name: Lint with Ruff
+      run: ruff check src
+
+    - name: Lint with mypy
+      run: mypy --ignore-missing-imports src
+
+  test:
+    strategy:
+      max-parallel: 6
+      matrix:
+        os: [ubuntu-latest]
+        python-version: [3.9, '3.10', 3.11, 3.12]
+        pandoc-version: [2.14.0.3, 3.6.2]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - uses: r-lib/actions/setup-pandoc@v2
+      with:
+        pandoc-version: ${{ matrix.pandoc-version }}
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov responses
+
+    - name: Test with pytest
+      run: |
+        pip install -e .
+        pytest --cov=mkdocs_bibtex --cov-report=xml
+
+    - uses: codecov/codecov-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./coverage.xml

@@ -1,0 +1,34 @@
+name: Test Against Minimum VCS Versions
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: '0 7 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build Docker image
+        run: docker build -t minimum-vcs .github/workflows/tools/minimum-vcs
+
+      - name: Run tests
+        run: |
+          docker run \
+            --rm \
+            -v $PWD:/docked \
+            -w /docked \
+            minimum-vcs \
+            tox -e py -- -vv -m "not describe_exclude"
+
+# vim:set et sts=2:

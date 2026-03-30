@@ -1,0 +1,22 @@
+name: actionlint
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - ".github/**"
+  workflow_dispatch: {}
+
+jobs:
+  lint_workflows:
+    runs-on: pulumi-ubuntu-8core
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Lint actions
+        uses: reviewdog/action-actionlint@v1.67.0
+        with:
+          actionlint_flags: "-config-file .actionlint.yml"

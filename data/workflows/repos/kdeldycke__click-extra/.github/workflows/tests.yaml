@@ -1,0 +1,292 @@
+---
+name: 🔬 Tests
+"on":
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - click_extra/**
+      - tests/**
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/tests.yaml
+  pull_request:
+    branches-ignore:
+      - prepare-release
+    paths:
+      - click_extra/**
+      - tests/**
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/tests.yaml
+  schedule:
+    # Run tests monthly to catch regressions from dependency or environment changes.
+    - cron: "17 9 1 * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.event.head_commit.message, '[changelog] Release') }}
+
+jobs:
+
+  once-tests:
+    name: 🔂 Once tests
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: astral-sh/setup-uv@v7.3.1
+      - name: Install Python
+        run: uv --no-progress venv --python 3.14
+
+      - name: Run stable CLI
+        run: |
+          uvx                                     click-extra       --version
+          uvx     --from click-extra  --          click-extra-demo  --version
+          uv run  --with click-extra  --          click-extra       --version
+          uv run  --with click-extra  --          click-extra-demo  --version
+          uv run  --with click-extra  -m          click_extra       --version
+          uv run  --with click-extra  python -m   click_extra       --version
+
+      - name: Run dev CLI
+        run: |
+          uvx     --from git+https://github.com/kdeldycke/click-extra   --          click-extra       --version
+          uvx     --from git+https://github.com/kdeldycke/click-extra   --          click-extra-demo  --version
+          uv run  --with git+https://github.com/kdeldycke/click-extra   --          click-extra       --version
+          uv run  --with git+https://github.com/kdeldycke/click-extra   --          click-extra-demo  --version
+          uv run  --with git+https://github.com/kdeldycke/click-extra   -m          click_extra       --version
+          uv run  --with git+https://github.com/kdeldycke/click-extra   python -m   click_extra       --version
+
+      - name: Run stable CLI via uv tool
+        run: |
+          uv --no-progress tool install click-extra
+          click-extra       --version
+          click-extra-demo  --version
+          uv --no-progress tool uninstall click-extra
+      - name: Run dev CLI via uv tool
+        run: |
+          uv --no-progress tool install git+https://github.com/kdeldycke/click-extra
+          click-extra       --version
+          click-extra-demo  --version
+          uv --no-progress tool uninstall click-extra
+
+      - name: Run CLI via pipx
+        run: |
+          uv --no-progress tool install pipx
+          pipx run                                                      click-extra       --version
+          pipx run --spec click-extra                                   click-extra       --version
+          pipx run --spec click-extra                                   click-extra-demo  --version
+          pipx run --spec git+https://github.com/kdeldycke/click-extra  click-extra       --version
+          pipx run --spec git+https://github.com/kdeldycke/click-extra  click-extra-demo  --version
+          uv --no-progress tool uninstall pipx
+
+      - name: Run CLI via pip
+        run: |
+          pip install click-extra
+          click-extra       --version
+          click-extra-demo  --version
+
+      - name: Install project
+        run: uv --no-progress sync --frozen --all-extras --group test
+      - name: Run once-only tests
+        run: uv --no-progress run --frozen -- pytest -m once
+
+  tests:
+    strategy:
+      # We delegate the failure decision to each job, by the way of the "continue-on-error" flag.
+      fail-fast: false
+      matrix:
+        # Available OS: https://github.com/actions/runner-images#available-images
+        # Only targets 2 variants per platforms to keep the matrix small.
+        os:
+          - ubuntu-24.04-arm # arm64
+          - ubuntu-slim      # x86
+          - macos-26         # arm64
+          - macos-15-intel   # x86
+          - windows-11-arm   # arm64
+          - windows-2025     # x86
+        python-version:
+          - "3.10"
+          # Ignore intermediate versions to reduce CI load.
+          # - "3.11"
+          # - "3.12"
+          # - "3.13"
+          - "3.14"
+          - "3.14t"
+          - "3.15"
+          - "3.15t"
+        click-version:
+          - released
+          - stable
+          - main
+        cloup-version:
+          - released
+          - master
+        # Removes from the matrix some combinations for development versions of Click and Cloup. This reduce the size
+        # of the matrix for tests on non-released versions. While keeping the full exhaustive tests on the released
+        # versions of Click and Cloup.
+        # XXX Ideally, the exclude section below could be reduced to:
+        #   exclude:
+        #     - click-version: stable
+        #       os:
+        #         - ubuntu-slim
+        #         - macos-15-intel
+        #         - windows-2025
+        #       python-version:
+        #         - "3.10"
+        #         - "3.11"
+        #         - "3.12"
+        #         - "3.13"
+        #         - "3.15"
+        #         - "3.15t"
+        #     - click-version: main
+        #       os:
+        #         - ubuntu-slim
+        #         - macos-15-intel
+        #         - windows-2025
+        #       python-version:
+        #         - "3.10"
+        #         - "3.11"
+        #         - "3.12"
+        #         - "3.13"
+        #         - "3.15"
+        #         - "3.15t"
+        #     - cloup-version: master
+        #       os:
+        #         - ubuntu-slim
+        #         - macos-15-intel
+        #         - windows-2025
+        #       python-version:
+        #         - "3.10"
+        #         - "3.11"
+        #         - "3.12"
+        #         - "3.13"
+        #         - "3.15"
+        #         - "3.15t"
+        exclude:
+          # Python 3.10 has no native ARM64 Windows build.
+          - os: windows-11-arm
+            python-version: "3.10"
+          # Only targets the latest OS for each platform.
+          - os: ubuntu-slim
+            click-version: stable
+          - os: ubuntu-slim
+            click-version: main
+          - os: ubuntu-slim
+            cloup-version: master
+          - os: macos-15-intel
+            click-version: stable
+          - os: macos-15-intel
+            click-version: main
+          - os: macos-15-intel
+            cloup-version: master
+          - os: windows-2025
+            click-version: stable
+          - os: windows-2025
+            click-version: main
+          - os: windows-2025
+            cloup-version: master
+          # Exclude old Python version. Only test on latest stable release.
+          - python-version: "3.10"
+            click-version: stable
+          - python-version: "3.10"
+            click-version: main
+          - python-version: "3.10"
+            cloup-version: master
+          # Exclude Python's dev version.
+          - python-version: "3.15"
+            click-version: stable
+          - python-version: "3.15"
+            click-version: main
+          - python-version: "3.15"
+            cloup-version: master
+          - python-version: "3.15t"
+            click-version: stable
+          - python-version: "3.15t"
+            click-version: main
+          - python-version: "3.15t"
+            cloup-version: master
+        include:
+          # Default all jobs as stable, unless marked otherwise below.
+          - state: stable
+          # XXX Python 3.15 is still in development.
+          - state: unstable
+            python-version: "3.15"
+          - state: unstable
+            python-version: "3.15t"
+    name: |
+      ${{ matrix.state == 'stable' && '✅' || '⁉️' }}
+      ${{ matrix.os }} /
+      py${{ matrix.python-version }} /
+      Click ${{ matrix.click-version }} /
+      Cloup ${{ matrix.cloup-version }}
+    runs-on: ${{ matrix.os }}
+    # We keep going when a job flagged as not stable fails.
+    continue-on-error: ${{ matrix.state == 'unstable' }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: astral-sh/setup-uv@v7.3.1
+      - name: Force native ARM64 Python on Windows ARM64
+        # Workaround for https://github.com/astral-sh/uv/issues/12906: uv defaults to x86_64 Python on ARM64 Windows,
+        # relying on transparent emulation. Native extensions with Rust (e.g., test-results-parser from codecov-cli)
+        # fail to compile because the ARM64 Rust toolchain lacks the x86_64-pc-windows-msvc target. Setting UV_PYTHON
+        # to an architecture-qualified specifier forces uv (and uvx) to use native ARM64 Python for all steps.
+        if: runner.os == 'Windows' && runner.arch == 'ARM64'
+        shell: bash
+        run: echo "UV_PYTHON=cpython-${{ matrix.python-version }}-aarch64" >> "$GITHUB_ENV"
+      - name: Install Python ${{ matrix.python-version }}
+        # If UV cannot find the requested Python version, it exits with code 2, which let the job pass unnoticed on
+        # Windows. So we force the shell to bash, even on Windows, and "set -e" to ensure any error in the install
+        # process is caught and fails the job. It works because Windows runners too Git Bash available).
+        shell: bash
+        run: |
+          set -e
+          uv --no-progress venv --python "${UV_PYTHON:-${{ matrix.python-version }}}"
+      - name: Install project
+        # Install all extras, so we can check any incompatibility.
+        run: >
+          uv --no-progress sync --frozen --all-extras --group test
+
+      - name: Run local CLI
+        shell: bash
+        run: |
+          uv run -- click-extra         --version
+          uv run -- click-extra-demo    --version
+          uv run        -m click_extra  --version
+          uv run python -m click_extra  --version
+
+      - name: Unittests
+        run: >
+          uv --no-progress run --frozen
+          ${{ matrix.click-version != 'released'
+          && format('--with "git+https://github.com/pallets/click.git@{0}"', matrix.click-version) || '' }}
+          ${{ matrix.cloup-version != 'released'
+          && format('--with "git+https://github.com/janluke/cloup.git@{0}"', matrix.cloup-version) || ''}}
+          --
+          pytest -m "not once"
+
+      - name: Upload coverage to Codecov
+        # Skip on prepare-release PRs: Codecov cannot create commits on protected branches.
+        if: github.head_ref != 'prepare-release'
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        shell: bash
+        run: >
+          uvx --no-progress 'codecov-cli==11.2.6'
+          --auto-load-params-from githubactions
+          upload-process
+          --git-service github
+          --report-type coverage
+          --token "${CODECOV_TOKEN}"
+      - name: Upload test results to Codecov
+        if: github.head_ref != 'prepare-release'
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        shell: bash
+        run: >
+          uvx --no-progress 'codecov-cli==11.2.6'
+          --auto-load-params-from githubactions
+          upload-process
+          --git-service github
+          --report-type test_results
+          --token "${CODECOV_TOKEN}"

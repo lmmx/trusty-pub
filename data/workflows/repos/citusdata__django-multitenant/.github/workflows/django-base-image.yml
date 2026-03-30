@@ -1,0 +1,37 @@
+name: "Django MT Docker Image For Tests"
+on:
+  schedule:
+    - cron: 30 0 * * *
+  push:
+    branches:
+      - "python-all-versions/**"
+      - "main"
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    name: Build Django Base Image
+
+    steps:
+      - uses: actions/checkout@v3
+     
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USER_NAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Build and push
+        env:
+          DOCKER_BUILDKIT: 1
+        run: |
+          set -euxo pipefail
+          docker build -t citusdata/python-all-versions  base_gha_image
+          if [[ ${GITHUB_REF##*/} == "main" ]]; then
+            docker push citusdata/python-all-versions
+          else
+            docker tag citusdata/python-all-versions citusdata/python-all-versions:${GITHUB_REF##*/}
+            docker push citusdata/python-all-versions:${GITHUB_REF##*/}
+          fi
+          
+

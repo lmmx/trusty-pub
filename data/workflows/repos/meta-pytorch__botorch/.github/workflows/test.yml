@@ -1,0 +1,17 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+
+  tests-and-coverage:
+    name: Test & Coverage
+    uses: ./.github/workflows/reusable_test.yml
+    with:
+      use_latest_pytorch_gpytorch: true
+    secrets: inherit

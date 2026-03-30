@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches-ignore:
+      - "dependabot/**"
+  pull_request:
+
+jobs:
+  Windows:
+    name: 'Windows (${{ matrix.python }}, ${{ matrix.arch }}${{ matrix.extra_name }})'
+    timeout-minutes: 30
+    runs-on: 'windows-latest'
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        arch: ['x86', 'x64']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup python
+        uses: actions/setup-python@v4
+        with:
+          # This allows the matrix to specify just the major.minor version while still
+          # expanding it to get the latest patch version including alpha releases.
+          # This avoids the need to update for each new alpha, beta, release candidate,
+          # and then finally an actual release version.  actions/setup-python doesn't
+          # support this for PyPy presently so we get no help there.
+          #
+          # CPython -> 3.9.0-alpha - 3.9.X
+          # PyPy    -> pypy-3.7
+          python-version: ${{ fromJSON(format('["{0}", "{1}"]', format('{0}.0-alpha - {0}.X', matrix.python), matrix.python))[startsWith(matrix.python, 'pypy')] }}
+          architecture: '${{ matrix.arch }}'
+          cache: pip
+          cache-dependency-path: test-requirements.txt
+      - name: Run tests
+        run: ./ci.sh
+        shell: bash
+      - if: always()
+        uses: codecov/codecov-action@v3
+        with:
+          directory: empty
+          name: Windows (${{ matrix.python }}, ${{ matrix.arch }}${{ matrix.extra_name }})
+          flags: Windows,${{ matrix.python }}
+
+  Ubuntu:
+    name: 'Ubuntu (${{ matrix.python }}${{ matrix.extra_name }})'
+    timeout-minutes: 20
+    runs-on: 'ubuntu-latest'
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['pypy-3.9', '3.9', '3.10', '3.11', '3.12', '3.13', 'pypy-3.9-nightly']
+        check_formatting: ['0']
+        extra_name: ['']
+        include:
+          - python: '3.11'
+            check_formatting: '1'
+            extra_name: ', check formatting'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup python
+        uses: actions/setup-python@v4
+        if: "!endsWith(matrix.python, '-dev')"
+        with:
+          python-version: ${{ fromJSON(format('["{0}", "{1}"]', format('{0}.0-alpha - {0}.X', matrix.python), matrix.python))[startsWith(matrix.python, 'pypy')] }}
+          cache: pip
+          cache-dependency-path: test-requirements.txt
+      - name: Setup python (dev)
+        uses: deadsnakes/action@v2.0.2
+        if: endsWith(matrix.python, '-dev')
+        with:
+          python-version: '${{ matrix.python }}'
+      - name: Install python testsuite
+        if: endsWith(matrix.python, '-dev')
+        run: |
+          version=$(echo $PYVERSION | sed 's/-dev//')
+          sudo apt-get install -y --no-install-recommends libpython${version}-testsuite
+        env:
+          PYVERSION: '${{ matrix.python }}'
+      - name: Run tests
+        run: ./ci.sh
+        env:
+          CHECK_FORMATTING: '${{ matrix.check_formatting }}'
+      - if: always()
+        uses: codecov/codecov-action@v3
+        with:
+          directory: empty
+          name: Ubuntu (${{ matrix.python }}${{ matrix.extra_name }})
+          flags: Ubuntu,${{ matrix.python }}
+
+  macOS:
+    name: 'macOS (${{ matrix.python }})'
+    timeout-minutes: 20
+    runs-on: 'macos-latest'
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13', 'pypy-3.9-nightly']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ fromJSON(format('["{0}", "{1}"]', format('{0}.0-alpha - {0}.X', matrix.python), matrix.python))[startsWith(matrix.python, 'pypy')] }}
+          cache: pip
+          cache-dependency-path: test-requirements.txt
+      - name: Run tests
+        run: ./ci.sh
+      - if: always()
+        uses: codecov/codecov-action@v3
+        with:
+          directory: empty
+          name: macOS (${{ matrix.python }})
+          flags: macOS,${{ matrix.python }}

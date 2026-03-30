@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - trunk
+
+  pull_request:
+    branches:
+      - trunk
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.TOX_ENV }} ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.14", "3.13", "3.12", "3.11", "3.10", "3.9"]
+        TOX_ENV: ["lint", "py", "mypy"]
+        exclude:
+          - TOX_ENV: "lint"
+        include:
+          - TOX_ENV: "lint"
+            python: "3.12"
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Tox Run
+        run:  |
+          pip install tox;
+          TOX_ENV="${{ matrix.TOX_ENV }}";
+          echo "Starting: ${TOX_ENV} ${PUSH_DOCS}"
+          if [[ -n "${TOX_ENV}" ]]; then
+            tox -e "$TOX_ENV";
+          fi

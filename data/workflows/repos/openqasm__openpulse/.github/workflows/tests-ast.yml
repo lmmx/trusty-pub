@@ -1,0 +1,72 @@
+name: Reference Python Package
+
+on:
+  [push, pull_request]
+
+jobs:
+  build:
+      uses: ./.github/workflows/build-ast.yml
+  tests:
+    name: OpenPulse AST tests
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+            # Build on the oldest and latest supported Pythons
+            # and on the oldest and latest ANTLR version supported
+            # by each of those Pythons:
+            - python-version: '3.9'
+              antlr-version: '4.7'
+            - python-version: '3.9'
+              antlr-version: '4.13'
+            - python-version: '3.13'
+              antlr-version: '4.9'
+            - python-version: '3.13'
+              antlr-version: '4.13'
+    defaults:
+      run:
+        working-directory: source/openpulse
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: openpulse-python-wheel
+          path: ./source/openpulse/
+
+      - name: Install package
+        run: |
+          set -e
+          pip install --upgrade pip wheel
+          pip install -r requirements-dev.txt
+          pip install 'antlr4_python3_runtime==${{ matrix.antlr-version }}'
+          pip install "$(echo openpulse-*.whl)[all]"
+
+      - name: Check openpulse format
+        run: black --check --diff openpulse tests
+
+      - name: Check openpulse style
+        working-directory: source/openpulse/openpulse
+        run: pylint .
+
+      - name: Check openpulse tests style
+        working-directory: source/openpulse/tests
+        run: pylint .
+
+      - name: Run openpulse tests
+        run: |
+          # Swap into the testing directory so the imported `openpulse` is the
+          # wheel version not the current-directory version.  The
+          # `--import-mode=importlib` stops pytest from modifying the path to
+          # accidentally put the checked-out version (with no ANTLR) back.
+          cd tests
+          pytest -vv --color=yes --import-mode=importlib .

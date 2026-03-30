@@ -1,0 +1,197 @@
+---
+name: Lint and test
+on:
+  pull_request:
+
+env:
+  PYTHON_VERSION: '3.10'
+
+
+jobs:
+  lint:
+    name: Run linters
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Linting and static code checks
+        run: uv run pre-commit run --show-diff-on-failure --color=always --all-files
+  test-no-alpha:
+    name: Run tests without alpha features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: Turn off alpha features
+        run: uv run python dev.py alpha --off
+      - name: Run pytest
+        env:
+          IS_GITHUB_ACTIONS: "true"
+        run: uv run pytest tests/test_unit -n8
+
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    env:
+      CDF_CLUSTER: ${{ vars.CDF_CLUSTER }}
+      CDF_PROJECT: ${{ vars.CDF_PROJECT }}
+      IDP_CLIENT_ID: ${{ vars.IDP_CLIENT_ID }}
+      IDP_CLIENT_SECRET: ${{ secrets.IDP_CLIENT_SECRET }}
+      IDP_TOKEN_URL: ${{ vars.IDP_TOKEN_URL }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: Run pytest
+        env:
+          IS_GITHUB_ACTIONS: "true"
+        run: uv run pytest tests/test_unit -n8
+  coverage:
+    name: Create coverage report
+    runs-on: ubuntu-latest
+    env:
+      CDF_CLUSTER: ${{ vars.CDF_CLUSTER }}
+      CDF_PROJECT: ${{ vars.CDF_PROJECT }}
+      IDP_CLIENT_ID: ${{ vars.IDP_CLIENT_ID }}
+      IDP_CLIENT_SECRET: ${{ secrets.IDP_CLIENT_SECRET }}
+      IDP_TOKEN_URL: ${{ vars.IDP_TOKEN_URL }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: 3.11
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: Create test coverage report
+        env:
+          IS_GITHUB_ACTIONS: "true"
+        run: uv run pytest --cov=cognite_toolkit/ --cov-config=pyproject.toml --cov-report=xml:coverage.xml tests/   -n8
+      - name: Push coverage report to PR
+        uses: orgoro/coverage@3f13a558c5af7376496aa4848bf0224aead366ac # v3.2
+        with:
+            coverageFile: coverage.xml
+            thresholdAll: 0.8
+            token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: cognitedata/toolkit
+
+  dry-run-demo:
+    runs-on: ubuntu-latest
+    env:
+        CDF_CLUSTER: ${{ vars.CDF_CLUSTER }}
+        CDF_PROJECT: ${{ vars.CDF_PROJECT }}
+        IDP_CLIENT_ID: ${{ vars.IDP_CLIENT_ID }}
+        IDP_CLIENT_SECRET: ${{ secrets.IDP_CLIENT_SECRET }}
+        IDP_TOKEN_URL: ${{ vars.IDP_TOKEN_URL }}
+        LOGIN_FLOW: client_credentials
+    name: Dry Run Demo
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: Build the package
+        run: uv build
+      - name: Initialize project
+        run: uv run cdf modules init demo_project --clean --all --library-url "https://github.com/cognitedata/toolkit-data/releases/download/latest/packages.zip"
+      - name: "Pre-processing for demo environment"
+        run: uv run python ./demo/preproc.py --modules all
+      - name: "Build the templates"
+        run: uv run cdf build --config-yaml demo -o demo_project
+      - name: "Verify and create access rights"
+        run: uv run cdf auth verify --no-prompt
+        # Temporarly suspending while investigating
+      # - name: "Test clean --dry-run --module=my_module"
+      #   run: |
+      #     uv run cdf clean --env demo --dry-run -m my_module --verbose
+      # - name: "Deploy the templates --dry-run"
+      #   run: |
+      #     uv run cdf deploy --drop --env demo --dry-run
+
+
+  Build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - id: version
+        name: Toolkit Version
+        # Read the version from the cognite_toolkit/_version.py file
+        run: echo "version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' cognite_toolkit/_version.py)" >> $GITHUB_ENV
+
+      - name: Build Image
+        run: |
+          docker build -t cognite/toolkit:${{ env.version }} -t cognite/toolkit:latest .
+
+      - name: Check help command
+        run: docker run cognite/toolkit:latest cdf --help
+
+      - name: Test Image
+        run: |
+          docker run -v $(pwd):/app cognite/toolkit:latest cdf modules init my_org --all
+
+      - name: Verfiy Created Files
+        run: |
+         if [ -d "my_org" ]; then
+              echo "My org successfully created"
+            else
+              echo "My org failed creation"
+              exit 1
+         fi
+      - name: Inspection
+        run: |
+          ls -l my_org
+          ls -l my_org/modules
+
+  validate-description:
+    name: Validate PR description
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: Dump description to file
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const fs = require('fs');
+            const description = context.payload.pull_request.body;
+            fs.writeFileSync('last_git_message.txt', description);
+      - name: Validate Changelog section in PR description
+        run: uv run python dev.py changelog

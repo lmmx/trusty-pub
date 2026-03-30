@@ -1,0 +1,49 @@
+name: release
+on:
+    workflow_dispatch:
+        inputs:
+            release_version:
+                description: 'Version number for new release'
+                required: true
+jobs:
+    build:
+        runs-on: ubuntu-24.04
+        strategy:
+            matrix:
+                python-version: [ '3.8', '3.9', '3.10', '3.11' ]
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: set up Python ${{ matrix.python-version }}
+                uses: actions/setup-python@v5
+                with:
+                    python-version: ${{ matrix.python-version }}
+            -   name: install dependencies
+                run: |
+                    python -m pip install --upgrade pip
+                    pip install -U tox tox-gh-actions setuptools wheel
+                    pip install -r test-requirements.txt
+            -   name: test with tox
+                env:
+                    PYTEST_ADDOPTS: "--strict --cov --cov-report=term-missing --cov-report=xml"
+                run: tox
+            -   name: codecov
+                uses: codecov/codecov-action@v5
+    deploy:
+        runs-on: ubuntu-latest
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: build sdist bdist_wheel
+                run: |
+                    VERSION=${{ github.event.inputs.release_version }}
+                    sed -i "s/version='.*'/version='$VERSION'/g" setup.py
+                    git config user.email contact@dhatim.com
+                    git config user.name ${{ github.actor }}
+                    git commit . -m "Bump version to ${VERSION}"
+                    git push origin master
+                    git tag $VERSION
+                    git push origin $VERSION
+                    python setup.py sdist bdist_wheel
+            -   name: deploy on pypi
+                uses: pypa/gh-action-pypi-publish@master
+                with:
+                    password: ${{ secrets.PYPI_API_TOKEN }}

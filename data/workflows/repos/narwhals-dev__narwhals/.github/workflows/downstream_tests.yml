@@ -1,0 +1,657 @@
+name: Test Downstream Libraries - Fast
+
+on:
+  pull_request:
+
+env:
+  PY_COLORS: 1
+
+jobs:
+  altair:
+    env:
+      UV_SYSTEM_PYTHON: 1
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: altair-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-altair
+        run: |
+          git clone https://github.com/vega/altair.git --depth=1
+          cd altair
+          git log
+      - name: install-basics
+        run: uv pip install --upgrade tox virtualenv setuptools
+      - name: install-altair-dev
+        run: |
+          cd altair
+          # Temporary pin until it's addressed upstream.
+          uv pip install "pandas<3"
+          uv pip install -e ".[dev, all]"
+      - name: install-narwhals-dev
+        run: |
+          uv pip uninstall narwhals
+          uv pip install -e .
+      - name: show-deps
+        run: uv pip freeze
+      - name: Run pytest
+        run: |
+          cd altair
+          pytest tests
+      - name: Run mypy
+        run: |
+          cd altair
+          mypy altair tests
+
+  marimo:
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+        dependencies: ["core,optional"]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: marimo-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-marimo
+        run: |
+          git clone https://github.com/marimo-team/marimo.git --depth=1
+          cd marimo
+          git log
+      - name: install-narwhals-dev
+        run: |
+          cd marimo
+          uv add ../ --editable
+          # Temporary pin until it's addressed upstream.
+          uv add "pandas<3" --group test-optional
+          # Temporary pin to get CI green
+          uv add "sqlglot<28.7.0" --group test-optional
+      - name: show-deps
+        run: |
+          cd marimo
+          uv tree --group test-optional
+      - name: Create assets directory, copy over index.html
+        continue-on-error: true
+        run: |
+          mkdir -p marimo/marimo/_static/assets
+          cp marimo/frontend/index.html marimo/marimo/_static/index.html
+          cp marimo/frontend/public/favicon.ico marimo/marimo/_static/favicon.ico
+      - name: Run tests with full dependencies
+        if: ${{ matrix.dependencies == 'core,optional' }}
+        run: |
+          cd marimo
+          uv run --python ${{ matrix.python-version }} python -c "import narwhals; print(narwhals.__file__)"
+          scripts/test-narwhals.sh --python=${{ matrix.python-version }}
+        timeout-minutes: 15
+
+  scikit-lego:
+    env:
+      UV_SYSTEM_PYTHON: 1
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: sklego-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-scikit-lego
+        run: git clone https://github.com/koaning/scikit-lego.git --depth 1
+      - name: install-basics
+        run: uv pip install --upgrade tox virtualenv setuptools
+      - name: install-scikit-lego-dev
+        run: |
+          cd scikit-lego
+          uv pip install -e ".[test]"
+      - name: install-narwhals-dev
+        run: |
+          uv pip uninstall narwhals
+          uv pip install -e .
+      - name: show-deps
+        run: uv pip freeze
+      - name: Run pytest
+        run: |
+          cd scikit-lego
+          pytest -n auto --disable-warnings --cov=sklego -m "not cvxpy and not formulaic and not umap"
+
+  shiny:
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: shiny-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-shiny
+        run: |
+          git clone https://github.com/posit-dev/py-shiny.git
+          cd py-shiny
+          uv venv -p ${{ matrix.python-version }}
+          git log
+      - name: install-basics
+        run: |
+          cd py-shiny
+          . .venv/bin/activate
+          uv pip install --upgrade tox virtualenv setuptools
+      - name: install-shiny-dev
+        run: |
+          cd py-shiny
+          . .venv/bin/activate
+          # temporary pin to get CI green
+          uv pip install "flake8-bugbear<25.10.21"
+          make narwhals-install-shiny
+      - name: install-narwhals-dev
+        run: |
+          cd py-shiny
+          . .venv/bin/activate
+          uv pip uninstall narwhals
+          uv pip install -e ./..
+      - name: show-deps
+        run: |
+          cd py-shiny
+          . .venv/bin/activate
+          uv pip freeze
+      - name: Run `make narwhals-test-integration`
+        run: |
+          cd py-shiny
+          . .venv/bin/activate
+          # Isort seems to behave slightly differently in CI
+          # so we ignore its output
+          make format -s
+          make narwhals-test-integration
+
+  tea-tasting:
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: clone-tea-tasting
+        run: |
+          git clone https://github.com/e10v/tea-tasting.git --depth=1
+          cd tea-tasting
+          git log
+      - name: install-uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-suffix: tea-tasting-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+          python-version: ${{ matrix.python-version }}
+      - name: install-tea-tasting-test
+        run: |
+          cd tea-tasting
+          uv sync --group test
+          # Temporary pin to get CI green
+          uv pip install "sqlglot<28.7.0"
+      - name: install-narwhals-dev
+        run: |
+          cd tea-tasting
+          uv pip uninstall narwhals
+          uv pip install -e ./..
+      - name: show-deps
+        run: |
+          cd tea-tasting
+          uv pip freeze
+      - name: run-pytest
+        run: |
+          cd tea-tasting
+          # empty pytest.ini to avoid pytest using narwhals configs
+          touch pytest.ini
+          uv run --no-sync pytest tests
+
+  tubular:
+    env:
+      UV_SYSTEM_PYTHON: 1
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: tubular-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-tubular
+        run: |
+          git clone https://github.com/lvgig/tubular --depth=1
+          cd tubular
+          git log
+      - name: install-basics
+        run:
+          uv pip install --upgrade tox virtualenv setuptools pytest-env
+      - name: install-tubular-dev
+        run: |
+          cd tubular
+          # Temporary pin until it's addressed upstream.
+          uv pip install "pandas<3"
+          uv pip install -e ".[dev]"
+      - name: install-narwhals-dev
+        run: |
+          uv pip uninstall narwhals
+          uv pip install -e .
+      - name: show-deps
+        run: uv pip freeze
+      - name: Run pytest
+        run: |
+          cd tubular
+          pytest tests --config-file=pyproject.toml
+
+  plotly:
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: plotly-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-plotly
+        run: |
+          git clone https://github.com/plotly/plotly.py --depth=1
+          cd plotly.py
+          git log
+      - name: install-deps
+        run: |
+          cd plotly.py
+          uv venv -p ${{ matrix.python-version }}
+          uv sync --extra dev_optional
+      - name: install-narwhals-dev
+        run: |
+          cd plotly.py
+          . .venv/bin/activate
+          uv pip uninstall narwhals
+          uv pip install -e ./..
+      - name: show-deps
+        run: |
+          cd plotly.py
+          . .venv/bin/activate
+          uv pip freeze
+      - name: Run pytest on plotly express
+        run: |
+          cd plotly.py
+          . .venv/bin/activate
+          pytest tests/test_optional/test_px
+
+  hierarchicalforecast:
+    env:
+      UV_SYSTEM_PYTHON: 1
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: hierarchicalforecast-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-hierarchicalforecast
+        run: |
+          git clone https://github.com/Nixtla/hierarchicalforecast --depth=1 --recurse-submodules --shallow-submodules
+          cd hierarchicalforecast
+          git log
+      - name: install-basics
+        run: uv pip install --upgrade tox virtualenv setuptools
+      - name: install-deps
+        run: |
+          cd hierarchicalforecast
+          uv pip install datasetsforecast "statsforecast>=1.0.0" scipy "polars[numpy]<=1.32.0" pytest pytest-benchmark pytest-cov
+          uv pip install .
+      - name: install-narwhals-dev
+        run: |
+          uv pip uninstall narwhals
+          uv pip install -e .
+      - name: show-deps
+        run: uv pip freeze
+      - name: Run tests
+        run: |
+          cd hierarchicalforecast
+          pytest tests --no-cov --import-mode=importlib 
+
+
+  formulaic:
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: formulaic-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-formulaic
+        run: |
+          git clone https://github.com/matthewwardrop/formulaic.git --depth=1
+          cd formulaic
+          git log
+      - name: create-hatch-env
+        run: |
+          cd formulaic
+          uv pip install hatch hatch-vcs "click!=8.3.0" --system
+      - name: install-formulaic-dev
+        run: |
+          cd formulaic
+          # Temporary pin until it's addressed upstream.
+          hatch run uv pip install "pandas<3"
+          hatch run uv pip install -e ".[arrow,calculus]"
+      - name: install-narwhals-dev
+        run: |
+          cd formulaic
+          hatch run uv pip uninstall narwhals
+          hatch run uv pip install -e ./..
+      - name: show-deps
+        run: hatch run uv pip freeze
+      - name: run test
+        run: |
+          cd formulaic
+          hatch run tests --config-file=pyproject.toml
+
+  pointblank:
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: pointblank-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-pointblank
+        run: |
+          git clone https://github.com/posit-dev/pointblank.git --depth=1
+          cd pointblank
+          git log
+      - name: install-basics
+        run: uv pip install --upgrade tox virtualenv setuptools --system
+      - name: install-deps
+        run: |
+          cd pointblank
+          uv venv -p ${{ matrix.python-version }}
+          . .venv/bin/activate
+          uv pip install . --group dev
+          # Temporary pin to get CI green
+          uv pip install "sqlglot<28.7.0"
+          # Temporary pin to get CI green
+          uv pip install "pandas<3"
+          uv pip install pytest pytest-cov pytest-snapshot pandas polars "ibis-framework[duckdb,mysql,postgres,sqlite]>=9.5.0" chatlas shiny
+      - name: install-narwhals-dev
+        run: |
+          cd pointblank
+          . .venv/bin/activate
+          uv pip uninstall narwhals
+          uv pip install -e .
+      - name: show-deps
+        run: |
+          cd pointblank
+          . .venv/bin/activate
+          uv pip freeze
+      - name: Run tests
+        run: |
+          cd pointblank
+          . .venv/bin/activate
+          # make sure that we use the .venv when running tests, so that
+          # the local narwhals install is picked up
+          sed -i 's/uv run pytest/uv run --no-sync pytest/g' Makefile
+          make test
+
+  validoopsie:
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"] # 3.9 and 3.12 are enough to cover all the tests
+        os: ["ubuntu-latest"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: validoopsie-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-validoopsie
+        run: |
+          git clone https://github.com/akmalsoliev/Validoopsie.git --depth=1 validoopsie
+          cd validoopsie
+          git log
+      - name: install-validoopsie-dev
+        run: |
+          cd validoopsie
+          uv sync --dev --upgrade
+          # Temporary pin until it's addressed upstream.
+          uv remove pandas --group dev
+          uv add "pandas<3"
+      - name: install-narwhals-dev
+        run: |
+          cd validoopsie
+          uv remove narwhals
+          uv add ./..
+      - name: show-deps
+        run: |
+          cd validoopsie
+          which python
+          uv pip freeze
+      - name: Run tests
+        run: |
+          cd validoopsie
+          # empty pytest.ini to avoid pytest using narwhals configs
+          touch pytest.ini
+          touch tests/__init__.py
+          touch tests/utils/__init__.py
+          # Keep `--no-sync` in case Narwhals is re-synced with PyPI version
+          uv run --no-sync pytest tests
+        timeout-minutes: 15
+
+  darts:
+    env:
+      UV_SYSTEM_PYTHON: 1
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: ["ubuntu-latest"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: darts-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-darts
+        run: |
+          git clone https://github.com/unit8co/darts.git --depth=1
+          cd darts
+          git log
+      - name: install-deps
+        run: |
+          cd darts
+          uv pip install . \
+          --group dev \
+          llvmlite==0.46.0 \
+          numba==0.63.1
+      - name: install-narwhals-dev
+        run: |
+          uv pip uninstall narwhals
+          # TODO(FBruzzesi): Install polars & pyarrow from darts requirements when they introduce it
+          uv pip install -e ".[polars, pyarrow]"
+      - name: show-deps
+        run: uv pip freeze
+      - name: Run tests
+        run: |
+          cd darts
+          pytest darts/tests/test_timeseries.py
+          pytest darts/tests/test_timeseries_multivariate.py
+          pytest darts/tests/test_timeseries_static_covariates.py
+
+  gt-extras:
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: gt-extras-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-gt-extras
+        run: |
+          git clone https://github.com/posit-dev/gt-extras.git --depth 1
+          cd gt-extras
+          git log
+      - name: install-gt-extras-dev
+        run: |
+          cd gt-extras
+          uv sync --all-extras --dev
+      - name: install-narwhals-dev
+        run: |
+          cd gt-extras
+          uv pip uninstall narwhals
+          uv pip install -e ./..
+      - name: show-deps
+        run: |
+          cd gt-extras
+          uv pip freeze
+      - name: run-pytest
+        run: |
+          cd gt-extras
+          uv run --no-sync pytest
+
+  fairlearn:
+    env:
+      UV_SYSTEM_PYTHON: 1
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: "true"
+          cache-suffix: fairlearn-${{ matrix.python-version }}
+          cache-dependency-glob: "pyproject.toml"
+      - name: clone-fairlearn
+        run: |
+          git clone https://github.com/fairlearn/fairlearn.git --depth 1
+          cd fairlearn
+          git log
+      - name: install-deps
+        run: |
+          cd fairlearn
+          # TODO(FBruzzesi): Align with fairlearn team to get a minimal requirement to test narwhals features
+          uv pip install -e . -r requirements.txt lightgbm matplotlib polars pyarrow pytest typing-extensions
+      - name: install-narwhals-dev
+        run: |
+          cd fairlearn
+          uv pip uninstall narwhals
+          uv pip install -e ./..
+          uv pip freeze
+      - name: run-pytest
+        run: |
+          cd fairlearn
+          pytest test/unit -m "narwhals"

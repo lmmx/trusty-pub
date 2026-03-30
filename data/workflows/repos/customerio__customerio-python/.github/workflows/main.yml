@@ -1,0 +1,36 @@
+name: build
+
+on: [ push ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [ '3.9', '3.10', '3.11', '3.12', '3.13' ]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5.6.0
+      with:
+        python-version: ${{ matrix.python }}
+    - name: install dependencies for the minor version
+      run: |
+        python -m venv venv
+        . venv/bin/activate
+        pip install -r requirements.txt
+    - name: run tests
+      run: |
+        . venv/bin/activate
+        make test
+        deactivate
+    - name: reinstall to the latest version
+      run: |
+        python -m venv venv
+        . venv/bin/activate
+        pip install --upgrade requests
+    - name: run tests again
+      run: |
+        . venv/bin/activate
+        make test

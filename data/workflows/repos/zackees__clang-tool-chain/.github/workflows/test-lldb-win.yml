@@ -1,0 +1,56 @@
+name: lldb-win
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-lldb-win:
+    name: LLDB (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        irm https://astral.sh/uv/install.ps1 | iex
+      shell: powershell
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+      shell: bash
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Windows x64 - LLDB"
+        python --version
+      shell: bash
+
+    - name: Download and install clang toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      shell: bash
+      timeout-minutes: 20
+
+    - name: Purge old LLDB installation (force re-download)
+      run: |
+        rm -rf ~/.clang-tool-chain/lldb
+        echo "Purged old LLDB installation to force fresh download"
+      shell: bash
+
+    - name: Run LLDB tests
+      run: |
+        uv run pytest tests/test_lldb.py -v
+      shell: bash

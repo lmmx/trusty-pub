@@ -1,0 +1,69 @@
+name: DIPY Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  schedule:
+    - cron: "0 0 25-31 * 0" # 1 per month
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  stable:
+    uses: ./.github/workflows/test_template.yml
+    with:
+      runs-on: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+      python-version: '["3.11", "3.12", "3.13"]'
+
+  optional-deps-pip:
+    uses: ./.github/workflows/test_template.yml
+    with:
+      runs-on: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+      depends: cython!=0.29.29 numpy==1.24.2 matplotlib h5py==3.11.0 nibabel cvxpy==1.5.3 tqdm
+      extra-depends: scikit_learn pandas statsmodels tables scipy==1.10.1 numexpr
+
+  optional-deps-conda:
+    uses: ./.github/workflows/test_template.yml
+    with:
+      runs-on: '["macos-latest", "windows-latest"]'
+      install-type: '["conda"]'
+      depends: cython!=0.29.29 numpy=1.25.0 matplotlib h5py=3.11.0 nibabel cvxpy=1.5.2 tqdm
+      extra-depends: scikit-learn pandas statsmodels pytables scipy=1.10.1
+
+  parallel:
+    uses: ./.github/workflows/test_template.yml
+    with:
+      runs-on: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+      extra-depends: dask joblib ray==2.9.3 protobuf<4.0.0 # More info here https://github.com/ray-project/ray/pull/25211
+
+  minimal-py311:
+    uses: ./.github/workflows/test_template.yml
+    with:
+      runs-on: '["ubuntu-latest", ]'
+      python-version: '["3.11", ]'
+      depends: cython==0.29.32 numpy==1.23.5 scipy==1.9.3 nibabel==3.0.0 h5py==3.8.0 tqdm
+
+  coverage:
+    uses: ./.github/workflows/test_template.yml
+    with:
+      runs-on: '["ubuntu-latest", ]'
+      coverage: true
+      enable-viz-tests: true
+      extra-depends: scikit-learn scipy statsmodels pandas tables fury tensorflow==2.18 torch
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  pre-py314:
+    uses: ./.github/workflows/test_template.yml
+    with:
+      runs-on: '["ubuntu-latest", ]'
+      python-version: '["3.14",]'
+      use-pre: true
+      extra-depends: scikit_learn scipy statsmodels pandas tables

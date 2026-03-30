@@ -1,0 +1,134 @@
+name: 'Daily CI Tests'
+
+on:
+  workflow_dispatch:
+    inputs:
+      rungallery:
+        type: boolean
+        default: false
+        description: run entire gallery
+  workflow_call:
+  schedule:
+    - cron: '0 8 * * *'
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: daily-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker_image:
+    uses: ./.github/workflows/docker_image.yml
+    with:
+      tool: 'tools'
+      sc_version: ${{ github.ref }}
+
+  cache:
+    name: Generate cache
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          python3 -m pip install -e .[test]
+          python3 -m pip install -r ./examples/requirements.txt
+
+      - name: Gather cache
+        run: |
+          . .venv/bin/activate
+          python3 .github/workflows/bin/generate_cache.py
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: scpackage-daily-cache
+          path: .sc/cache
+          retention-days: 1
+
+  daily_tests_job:
+    needs: [cache, docker_image]
+    timeout-minutes: 150
+    runs-on: ubuntu-22.04 # Match ubuntu version with container
+    container:
+      image: ${{ needs.docker_image.outputs.sc_tool }}
+
+    env:
+      SCTESTCACHE: ${{ github.workspace }}/.sc/cache/
+
+    name: 'All tests'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout SiliconCompiler
+        uses: actions/checkout@v6
+
+      - name: Set tools and permissions for caching
+        run: |
+          chown -R root: ~
+          ln -s $RUNNER_TOOL_CACHE /opt/hostedtoolcache
+          echo "LD_LIBRARY_PATH_BACKUP=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        id: setup-python
+        env:
+          AGENT_TOOLSDIRECTORY: ${{ runner.tool_cache }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Restore cache
+        uses: actions/download-artifact@v8
+        with:
+          name: scpackage-daily-cache
+          path: ${{ env.SCTESTCACHE }}
+
+      - name: Setup tests
+        run: |
+          export LD_LIBRARY_PATH="${{ env.LD_LIBRARY_PATH_BACKUP }}"
+          echo $LD_LIBRARY_PATH
+          ${{ steps.setup-python.outputs.python-path }} -m venv .venv
+          source .venv/bin/activate
+          python3 --version
+
+          python3 -m pip install --upgrade pip
+
+          python3 -m pip install .[test,cocotb]
+          python3 -m pip install -r ./examples/requirements.txt
+
+      - name: Start slurm
+        run: |
+          export LD_LIBRARY_PATH="${{ env.LD_LIBRARY_PATH_BACKUP }}"
+          echo $LD_LIBRARY_PATH
+          /start_slurm.sh
+
+      - name: Run tests
+        run: |
+          export LD_LIBRARY_PATH="${{ env.LD_LIBRARY_PATH_BACKUP }}"
+          echo $LD_LIBRARY_PATH
+          source .venv/bin/activate
+
+          # change running directory
+          mkdir testrun
+          cd testrun
+
+          pytest $GITHUB_WORKSPACE -n logical -m "not docker" --durations=0 --clean
+
+  gallery:
+    if: ${{ github.event_name	!= 'workflow_dispatch' || inputs.rungallery }}
+    uses: siliconcompiler/scgallery/.github/workflows/run-designs.yml@main
+    with:
+      sc-ref: ${{ github.ref }}
+      concurrency: 30

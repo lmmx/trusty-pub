@@ -1,0 +1,203 @@
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '30 13 * * *'
+permissions: { }
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+
+      matrix:
+        py:
+          - 'cp39'
+          - 'cp310'
+          - 'cp311'
+          - 'cp312'
+          - 'cp313'
+          - 'cp313t'
+          - 'cp314'
+          - 'cp314t'
+        arch:
+          - 'aarch64'
+          - 'i686'
+          - 'ppc64le'
+          - 's390x'
+          - 'x86_64'
+        abi:
+          - 'manylinux'
+          - 'musllinux'
+        image:
+          - 'manylinux2014'
+          - 'manylinux_2_28'
+          - 'musllinux_1_1'
+          - 'musllinux_1_2'
+        exclude:
+          # Cancel out abi - image mismatch.
+          - abi: 'manylinux'
+            image: 'musllinux_1_1'
+          - abi: 'manylinux'
+            image: 'musllinux_1_2'
+          - abi: 'musllinux'
+            image: 'manylinux2014'
+          - abi: 'musllinux'
+            image: 'manylinux_2_28'
+          # Remove some older ABIs that don't need to exist.
+          - arch: 'i686'
+            image: 'musllinux_1_1'
+          - arch: 'ppc64le'
+            image: 'musllinux_1_1'
+          - arch: 's390x'
+            image: 'musllinux_1_1'
+          # Switch to manylinux_2_28 on 3.14+.
+          - py: 'cp39'
+            image: 'manylinux_2_28'
+          - py: 'cp310'
+            image: 'manylinux_2_28'
+          - py: 'cp311'
+            image: 'manylinux_2_28'
+          - py: 'cp312'
+            image: 'manylinux_2_28'
+          - py: 'cp313'
+            image: 'manylinux_2_28'
+          - py: 'cp314'
+            image: 'manylinux2014'
+          - py: 'cp314t'
+            image: 'manylinux2014'
+          # Drop support for musllinux_1_1 on 3.14+
+          - py: 'cp314'
+            image: 'musllinux_1_1'
+          - py: 'cp314t'
+            image: 'musllinux_1_1'
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
+    env:
+      CIBW_ARCHS: ${{ matrix.arch }}
+      CIBW_BUILD: ${{ matrix.py }}-${{ matrix.abi }}_${{ matrix.arch }}
+      # uv not present on musllinux cross-compiled images.
+      CIBW_BUILD_FRONTEND: ${{ (matrix.abi == 'musllinux' && (matrix.arch == 'ppc64le' || matrix.arch == 's390x')) && 'build' || 'build[uv]' }}
+      CIBW_BUILD_VERBOSITY: '1'
+      CIBW_MANYLINUX_AARCH64_IMAGE: quay.io/pypa/${{ matrix.image }}_aarch64:latest
+      CIBW_MANYLINUX_I686_IMAGE: quay.io/pypa/${{ matrix.image }}_i686:latest
+      CIBW_MANYLINUX_PPC64LE_IMAGE: quay.io/pypa/${{ matrix.image }}_ppc64le:latest
+      CIBW_MANYLINUX_S390X_IMAGE: quay.io/pypa/${{ matrix.image }}_s390x:latest
+      CIBW_MANYLINUX_X86_64_IMAGE: quay.io/pypa/${{ matrix.image }}_x86_64:latest
+      CIBW_MUSLLINUX_AARCH64_IMAGE: quay.io/pypa/${{ matrix.image }}_aarch64:latest
+      CIBW_MUSLLINUX_I686_IMAGE: quay.io/pypa/${{ matrix.image }}_i686:latest
+      CIBW_MUSLLINUX_PPC64LE_IMAGE: quay.io/pypa/${{ matrix.image }}_ppc64le:latest
+      CIBW_MUSLLINUX_S390X_IMAGE: quay.io/pypa/${{ matrix.image }}_s390x:latest
+      CIBW_MUSLLINUX_X86_64_IMAGE: quay.io/pypa/${{ matrix.image }}_x86_64:latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d9e0f98d3fc6adb07d1e3d37f3043649ddad06a1 # v6.5.0
+        with:
+          version: "0.8.11"
+
+      - name: Set up QEMU
+        if: ${{ matrix.arch == 'ppc64le' || matrix.arch == 's390x' }}
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Build wheels
+        run: |
+          uvx -p 3.13 cibuildwheel@3.1.4
+
+      - name: Upload Wheel
+        if: ${{ !endsWith(matrix.py, 't') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-${{ matrix.py }}-${{ matrix.arch }}-${{ matrix.abi }}-${{ matrix.image }}
+          path: ./wheelhouse/*.whl
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        py:
+          - 'cp39'
+          - 'cp310'
+          - 'cp311'
+          - 'cp312'
+          - 'cp313'
+          - 'cp313t'
+          - 'cp314'
+          - 'cp314t'
+        arch:
+          - 'arm64'
+          - 'x86_64'
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-13' || 'macos-14' }}
+    env:
+      CIBW_ARCHES: ${{ matrix.arch }}
+      CIBW_BUILD: ${{ matrix.py }}-macosx_${{ matrix.arch }}
+      CIBW_BUILD_VERBOSITY: '1'
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d9e0f98d3fc6adb07d1e3d37f3043649ddad06a1 # v6.5.0
+        with:
+          version: "0.8.11"
+
+      - name: Build wheels
+        run: |
+          uvx -p 3.13 cibuildwheel@3.1.4
+
+      - name: Upload Wheel
+        if: ${{ !endsWith(matrix.py, 't') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-${{ matrix.py }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        py:
+          - 'cp39'
+          - 'cp310'
+          - 'cp311'
+          - 'cp312'
+          - 'cp313'
+          - 'cp313t'
+          - 'cp314'
+          - 'cp314t'
+        arch:
+          - 'win32'
+          - 'win_amd64'
+          - 'win_arm64'
+        exclude:
+          - py: 'cp39'
+            arch: 'win_arm64'
+          - py: 'cp310'
+            arch: 'win_arm64'
+    runs-on: ${{ matrix.arch == 'win_arm64' && 'windows-11-arm' || 'windows-2022' }}
+    env:
+      CIBW_ARCHES: ${{ matrix.arch }}
+      CIBW_BUILD: ${{ matrix.py }}-${{ matrix.arch }}
+      CIBW_BUILD_VERBOSITY: '1'
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d9e0f98d3fc6adb07d1e3d37f3043649ddad06a1 # v6.5.0
+        with:
+          version: "0.8.11"
+
+      - name: Build wheels
+        run: |
+          uvx -p 3.13 cibuildwheel@3.1.4
+
+      - name: Upload Wheel
+        if: ${{ !endsWith(matrix.py, 't') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-${{ matrix.py }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl

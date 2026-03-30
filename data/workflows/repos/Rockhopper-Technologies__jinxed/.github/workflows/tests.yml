@@ -1,0 +1,82 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  release:
+  schedule:
+    # Every Thursday at 1 AM
+    - cron: '0 1 * * 4'
+
+jobs:
+
+  Tests:
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+    container: ${{ matrix.container || format('python:{0}', matrix.python-version) }}
+    name: ${{ (matrix.toxenv && !startsWith(matrix.toxenv, 'py')) && format('{0} ({1})', matrix.toxenv, matrix.python-version) || matrix.python-version }} ${{ matrix.optional && '[OPTIONAL]' }}
+    continue-on-error: ${{ matrix.optional || false }}
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        python-version:  ['2.7', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', '3.12']
+        include:
+
+          - python-version: '3.13'
+            toxenv: lint
+            os-deps:
+              - enchant-2
+
+          - python-version: '3.13'
+            toxenv: docs
+            os-deps:
+              - enchant-2
+
+          - python-version: '3.13'
+            toxenv: coverage
+
+          - python-version: '3.14'
+            container: 'python:3.14-rc'
+            optional: true
+
+          - python-version: pypy-2.7
+            toxenv: pypy27
+            container: pypy:2.7
+
+          - python-version: pypy-3
+            toxenv: pypy3
+            container: pypy:3
+
+    env:
+      TOXENV: ${{ matrix.toxenv || format('py{0}', matrix.python-version) }}
+
+    steps:
+      # This is only needed for Python 3.6 and earlier because Tox 4 requires 3.7+
+      - name: Fix TOXENV
+        run: echo "TOXENV=$(echo $TOXENV | sed 's/\.//g')" >> $GITHUB_ENV
+        if: ${{ contains(fromJson('["2.7", "3.5", "3.6"]'), matrix.python-version) }}
+
+      - name: Install OS Dependencies
+        run: apt update && apt -y install ${{ join(matrix.os-deps, ' ') }}
+        if: ${{ matrix.os-deps }}
+
+      - uses: actions/checkout@v4
+
+      # https://github.com/actions/checkout/issues/1048
+      - name: Workaround for git ownership issue
+        run: git config --global --add safe.directory $GITHUB_WORKSPACE
+
+      - name: Install tox
+        run: pip install tox
+
+      - name: Run tox
+        run: tox -- --verbose
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          verbose: true
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+        if: ${{ matrix.toxenv == 'coverage' }}

@@ -1,0 +1,57 @@
+name: Test windows
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  test_windows:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # see https://github.com/microsoft/setup-msbuild
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v1.0.2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install python dependencies
+        shell: bash
+        run: |
+          pip install setuptools wheel
+
+          if [[ ${{ matrix.python-version }} == "3.8" ]]; then
+            pip install numpy==1.24.0
+          fi
+
+      - name: Build lilcom
+        shell: bash
+        run: |
+          python3 setup.py install --verbose
+
+      - name: Run tests
+        shell: bash
+        run: |
+          rm -rfv lilcom
+          python3 -c "import lilcom; print(lilcom.__file__)"
+          python3 -c "import lilcom_extension; print(lilcom_extension.__file__)"
+          python3 ./test/test_lilcom.py
+          python3 ./test/test_speed.py
+          python3 ./test/test_header.py

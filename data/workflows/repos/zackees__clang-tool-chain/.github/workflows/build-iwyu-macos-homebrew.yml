@@ -1,0 +1,198 @@
+name: Build IWYU macOS Archives (Homebrew Method)
+
+# This workflow extracts pre-built IWYU binaries from Homebrew instead of building from source.
+# This is MUCH faster (~3-5 min vs ~15-20 min) and uses Homebrew's pre-built binaries.
+#
+# Runtime: ~5-8 minutes (both architectures in parallel)
+# Cost: ~$0.08-0.16 USD per run (50% cheaper than building from source)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_repo:
+        description: 'Upload artifacts to downloads-bins repository (requires write access)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+# Prevent accidental concurrent runs
+concurrency:
+  group: iwyu-macos-homebrew-build
+  cancel-in-progress: false
+
+jobs:
+  extract-iwyu-macos-x64:
+    runs-on: macos-15-large  # Intel Mac for x86_64 (macos-13 retired)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install zstandard
+
+      - name: Display system information
+        run: |
+          echo "=== System Information ==="
+          uname -a
+          sw_vers
+          echo ""
+          echo "=== Homebrew Information ==="
+          brew --version
+          echo ""
+          echo "=== Architecture ==="
+          arch
+          python3 -c "import platform; print(f'Python arch: {platform.machine()}')"
+
+      - name: Extract IWYU from Homebrew
+        run: |
+          cd downloads-bins/tools
+          python3 extract_iwyu_from_homebrew.py --arch x86_64
+        timeout-minutes: 10
+
+      - name: Verify extraction
+        run: |
+          echo "=== Extracted Files ==="
+          ls -lh downloads-bins/assets/iwyu/darwin/x86_64/
+          echo ""
+          echo "=== Binary Size ==="
+          ls -lh downloads-bins/assets/iwyu/darwin/x86_64/bin/include-what-you-use
+          echo ""
+          echo "=== Dependencies ==="
+          otool -L downloads-bins/assets/iwyu/darwin/x86_64/bin/include-what-you-use
+          echo ""
+          echo "=== Version Test ==="
+          downloads-bins/assets/iwyu/darwin/x86_64/bin/include-what-you-use --version || echo "Version check failed"
+
+      - name: Create archive
+        run: |
+          cd downloads-bins/tools
+          python3 create_iwyu_archives.py --platform darwin --arch x86_64 --version 0.25 --iwyu-root ../assets/iwyu
+        timeout-minutes: 5
+
+      - name: Display build results
+        run: |
+          echo "=== Archive Created ==="
+          cd downloads-bins/assets/iwyu/darwin/x86_64
+          ls -lh iwyu-*-darwin-x86_64.tar.zst* 2>/dev/null || echo "Archive not found"
+          echo ""
+          echo "=== SHA256 Checksum ==="
+          cat iwyu-*-darwin-x86_64.tar.zst.sha256 2>/dev/null || echo "SHA256 not found"
+          echo ""
+          echo "=== Archive Contents Preview ==="
+          tar -tzf <(zstd -d < iwyu-*-darwin-x86_64.tar.zst) 2>/dev/null | head -20 || echo "Cannot list archive"
+
+      - name: Upload macOS x86_64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwyu-darwin-x86_64-homebrew
+          path: |
+            downloads-bins/assets/iwyu/darwin/x86_64/iwyu-*.tar.zst
+            downloads-bins/assets/iwyu/darwin/x86_64/iwyu-*.tar.zst.sha256
+          retention-days: 30
+
+  extract-iwyu-macos-arm64:
+    runs-on: macos-latest  # Apple Silicon Mac (macos-14 or later)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install zstandard
+
+      - name: Display system information
+        run: |
+          echo "=== System Information ==="
+          uname -a
+          sw_vers
+          echo ""
+          echo "=== Homebrew Information ==="
+          brew --version
+          echo ""
+          echo "=== Architecture ==="
+          arch
+          python3 -c "import platform; print(f'Python arch: {platform.machine()}')"
+
+      - name: Extract IWYU from Homebrew
+        run: |
+          cd downloads-bins/tools
+          python3 extract_iwyu_from_homebrew.py --arch arm64
+        timeout-minutes: 10
+
+      - name: Verify extraction
+        run: |
+          echo "=== Extracted Files ==="
+          ls -lh downloads-bins/assets/iwyu/darwin/arm64/
+          echo ""
+          echo "=== Binary Size ==="
+          ls -lh downloads-bins/assets/iwyu/darwin/arm64/bin/include-what-you-use
+          echo ""
+          echo "=== Dependencies ==="
+          otool -L downloads-bins/assets/iwyu/darwin/arm64/bin/include-what-you-use
+          echo ""
+          echo "=== Version Test ==="
+          downloads-bins/assets/iwyu/darwin/arm64/bin/include-what-you-use --version || echo "Version check failed"
+
+      - name: Create archive
+        run: |
+          cd downloads-bins/tools
+          python3 create_iwyu_archives.py --platform darwin --arch arm64 --version 0.25 --iwyu-root ../assets/iwyu
+        timeout-minutes: 5
+
+      - name: Display build results
+        run: |
+          echo "=== Archive Created ==="
+          cd downloads-bins/assets/iwyu/darwin/arm64
+          ls -lh iwyu-*-darwin-arm64.tar.zst* 2>/dev/null || echo "Archive not found"
+          echo ""
+          echo "=== SHA256 Checksum ==="
+          cat iwyu-*-darwin-arm64.tar.zst.sha256 2>/dev/null || echo "SHA256 not found"
+          echo ""
+          echo "=== Archive Contents Preview ==="
+          tar -tzf <(zstd -d < iwyu-*-darwin-arm64.tar.zst) 2>/dev/null | head -20 || echo "Cannot list archive"
+
+      - name: Upload macOS ARM64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwyu-darwin-arm64-homebrew
+          path: |
+            downloads-bins/assets/iwyu/darwin/arm64/iwyu-*.tar.zst
+            downloads-bins/assets/iwyu/darwin/arm64/iwyu-*.tar.zst.sha256
+          retention-days: 30
+
+  summary:
+    needs: [extract-iwyu-macos-x64, extract-iwyu-macos-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Display summary
+        run: |
+          echo "=== Build Summary ==="
+          echo ""
+          echo "Available artifacts:"
+          find . -name "*.tar.zst" -exec ls -lh {} \;
+          echo ""
+          echo "SHA256 checksums:"
+          find . -name "*.sha256" -exec cat {} \;
+          echo ""
+          echo "=== Next Steps ==="
+          echo "1. Download artifacts from the Actions tab"
+          echo "2. Update manifest.json files with new SHA256 hashes"
+          echo "3. Upload archives to downloads-bins repository"
+          echo "4. Test with: clang-tool-chain-iwyu --version"

@@ -1,0 +1,66 @@
+name: Build sdist and test
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.8"
+
+    - name: Build sdist
+      run: |
+        set -x
+        python -m pip install --upgrade pip
+        pip install -r requirements_dev.txt
+        pip freeze
+        python -m build --sdist
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: sdist-to-download
+        path: dist/hampel-1.0.2.tar.gz
+
+  install-and-test:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+    needs: build
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/download-artifact@v3
+      with:
+        name: sdist-to-download
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install sdist
+      run: |
+        set -x
+        
+        pip install wheel
+        pip install hampel-1.0.2.tar.gz
+
+    - name: Pip freeze
+      run: |
+        pip freeze
+
+    - name: Run unit tests
+      run: |
+        pip install pytest pandas
+        pytest -v

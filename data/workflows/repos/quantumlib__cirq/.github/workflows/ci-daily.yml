@@ -1,0 +1,97 @@
+name: Continuous Integration - Daily
+
+on:
+  schedule:
+    # Checks out main by default.
+    - cron: '0 0 * * *'
+
+  # Allow manual invocation.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+# Declare default permissions as read only.
+permissions: read-all
+
+jobs:
+  pytest:
+    if: github.repository_owner == 'quantumlib'
+    name: Pytest Ubuntu
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: 'x64'
+          cache: 'pip'
+          cache-dependency-path: |
+            **/requirements.txt
+            dev_tools/requirements/**/*.txt
+      - name: Install requirements
+        run: |
+          pip install --upgrade cirq~=1.0.dev &&
+            pip install \
+              -r dev_tools/requirements/deps/pylint.txt \
+              -r dev_tools/requirements/deps/pytest.txt \
+              -r dev_tools/requirements/deps/notebook.txt
+      - name: Pytest check
+        run: check/pytest -n auto --ignore=cirq-core/cirq/contrib --enable-slow-tests
+  windows:
+    if: github.repository_owner == 'quantumlib'
+    name: Pytest Windows
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: 'x64'
+          cache: 'pip'
+          cache-dependency-path: |
+            **/requirements.txt
+            dev_tools/requirements/**/*.txt
+      - name: Install requirements
+        run: |
+          pip install --upgrade cirq~=1.0.dev &&
+            pip install -r dev_tools/requirements/deps/pylint.txt &&
+            pip install -r dev_tools/requirements/deps/pytest.txt &&
+            pip install -r dev_tools/requirements/deps/notebook.txt
+      - name: Pytest Windows
+        run: check/pytest -n auto --ignore=cirq-core/cirq/contrib --enable-slow-tests
+        shell: bash
+  macos:
+    if: github.repository_owner == 'quantumlib'
+    name: Pytest MacOS
+    strategy:
+      matrix:
+        # TODO: quantumlib/qsim#1017 - enable '3.14' when qsimcirq has binary wheel
+        python-version: ['3.11', '3.12', '3.13']
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: 'x64'
+          cache: 'pip'
+          cache-dependency-path: |
+            **/requirements.txt
+            dev_tools/requirements/**/*.txt
+      - name: Install requirements
+        run: |
+          pip install --upgrade cirq~=1.0.dev &&
+            pip install \
+              -r dev_tools/requirements/deps/pylint.txt \
+              -r dev_tools/requirements/deps/pytest.txt \
+              -r dev_tools/requirements/deps/notebook.txt
+      - name: Pytest check
+        run: check/pytest -n auto --ignore=cirq-core/cirq/contrib --enable-slow-tests

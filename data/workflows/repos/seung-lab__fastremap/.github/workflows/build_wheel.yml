@@ -1,0 +1,44 @@
+name: Build Wheels
+
+on:  
+  workflow_dispatch:
+  push:
+    tags:
+      - '*'
+env:
+  CIBW_SKIP: cp27-* cp33-* cp34-* cp35-* cp36-* cp37-* cp38* pp* *-musllinux* cp312-manylinux_i686
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{matrix.arch}} for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [auto]
+        include:
+          - os: ubuntu-latest
+            arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if:  ${{ matrix.arch == 'aarch64' }}
+        uses: docker/setup-qemu-action@v1
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        # to supply options, put them in 'env', like:
+        env:
+          CIBW_ARCHS_LINUX: ${{matrix.arch}}
+          CIBW_BEFORE_BUILD: pip install numpy setuptools wheel cython 
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+
+
+      - name: Upload built wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-wheels-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: warn

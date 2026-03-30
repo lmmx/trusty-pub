@@ -1,0 +1,55 @@
+# Run tests for step generation
+
+name: 'Step generation test'
+
+on:
+  pull_request:
+    paths:
+      - 'step-generation/**'
+      - 'shared-data/**'
+      - 'package.json'
+      - '.github/workflows/step-generation-test.yaml'
+      - '.github/actions/js/setup/action.yml'
+      - '.github/actions/git/resolve-tag/action.yml'
+      - '.github/actions/environment/complex-variables/action.yml'
+      - 'vitest.config.*'
+  push:
+    paths:
+      - 'step-generation/**'
+      - 'shared-data/**'
+      - 'package.json'
+      - '.github/workflows/step-generation-test.yaml'
+      - '.github/actions/js/setup/action.yml'
+      - '.github/actions/git/resolve-tag/action.yml'
+      - '.github/actions/environment/complex-variables/action.yml'
+      - 'vitest.config.*'
+    branches:
+      - '*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.ref_name != 'edge' || github.run_id}}-${{ github.ref_type != 'tag' || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: true
+
+jobs:
+  js-unit-test:
+    name: 'step generation unit tests'
+    runs-on: 'ubuntu-24.04'
+    timeout-minutes: 20
+    steps:
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v5
+      - uses: ./.github/actions/js/setup
+      - name: 'run step generation unit tests'
+        run: make -C step-generation test-cov
+      - name: 'Upload coverage report'
+        uses: codecov/codecov-action@v5
+        with:
+          flags: step-generation
+          token: ${{ secrets.CODECOV_TOKEN }}

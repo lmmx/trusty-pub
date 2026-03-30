@@ -1,0 +1,433 @@
+name: Pyatlan Pull Request Build
+
+# This workflow runs both sync and async integration tests intelligently:
+# - Legacy sync integration tests: Always run on every PR with code changes
+# - Legacy async integration tests: Only run when AIO changes detected or "run-async-tests" label
+# - V9 unit tests: Always run on every PR with code changes
+# - V9 integration tests (sync + async): Only run when PR has the "run_pyatlan_v9_integration_tests" label
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check-code-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      has-code-changes: ${{ steps.filter.outputs.has-code-changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect code changes
+        id: filter
+        run: |
+          # For workflow_dispatch, always run everything
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "has-code-changes=true" >> $GITHUB_OUTPUT
+            echo "Manual trigger: running all tests"
+            exit 0
+          fi
+
+          # Get changed files
+          CHANGED=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD)
+
+          # Check if any changed file is actual code (not just CI/docs/config)
+          CODE_CHANGES=$(echo "$CHANGED" | grep -vE '^\.(github|claude|cursor)/|^docs/|^site/|^README|^HISTORY|^LICENSE|^NOTICE|^CODE_OF_CONDUCT|^CONTRIBUTING|^CLAUDE\.md|^\.gitignore|^\.pre-commit|^\.editorconfig|^mkdocs' || true)
+
+          if [ -n "$CODE_CHANGES" ]; then
+            echo "has-code-changes=true" >> $GITHUB_OUTPUT
+            echo "Code changes detected:"
+            echo "$CODE_CHANGES" | head -20
+          else
+            echo "has-code-changes=false" >> $GITHUB_OUTPUT
+            echo "No code changes detected, only CI/docs/config files:"
+            echo "$CHANGED"
+          fi
+
+  vulnerability-scan:
+    needs: [check-code-changes]
+    if: needs.check-code-changes.outputs.has-code-changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Specify version as a string
+        # https://github.com/actions/setup-python/issues/160"
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938  # v4.2.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+            # Since we used pytest for dev
+            # ("py" -> library is in maintenance mode)
+            # We can ignore this vulnerability here
+            # Reference: https://github.com/pytest-dev/py
+            ignore-vulns: |
+              PYSEC-2022-42969
+              GHSA-48p4-8xcf-vxj5
+              GHSA-pq67-6m6q-mj2v
+            summary: true
+            vulnerability-service: osv
+            inputs: .
+
+  check-aio-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run-async-tests: ${{ steps.check-conditions.outputs.run-async-tests }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for AIO changes or manual trigger
+        id: check-conditions
+        run: |
+          # Check if PR has the run-async-tests label
+          if echo '${{ toJson(github.event.pull_request.labels.*.name) }}' | grep -q "run-async-tests"; then
+            echo "run-async-tests=true" >> $GITHUB_OUTPUT
+            echo "🏷️ Manual trigger: Found 'run-async-tests' label"
+            exit 0
+          fi
+
+          # Check for changes in AIO-related paths
+          if git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD | grep -E "(pyatlan/.*aio/|tests/.*aio/)"; then
+            echo "run-async-tests=true" >> $GITHUB_OUTPUT
+            echo "🔍 Change detection: Found AIO-related changes:"
+            aio_files=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD | grep -E "(pyatlan/.*aio/|tests/.*aio/)")
+            echo "$aio_files" | head -20
+            total_count=$(echo "$aio_files" | wc -l)
+            echo "📊 Total AIO files changed: $total_count"
+          else
+            echo "run-async-tests=false" >> $GITHUB_OUTPUT
+            echo "⏭️ No AIO changes detected and no manual trigger label found"
+          fi
+
+  check-v9-integration-label:
+    runs-on: ubuntu-latest
+    outputs:
+      run-v9-integration: ${{ steps.check-label.outputs.run-v9-integration }}
+    steps:
+      - name: Check for v9 integration test label
+        id: check-label
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run-v9-integration=true" >> $GITHUB_OUTPUT
+            echo "Manual trigger: running v9 integration tests"
+            exit 0
+          fi
+
+          if echo '${{ toJson(github.event.pull_request.labels.*.name) }}' | grep -q "run_pyatlan_v9_integration_tests"; then
+            echo "run-v9-integration=true" >> $GITHUB_OUTPUT
+            echo "Found 'run_pyatlan_v9_integration_tests' label"
+          else
+            echo "run-v9-integration=false" >> $GITHUB_OUTPUT
+            echo "No 'run_pyatlan_v9_integration_tests' label found, skipping v9 integration tests"
+          fi
+
+  qa-checks-and-unit-tests:
+    needs: [check-code-changes, vulnerability-scan]
+    if: needs.check-code-changes.outputs.has-code-changes == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.distribute-integration-test-files.outputs.files }}
+      aio-files: ${{ steps.distribute-aio-test-files.outputs.aio-files }}
+    strategy:
+      matrix:
+        # Specify version as a string
+        # https://github.com/actions/setup-python/issues/160"
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: QA checks (ruff-format, ruff-lint, mypy)
+        run: uv run ./qa-checks
+
+      - name: Run unit tests
+        env: # Test tenant environment variables
+          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+        # Run with `pytest-sugar` for enhancing the overall test report output
+        run: uv run pytest tests/unit --force-sugar -vv
+
+      - name: Prepare integration tests distribution
+        id: distribute-integration-test-files
+        run: |
+          test_ignore_file=tests/integration/.testignore.txt
+          files=$(ls tests/integration/test_*.py tests/integration/*_test.py | grep -v -f $test_ignore_file | tr '\n' ' ')
+          json_files=$(echo "${files[@]}" | jq -R -c 'split(" ")[:-1]')
+          echo "files=$json_files" >> $GITHUB_OUTPUT
+
+      - name: Prepare async integration tests distribution
+        id: distribute-aio-test-files
+        run: |
+          # Check if AIO test directory exists and has test files
+          if [ -d "tests/integration/aio" ]; then
+            aio_files=$(find tests/integration/aio -name "test_*.py" -o -name "*_test.py" | tr '\n' ' ')
+            if [ -n "$aio_files" ]; then
+              json_aio_files=$(echo "${aio_files[@]}" | jq -R -c 'split(" ")[:-1]')
+              echo "aio-files=$json_aio_files" >> $GITHUB_OUTPUT
+            else
+              echo "aio-files=[]" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "aio-files=[]" >> $GITHUB_OUTPUT
+          fi
+
+  integration-tests:
+    needs: [check-code-changes, vulnerability-scan, qa-checks-and-unit-tests]
+    if: needs.check-code-changes.outputs.has-code-changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test_file: ${{fromJson(needs.qa-checks-and-unit-tests.outputs.files)}}
+    concurrency:
+      group: ${{ matrix.test_file }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          # Specify version as a string
+          # https://github.com/actions/setup-python/issues/160"
+          python-version: "3.9"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run integration tests
+        env: # Test tenant environment variables
+          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 3
+          timeout_minutes: 10 # Maximum time per test job; otherwise, the job will fail
+          # Run the integration test file using `pytest-timer` plugin
+          # to display only the durations of the 10 slowest tests with `pytest-sugar`
+          command: uv run pytest ${{ matrix.test_file }} -p name_of_plugin --timer-top-n 10 --force-sugar -vv
+
+
+  async-integration-tests:
+    needs: [check-code-changes, vulnerability-scan, qa-checks-and-unit-tests, check-aio-changes]
+    runs-on: ubuntu-latest
+    # Only run if code changed AND (AIO changes detected or manual trigger)
+    if: needs.check-code-changes.outputs.has-code-changes == 'true' && needs.check-aio-changes.outputs.run-async-tests == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        test_file: ${{fromJson(needs.qa-checks-and-unit-tests.outputs.aio-files)}}
+    concurrency:
+      group: async-${{ matrix.test_file }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          # Specify version as a string
+          # https://github.com/actions/setup-python/issues/160"
+          python-version: "3.9"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run async integration tests
+        env: # Test tenant environment variables
+          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 3
+          timeout_minutes: 15 # Async tests may take longer, increased timeout
+          # Run the async integration test file using `pytest-timer` plugin
+          # to display only the durations of the 10 slowest tests with `pytest-sugar`
+          command: uv run pytest ${{ matrix.test_file }} -p name_of_plugin --timer-top-n 10 --force-sugar -vv
+
+  # =========================================================================
+  # V9 (msgspec) Jobs
+  # =========================================================================
+
+  v9-qa-checks-and-unit-tests:
+    needs: [check-code-changes, vulnerability-scan]
+    if: needs.check-code-changes.outputs.has-code-changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: QA checks (ruff-format, ruff-lint, mypy)
+        run: uv run ./qa-checks
+
+      - name: Run v9 unit tests
+        env:
+          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+        run: uv run pytest tests_v9/unit --force-sugar -vv
+
+  v9-prepare-integration-tests:
+    needs: [check-code-changes, vulnerability-scan, check-v9-integration-label]
+    if: >-
+      needs.check-code-changes.outputs.has-code-changes == 'true' &&
+      needs.check-v9-integration-label.outputs.run-v9-integration == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      v9-files: ${{ steps.distribute-v9-files.outputs.v9-files }}
+      v9-aio-files: ${{ steps.distribute-v9-aio-files.outputs.v9-aio-files }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare v9 sync integration tests distribution
+        id: distribute-v9-files
+        run: |
+          files=$(find tests_v9/integration -maxdepth 1 \( -name "test_*.py" -o -name "*_test.py" \) | sort | tr '\n' ' ')
+          if [ -n "$files" ]; then
+            json_files=$(echo "${files[@]}" | jq -R -c 'split(" ")[:-1]')
+          else
+            json_files="[]"
+          fi
+          echo "v9-files=$json_files" >> $GITHUB_OUTPUT
+          echo "V9 sync integration test files: $json_files"
+
+      - name: Prepare v9 async integration tests distribution
+        id: distribute-v9-aio-files
+        run: |
+          if [ -d "tests_v9/integration/aio" ]; then
+            aio_files=$(find tests_v9/integration/aio -name "test_*.py" | sort | tr '\n' ' ')
+            if [ -n "$aio_files" ]; then
+              json_aio_files=$(echo "${aio_files[@]}" | jq -R -c 'split(" ")[:-1]')
+            else
+              json_aio_files="[]"
+            fi
+          else
+            json_aio_files="[]"
+          fi
+          echo "v9-aio-files=$json_aio_files" >> $GITHUB_OUTPUT
+          echo "V9 async integration test files: $json_aio_files"
+
+  v9-integration-tests:
+    needs: [v9-prepare-integration-tests]
+    if: needs.v9-prepare-integration-tests.outputs.v9-files != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test_file: ${{fromJson(needs.v9-prepare-integration-tests.outputs.v9-files)}}
+    concurrency:
+      group: v9-${{ matrix.test_file }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run v9 integration test
+        env:
+          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 3
+          timeout_minutes: 10
+          command: uv run pytest ${{ matrix.test_file }} -p name_of_plugin --timer-top-n 10 --force-sugar -vv
+
+  v9-async-integration-tests:
+    needs: [v9-prepare-integration-tests]
+    if: needs.v9-prepare-integration-tests.outputs.v9-aio-files != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test_file: ${{fromJson(needs.v9-prepare-integration-tests.outputs.v9-aio-files)}}
+    concurrency:
+      group: v9-async-${{ matrix.test_file }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run v9 async integration test
+        env:
+          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 3
+          timeout_minutes: 15
+          command: uv run pytest ${{ matrix.test_file }} -p name_of_plugin --timer-top-n 10 --force-sugar -vv

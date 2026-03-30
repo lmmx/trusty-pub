@@ -1,0 +1,59 @@
+name: Changelog
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled, unlabeled, reopened]
+    branches-ignore:
+      - master
+
+env:
+  DEFAULT_PYTHON: '3.13'
+
+permissions:
+  contents: read
+
+jobs:
+  check-changelog:
+    name: Changelog Entry Check
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.pull_request.labels.*.name, 'ci:skip-changelog') && github.event.pull_request.user.login != 'pre-commit-ci[bot]' && github.event.pull_request.user.login != 'dependabot[bot]'"
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ env.DEFAULT_PYTHON }}
+        id: python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          activate-environment: "true"
+          enable-cache: "false"
+
+      - name: Install dependencies
+        run: |
+          uv sync --only-group docs
+
+      - name: Check changelog entry exists
+        run: |
+          if [ ! -s docs/changelog/next_release/${{ github.event.pull_request.number }}.*.rst ]; then
+              echo "Please add corresponding file 'docs/changelog/next_release/<issue number>.<change type>.rst' with changes description"
+              exit 1
+          fi
+
+      - name: Validate changelog
+        run: |
+          # Fetch the pull request' base branch so towncrier will be able to
+          # compare the current branch with the base branch.
+          git fetch --no-tags origin +refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}
+          towncrier check --compare-with origin/${{ github.base_ref }}
+          towncrier --draft

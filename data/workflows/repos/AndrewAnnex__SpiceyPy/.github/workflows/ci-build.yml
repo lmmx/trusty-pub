@@ -1,0 +1,146 @@
+name: PR and Merge builds (on main branch)
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: "0 4 * * 0"
+env:
+  # increment to rebuild cspice manually
+  CSPICE_VERSION: 67
+  CSPICE_CACHE_NUMBER: 9
+  PYPI_CACHE_NUMBER: 4
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+jobs:
+  test-pyodide:
+    name: Test SpiceyPy Pyodide build
+    runs-on: 'ubuntu-latest'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout 🌶️ 🥧
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Set up Python 🐍 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.13
+      - name: Build Pyodide wheel for SpiceyPy 🌶️ 🥧
+        uses: pypa/cibuildwheel@v3.3.1
+        env:
+          CIBW_PLATFORM: pyodide 
+          CIBW_ARCHS: "wasm32"
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
+          SKBUILD_BUILD_VERBOSE: "true"
+  test-conda:
+    name: Test SpiceyPy Conda install
+    runs-on: 'ubuntu-latest'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout 🌶️ 🥧
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: test-env
+          init-shell: >-
+            bash
+          cache-environment: true
+          create-args: >-
+            python=3.13
+            cspice
+            Cython
+            numpy
+            pip
+      - name: Install dependencies
+        shell: bash -el {0}
+        run: |
+          python -m pip install --user --group devwheel
+      - name: Build SpiceyPy 
+        shell: bash -el {0}
+        env:
+          SYSTEM_VERSION_COMPAT: 0
+        run: 
+          CMAKE_PREFIX_PATH=$CONDA_PREFIX python -m build
+      - name: Install SpiceyPy 🌶️ 🥧
+        shell: bash -el {0}
+        env:
+          SYSTEM_VERSION_COMPAT: 0
+        run: 
+          python -m pip install dist/*.whl
+      - name: Test 🧪 with coverage 📈
+        shell: bash -el {0}
+        run: |
+          python -m coverage run --source spiceypy -m pytest --pyargs spiceypy --benchmark-disable
+          # look for .coverage file
+          ls -lahtr
+      - name: Upload 🆙 coverage 📈 report to codecov 
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: false
+          verbose: true
+          use_oidc: true
+  test:
+    name: Test SpiceyPy 🌶️ 🥧
+    runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04-arm, ubuntu-latest, macos-15-intel, macos-15, windows-latest]
+        python-version: ['3.12', '3.13', '3.14']
+    steps:
+      - name: Setup windows msvc
+        if: ${{ matrix.os == 'windows-latest'}}
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+      - name: Checkout 🌶️ 🥧
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Set up Python 🐍 ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          check-latest: true
+      - name: Display Python 🐍 version
+        run: python -c "import sys; print(sys.version)"
+      - name: Install pip
+        run: |
+          python -m pip install --upgrade pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --user --group devwheel
+      - name: Build SpiceyPy 
+        shell: bash
+        env:
+          SYSTEM_VERSION_COMPAT: 0
+        run: 
+          python -m build
+      - name: Install SpiceyPy 🌶️ 🥧
+        shell: bash
+        env:
+          SYSTEM_VERSION_COMPAT: 0
+        run: 
+          python -m pip install dist/*.whl
+      - name: Test 🧪 with coverage 📈
+        shell: bash
+        run: |
+          python -m coverage run --source spiceypy -m pytest --pyargs spiceypy --benchmark-disable
+          # look for .coverage file
+          ls -lahtr
+      - name: Upload 🆙 coverage 📈 report to codecov 
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: false
+          verbose: true
+          use_oidc: true

@@ -1,0 +1,74 @@
+name: test-conda
+run-name: Run Conda tests for different OS
+
+on:
+  workflow_call:
+    inputs:
+      coverage:
+        type: boolean
+        description: Upload coverage to CodeCov
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-conda:
+    name: >
+      ${{ matrix.os }} (${{ matrix.dependency-mode }} dependencies)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ 'ubuntu-latest', 'macos-latest', 'windows-latest' ]
+        dependency-mode: [ 'locked', 'latest' ]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.9.1
+        with:
+          pixi-version: v0.59.0
+          cache: true
+
+      - name: Update pixi environment
+        if: matrix.dependency-mode == 'latest'
+        run: |
+          eval "$(pixi shell-hook)"
+          pixi update
+
+      - name: Run tests
+        run: |
+          eval "$(pixi shell-hook)"
+          # Install from source
+          HATCH_BUILD_HOOKS_ENABLE=true python -m pip install -e .
+
+          # Install a Jupyter Kernel
+          python -m ipykernel install --name jupytext-ci --user
+
+          # Test with pytest
+          pytest -n logical --cov --cov-report=xml
+
+          # Uninstall jupyter-fs as it overrides the original browser-test.js to
+          # check its own functionality (https://github.com/jpmorganchase/jupyter-fs/blob/main/jupyterfs/browser-test.js)
+          # So uninstall jupyter-fs before running browser check
+          pip uninstall jupyter-fs -y
+
+          # Check extension
+          jupyter labextension list
+          jupyter labextension list 2>&1 | grep -ie "jupyterlab-jupytext.*OK"
+
+          # Test lab extension
+          python -m jupyterlab.browser_check
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          verbose: true
+        if: inputs.coverage

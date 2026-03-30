@@ -1,0 +1,122 @@
+# @Author: Dr. Jeffrey Chijioke-Uche, IBM Quantum Ambassador
+# @last update: 2025-03-01
+# @Description: This workflow is triggered on a schedule to check the quality of the software. 
+#               This is to maintain the quality and fix any issues that may arise. This is quality Control.
+# @ Reference:  This workflow ensures that all necessary checks are performed regularly to maintain software integrity. 
+
+name: 🧠 Qcon Intelligent Core  - Force Sync Periodic Quality Control
+
+on:
+  push:
+    branches: [ "pypi" ]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force sync all workflows'
+        required: false
+        default: 'false'
+
+  schedule:
+    - cron: '0 1 * * *'    
+    - cron: '0 3 * * *'    
+    - cron: '0 5 * * *'    
+
+  workflow_run:
+    workflows:
+      - PyPI Deployment Environment
+      - Qiskit Connector Quality Check
+      - Python Compatibility
+    types:
+      - completed
+
+permissions:
+  actions: write
+  contents: write
+  deployments: write
+  pull-requests: write
+  checks: write
+  statuses: write
+  issues: write
+  discussions: write
+  pages: write
+  packages: write
+
+jobs:
+  wait-and-dispatch:
+    name: 🔄 Conditional Trigger of Release Sync Jobs
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
+    steps:
+      - name: 🔎 Ensure we're on main (scheduled run)
+        if: github.event_name == 'schedule'
+        run: |
+          DEFAULT_BRANCH=$(curl -s -H "Authorization: token ${{ secrets.PAT_GITHUB }}" https://api.github.com/repos/${{ github.repository }} | jq -r .default_branch)
+          echo "🧠 Default branch is: $DEFAULT_BRANCH"
+          if [ "$DEFAULT_BRANCH" != "main" ]; then
+            echo "✅ Requirements is that the periodic workflow runs only from 'main' which is the source of truth."
+            echo "✅ No job workflow was called. Thank you."
+            exit 0
+          fi
+
+      - name: ⏳ Wait for all required workflows to complete successfully
+        uses: ahmadnassri/action-workflow-queue@v1
+        with:
+          workflows: |
+            PyPI Deployment Environment
+            Qiskit Connector Quality Check
+            Python Compatibility
+          repo: ${{ github.repository }}
+          delay: 2m
+          timeout: 48m
+          github-token: ${{ secrets.PAT_GITHUB }}
+
+
+      #______________________________________________________________________________________________________
+      #   --- Check if all workflows succeeded.
+      #   --- If any workflow failed, exit with an error message.
+      #______________________________________________________________________________________________________
+      - name: ✅ All workflows succeeded — Dispatch Verify
+        run: |
+          echo "✅ All workflows succeeded."
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+
+
+      #______________________________________________________________________________________________________
+      #   --- Check if all workflows succeeded.
+      #   --- If any workflow failed, exit gracefully othrerwise continue.
+      #   --- Dispatch the release-record.yml and coverage.yml workflows.
+      #______________________________________________________________________________________________________
+      - name: ✅ All workflows succeeded — Check for failures
+        run: |
+          if [ $? -ne 0 ]; then
+            echo "[x] One or more workflows failed. Exiting."
+            exit 0
+          fi
+
+      - name: ✅ All workflows succeeded — Dispatch release-record.yml
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: release-record.yml
+          token: ${{ secrets.PAT_GITHUB }}
+
+      - name: ✅ All workflows succeeded — Dispatch coverage.yml
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: coverage.yml
+          token: ${{ secrets.PAT_GITHUB }}
+
+      #______________________________________________________________________________________________________
+      #   --- Optional: Uncomment if you want to dispatch the release-tag.yml and release-id.yml workflows.
+      #______________________________________________________________________________________________________
+      # - name: ✅ All workflows succeeded — Dispatch release-tag.yml
+      #   uses: benc-uk/workflow-dispatch@v1
+      #   with:
+      #     workflow: release-tag.yml
+      #     token: ${{ secrets.PAT_GITHUB }}
+
+      # - name: ✅ All workflows succeeded — Dispatch release-id.yml
+      #   uses: benc-uk/workflow-dispatch@v1
+      #   with:
+      #     workflow: release-id.yml
+      #     token: ${{ secrets.PAT_GITHUB }}

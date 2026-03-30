@@ -1,0 +1,186 @@
+name: Stability Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  stability-tests:
+    name: Stability Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install uv and set the Python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Copy huggingface examples
+        run: |
+          mkdir -p ./cuga_workspace
+          cp -r docs/examples/huggingface/* ./cuga_workspace/
+
+      - name: Run stability tests
+        continue-on-error: true
+        id: test-run
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.WATSONX_API_KEY }}
+          AGENT_SETTING_CONFIG: ${{ secrets.AGENT_SETTING_CONFIG }}
+          TEST_RESULTS_FILE: test_results_python_${{ matrix.python-version }}.json
+          PYTHONIOENCODING: utf-8
+        run: uv run run_stability_tests.py --method local
+
+      - name: Check pass rate
+        if: always()
+        run: |
+          results_file="test_results_python_${{ matrix.python-version }}.json"
+          if [ ! -f "$results_file" ]; then
+            echo "❌ Test results file not found. Tests may have failed before completion."
+            exit 1
+          fi
+          python3 << EOF
+          import json
+          import sys
+          with open('$results_file', 'r') as f:
+              data = json.load(f)
+          pass_rate = data.get('pass_rate', 0)
+          if pass_rate < 88:
+              print(f"❌ Pass rate is {pass_rate}%, which is below the required 88%. Failing the job.")
+              sys.exit(1)
+          print(f"✅ Pass rate is {pass_rate}%, which meets the required 88% threshold.")
+          EOF
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-python-${{ matrix.python-version }}
+          path: src/system_tests/e2e/logs/
+          retention-days: 7
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-python-${{ matrix.python-version }}
+          path: test_results_python_${{ matrix.python-version }}.json
+          retention-days: 7
+
+  stability-tests-windows:
+    name: Stability Tests Windows (Python 3.12)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install uv and set the Python version
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        env:
+          UV_NO_PROGRESS: 1
+          UV_QUIET: 1
+        run: uv sync --dev
+
+      - name: Copy huggingface examples
+        run: |
+          New-Item -ItemType Directory -Force -Path ./cuga_workspace
+          Copy-Item -Recurse -Force docs/examples/huggingface/* ./cuga_workspace/
+
+      - name: Run stability tests
+        continue-on-error: true
+        id: test-run
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          AGENT_SETTING_CONFIG: ${{ secrets.AGENT_SETTING_CONFIG }}
+          TEST_RESULTS_FILE: test_results_python_3.12_windows.json
+          UV_NO_PROGRESS: 1
+          UV_QUIET: 1
+          PYTHONIOENCODING: utf-8
+        run: uv run run_stability_tests.py --method local
+
+      - name: Check pass rate
+        if: always()
+        shell: pwsh
+        run: |
+          $resultsFile = "test_results_python_3.12_windows.json"
+          if (-not (Test-Path $resultsFile)) {
+            Write-Host "❌ Test results file not found. Tests may have failed before completion."
+            exit 1
+          }
+          $results = Get-Content $resultsFile | ConvertFrom-Json
+          $passRate = $results.pass_rate
+          if ($passRate -lt 88) {
+            Write-Host "❌ Pass rate is ${passRate}%, which is below the required 88%. Failing the job."
+            exit 1
+          }
+          Write-Host "✅ Pass rate is ${passRate}%, which meets the required 88% threshold."
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-python-3.12-windows
+          path: src/system_tests/e2e/logs/
+          retention-days: 7
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-python-3.12-windows
+          path: test_results_python_3.12_windows.json
+          retention-days: 7
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [stability-tests, stability-tests-windows]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-python-*
+          merge-multiple: true
+          path: test-results
+
+      - name: Generate summary report
+        run: uv run run_stability_tests.py --generate-summary --results-dir test-results

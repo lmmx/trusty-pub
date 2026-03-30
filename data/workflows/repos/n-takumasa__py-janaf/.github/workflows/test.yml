@@ -1,0 +1,64 @@
+name: test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "1"
+  RUFF_OUTPUT_FORMAT: "github"
+
+jobs:
+  run:
+    name: test with ${{ matrix.env }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        env: ["3.14", "3.13", "3.12", "3.11", "3.10", "3.9"]
+        include:
+          - os: windows-latest
+            env: "3.13"
+          - os: macos-latest
+            env: "3.13"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b  # v7.3.0
+        with:
+          enable-cache: false
+      - name: Install tox
+        run: >-
+          uv tool install
+          --python-preference only-managed
+          --python 3.13
+          tox
+          --with tox-uv
+          --with tox-gh
+      - name: Install Python
+        if: matrix.env != '3.13'
+        run: >-
+          uv python install
+          --python-preference only-managed
+          ${{ matrix.env }}
+      - name: Setup test suite
+        run: tox run -vv --notest --skip-missing-interpreters false
+        env:
+          TOX_GH_MAJOR_MINOR: ${{ matrix.env }}
+      - name: Run test suite
+        run: tox run --skip-pkg-install
+        env:
+          TOX_GH_MAJOR_MINOR: ${{ matrix.env }}

@@ -1,0 +1,58 @@
+# Code formatting and linting workflow.
+# Checks code formatting with black and code quality with ruff.
+# Ensures code follows project style guidelines.
+
+name: Format
+on:
+  workflow_call:
+  workflow_dispatch:  # to trigger manually
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup python environment
+        uses: durandtibo/setup-venv-uv-action@v0.0.3
+
+      # Check code formatting with black
+      - name: Check format
+        run: |
+          inv check-format
+
+      # Check code quality with ruff
+      - name: Check lint
+        run: |
+          inv check-lint
+
+  shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          echo "🔍 Running ShellCheck..."
+          shellcheck -- **/*.sh || exit 1
+
+      - name: Install shfmt
+        run: sudo snap install shfmt
+
+      - name: Run shfmt
+        run: |
+          echo "✨ Checking formatting using shfmt..."
+          shfmt -d -- **/*.sh

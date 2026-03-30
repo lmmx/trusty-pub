@@ -1,0 +1,62 @@
+name: CI
+concurrency:
+  group: ${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      test_linux:
+        type: boolean
+        default: true
+        description: "Run Linux Build and Test"
+      test_windows:
+        type: boolean
+        default: true
+        description: "Run Windows Build and Test" 
+      test_macintosh:
+        type: boolean
+        default: true
+        description: "Run Mac OS Build" 
+      upload_artifacts:
+        type: boolean
+        default: true
+        description: "Upload Artifacts"
+      
+  schedule:
+    - cron: "0 0 * * 0"
+
+jobs:
+  weekly_build:
+    if: ${{ github.event_name == 'schedule' }}
+    name: Weekly Build
+    uses: "./.github/workflows/reusable_buildtest.yml"
+    with:
+      test_linux: true
+      test_windows: true
+      test_macintosh: true
+      upload_artifacts: false
+    secrets: inherit
+
+  pr_test:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: Pull Request Tests
+    uses: "./.github/workflows/reusable_buildtest.yml"
+    with:
+      test_linux: true
+      test_windows: true
+      test_macintosh: true
+      upload_artifacts: false
+    secrets: inherit
+
+  manual_test:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    name: Manual Test
+    uses: "./.github/workflows/reusable_buildtest.yml"
+    with:
+      test_linux: ${{ inputs.test_linux }}
+      test_windows: ${{ inputs.test_windows }}
+      test_macintosh: ${{ inputs.test_macintosh }}
+      upload_artifacts: ${{ inputs.upload_artifacts }}
+    secrets: inherit

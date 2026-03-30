@@ -1,0 +1,134 @@
+name: Reusable PyPI Build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version string for the release (e.g., 25.4.0)'
+        required: false
+        type: string
+        default: ''
+      release-type:
+        description: 'Release type (dev or release)'
+        required: false
+        type: string
+        default: 'dev'
+      source-ref:
+        description: 'Git ref to build from'
+        required: false
+        type: string
+        default: 'main'
+      workflow-ref:
+        description: 'Git ref of the workflow branch (used to overlay pyproject.toml files)'
+        required: false
+        type: string
+        default: ''
+      runner:
+        description: 'GitHub runner to use'
+        required: false
+        type: string
+        default: 'linux-large-disk'
+    outputs:
+      version:
+        description: 'Version that was built'
+        value: ${{ jobs.build.outputs.version }}
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source-ref }}
+
+      - name: Overlay build config from workflow branch
+        if: ${{ inputs.workflow-ref != '' && inputs.workflow-ref != inputs.source-ref }}
+        run: |
+          git fetch --depth=1 origin "${{ inputs.workflow-ref }}"
+          git checkout FETCH_HEAD -- api/pyproject.toml client/pyproject.toml src/pyproject.toml nemo_retriever/pyproject.toml
+
+      - name: Determine version
+        id: set-version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="$(date +'%Y.%m.%d')"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Validate release type
+        run: |
+          if [[ "${{ inputs.release-type }}" != "dev" && "${{ inputs.release-type }}" != "release" ]]; then
+            echo "Error: release-type must be 'dev' or 'release'"
+            exit 1
+          fi
+
+      - name: Install build dependencies
+        run: pip install build twine
+
+      - name: Build nv-ingest-api wheel
+        run: |
+          cd api
+          NV_INGEST_RELEASE_TYPE=${{ inputs.release-type }} \
+          NV_INGEST_VERSION=${{ steps.set-version.outputs.version }} \
+          python -m build
+
+      - name: Build nv-ingest-client wheel
+        run: |
+          cd client
+          NV_INGEST_RELEASE_TYPE=${{ inputs.release-type }} \
+          NV_INGEST_VERSION=${{ steps.set-version.outputs.version }} \
+          python -m build
+
+      - name: Build nv-ingest service wheel
+        run: |
+          cd src
+          NV_INGEST_RELEASE_TYPE=${{ inputs.release-type }} \
+          NV_INGEST_VERSION=${{ steps.set-version.outputs.version }} \
+          python -m build
+
+      - name: Build nemo-retriever wheel
+        run: |
+          cd nemo_retriever
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          Path("src/nemo_retriever/_build_info.py").write_text(
+              '"""Build metadata written by CI before packaging."""\n\n'
+              'BUILD_GIT_SHA = "${{ github.sha }}"\n'
+              f'BUILD_DATE = "{datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}"\n',
+              encoding="utf-8",
+          )
+          PY
+          RETRIEVER_RELEASE_TYPE=${{ inputs.release-type }} \
+          RETRIEVER_VERSION=${{ steps.set-version.outputs.version }} \
+          RETRIEVER_BUILD_NUMBER=${{ inputs.release-type == 'release' && '0' || github.run_number }} \
+          RETRIEVER_GIT_SHA=${{ github.sha }} \
+          python -m build
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: python-wheels
+          path: |
+            api/dist/*.whl
+            api/dist/*.tar.gz
+            client/dist/*.whl
+            client/dist/*.tar.gz
+            src/dist/*.whl
+            src/dist/*.tar.gz
+            nemo_retriever/dist/*.whl
+            nemo_retriever/dist/*.tar.gz
+          retention-days: 7

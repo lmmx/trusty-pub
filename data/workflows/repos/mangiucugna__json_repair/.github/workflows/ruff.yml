@@ -1,0 +1,22 @@
+name: Ruff Lint and Format
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  ruff:
+    name: Ruff Lint and Format
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install Ruff
+      uses: astral-sh/ruff-action@v3
+
+    - name: Run Ruff Format
+      run: ruff format --check --diff

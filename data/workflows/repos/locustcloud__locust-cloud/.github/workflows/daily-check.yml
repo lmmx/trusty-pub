@@ -1,0 +1,86 @@
+name: Daily test run (api-dev, :master exporter)
+
+on:
+#   schedule: # 00:00, skipping Sunday and Monday
+#     - cron: "0 0 * * 2-6"
+  workflow_dispatch:
+
+env:
+  LOCUSTCLOUD_USERNAME: ${{ secrets.LOCUSTCLOUD_USERNAME }}
+  LOCUSTCLOUD_PASSWORD: ${{ secrets.LOCUSTCLOUD_PASSWORD }}
+  LOCUSTCLOUD_DEPLOYER_URL: https://api-dev.eu-north-1.locust.cloud/1
+  LOCUSTCLOUD_REGION: eu-north-1
+  LOCUSTCLOUD_IMAGE_TAG: master
+  LOCUSTCLOUD_NON_INTERACTIVE: 1
+  LOCUST_LOGLEVEL: DEBUG
+  SLACK_NOTIFICATIONS_WEBHOOK: ${{ secrets.SLACK_NOTIFICATIONS_WEBHOOK }}
+  PYTHONUNBUFFERED: 1 # ensure we see logs output right away
+
+jobs:
+  locust_cloud_full_run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - run: uv venv --python 3.11
+      # any local changes would make hatch-vcs set a "local version" (+dev0...), so we ignore any uv.lock updates:
+      - run: git update-index --assume-unchanged uv.lock
+      - run: uv run --with locust --with . locust --cloud --help
+      - run: uv run --with locust --with . locust --cloud --profile status-checker --host https://mock-test-target.eu-north-1.locust.cloud --autostart --autoquit 0 --run-time 1m --loglevel DEBUG --extra-files testdata/extra-files --extra-packages testdata/extra-package --requirements testdata/requirements.txt |& tee output.txt
+      # both workers connected
+      - run: grep -m 1 '2 workers connected' output.txt
+      # check ok exit
+      - run: grep -m 1 '(exit code 0)' output.txt
+      # check extra files specified were available
+      - run: "grep -m 1 -- '--extra-files verification: pineapple' output.txt"
+      # check autodetected extra files were available
+      - run: "grep -m 1 -- 'import finder works' output.txt"
+      # check extra package were successfully installed
+      - run: "grep -m 1 -- 'Hello from the example package!' output.txt"
+      # check --requirements were successfully installed
+      - run: "grep -m 1 -- 'dotenv imported successfully' output.txt"
+      # check for errors
+      - run: bash -ec "! grep Traceback output.txt"
+      - run: bash -ec "! grep ERROR output.txt"
+      # Disabled the following test for now, because of incorrect warning about:
+      # You can't start a distributed test before at least one worker processes has connected
+      # - run: bash -ec "! grep WARNING output.txt"
+      - name: On failure, notify slack
+        if: failure()
+        run: curl -d "{\"text\":\"<!channel> Failed full run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}" $SLACK_NOTIFICATIONS_WEBHOOK
+      - name: Make sure to delete (only really needed for mock)
+        if: always()
+        run: uv run --with locust --with . locust --delete
+
+  # locust_url_test:
+  #   needs: [locust_cloud_full_run]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
+  #         fetch-tags: true
+  #     - uses: astral-sh/setup-uv@v5
+  #     - run: uv venv --python 3.11
+  #     - run: uv run playwright install --with-deps
+  #     - run: uv run pytest tests/browser_tests.py
+  #       env:
+  #         LOCUSTCLOUD_USERNAME: ${{ secrets.LOCUSTCLOUD_USERNAME }}
+  #         LOCUSTCLOUD_PASSWORD: ${{ secrets.LOCUSTCLOUD_PASSWORD }}
+  #         HEADLESS: 1
+  #     - name: On failure, notify slack
+  #       if: failure()
+  #       run: curl -d "{\"text\":\"Failed url test run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}" $SLACK_NOTIFICATIONS_WEBHOOK
+  #     - name: Make sure to delete (url tester doesn't self-destroy)
+  #       if: always()
+  #       run: uv run --with locust --with . locust --delete

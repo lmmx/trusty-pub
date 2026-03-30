@@ -1,0 +1,230 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+    types: [synchronize, reopened, ready_for_review]
+jobs:
+  compile-without-audio:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Bootstrap poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python - -y --version 1.5.1
+      - name: Install dependencies
+        run: poetry install
+      - name: Type check everything except audio utilities
+        run: poetry run mypy . --exclude 'src/hume/empathic_voice/chat/audio'
+  compile-with-audio:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Install system dependencies for audio
+        run: |
+          sudo apt-get --yes update
+          sudo apt-get --yes install libportaudio2
+      - name: Bootstrap poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python - -y --version 1.5.1
+      - name: Install dependencies
+        run: poetry install -E microphone
+      - name: Compile
+        run: poetry run mypy .
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Install system dependencies for audio
+        run: |
+          sudo apt-get --yes update
+          sudo apt-get --yes install libportaudio2
+      - name: Bootstrap poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python - -y --version 1.5.1
+      - name: Install dependencies
+        run: poetry install -E microphone
+      - name: Test
+        run: poetry run pytest -rP .
+
+  test-examples:
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout SDK repo (PR branch)
+        uses: actions/checkout@v4
+        with:
+          path: sdk
+          # checkout the PR branch, not main
+          ref: ${{ github.event.pull_request.head.sha || github.head_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Checkout examples repo
+        uses: actions/checkout@v4
+        with:
+          repository: humeai/hume-api-examples
+          path: examples
+
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Bootstrap poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python - -y --version 1.5.1
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install system dependencies for audio
+        run: |
+          sudo apt-get --yes update
+          sudo apt-get --yes install libportaudio2
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
+
+      - name: Build SDK
+        working-directory: ./sdk
+        run: |
+          echo "=== SDK Build Info ==="
+          echo "Branch: ${{ github.head_ref || github.ref_name || 'unknown' }}"
+          echo "Ref: ${{ github.event.pull_request.head.sha || github.head_ref || github.ref }}"
+          echo "Commit SHA: $(git rev-parse HEAD)"
+          echo "Branch name: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'detached')"
+          echo "======================"
+          poetry install
+          SDK_VERSION=$(poetry version -s)
+          echo "SDK version: $SDK_VERSION"
+          echo "===================="
+
+      - name: Link SDK to TTS example
+        working-directory: ./examples/tts/tts-python-quickstart
+        run: |
+          SDK_PATH="${GITHUB_WORKSPACE}/sdk"
+          SDK_VERSION=$(cd "$SDK_PATH" && poetry version -s)
+          echo "=== Linking SDK to TTS ==="
+          echo "SDK version: $SDK_VERSION"
+          echo "SDK path: $SDK_PATH"
+          echo "===================="
+
+          python -m venv .venv
+
+          # Install SDK from local path
+          # Use -m pip to avoid uv's PEP 621 parsing issues with Poetry projects
+          .venv/bin/python -m pip install -e "$SDK_PATH"
+
+          echo ""
+          echo "=== Verifying Linked SDK ==="
+          INSTALLED_VERSION=$(uv run python -c "from importlib.metadata import version; print(version('hume'))")
+          echo "Installed hume version: $INSTALLED_VERSION"
+          if [ "$INSTALLED_VERSION" != "$SDK_VERSION" ]; then
+            echo "✗ WARNING: Version mismatch! Expected $SDK_VERSION, got $INSTALLED_VERSION"
+          else
+            echo "✓ Version matches: $INSTALLED_VERSION"
+          fi
+
+          # Verify it's using local SDK (editable install)
+          SDK_LOCATION=$(uv run python -c "import hume; import os; print(os.path.dirname(hume.__file__))")
+          echo "SDK location: $SDK_LOCATION"
+          if [[ "$SDK_LOCATION" == *"$SDK_PATH"* ]]; then
+            echo "✓ Using local SDK (editable install)"
+          elif [[ "$SDK_LOCATION" == *"site-packages"* ]]; then
+            echo "✓ Installed in site-packages (editable install should link to source)"
+          else
+            echo "✗ WARNING: May not be using local SDK"
+          fi
+          echo "===================="
+
+      - name: Run TTS tests
+        working-directory: ./examples/tts/tts-python-quickstart
+        run: uv run pytest test_app.py -v
+        env:
+          TEST_HUME_API_KEY: ${{ secrets.TEST_HUME_API_KEY }}
+
+      - name: Link SDK to EVI example
+        working-directory: ./examples/evi/evi-python-quickstart
+        run: |
+          SDK_PATH="${GITHUB_WORKSPACE}/sdk"
+          SDK_VERSION=$(cd "$SDK_PATH" && poetry version -s)
+          echo "=== Linking SDK to EVI ==="
+          echo "SDK version: $SDK_VERSION"
+          echo "SDK path: $SDK_PATH"
+          echo "===================="
+
+          python -m venv .venv
+
+          # Install SDK from local path
+          # Use -m pip to avoid uv's PEP 621 parsing issues with Poetry projects
+          .venv/bin/python -m pip install -e "$SDK_PATH"
+
+          echo ""
+          echo "=== Verifying Linked SDK ==="
+          INSTALLED_VERSION=$(uv run python -c "from importlib.metadata import version; print(version('hume'))")
+          echo "Installed hume version: $INSTALLED_VERSION"
+          if [ "$INSTALLED_VERSION" != "$SDK_VERSION" ]; then
+            echo "✗ WARNING: Version mismatch! Expected $SDK_VERSION, got $INSTALLED_VERSION"
+          else
+            echo "✓ Version matches: $INSTALLED_VERSION"
+          fi
+
+          # Verify it's using local SDK (editable install)
+          SDK_LOCATION=$(uv run python -c "import hume; import os; print(os.path.dirname(hume.__file__))")
+          echo "SDK location: $SDK_LOCATION"
+          if [[ "$SDK_LOCATION" == *"$SDK_PATH"* ]]; then
+            echo "✓ Using local SDK (editable install)"
+          elif [[ "$SDK_LOCATION" == *"site-packages"* ]]; then
+            echo "✓ Installed in site-packages (editable install should link to source)"
+          else
+            echo "✗ WARNING: May not be using local SDK"
+          fi
+          echo "===================="
+
+      - name: Run EVI tests
+        working-directory: ./examples/evi/evi-python-quickstart
+        run: uv run pytest test_quickstart.py -v
+        env:
+          TEST_HUME_API_KEY: ${{ secrets.TEST_HUME_API_KEY }}
+
+  publish:
+    needs: [compile-without-audio, compile-with-audio, test]
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Bootstrap poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python - -y --version 1.5.1
+      - name: Install dependencies
+        run: poetry install
+      - name: Publish to pypi
+        run: |
+          poetry config repositories.remote https://upload.pypi.org/legacy/
+          poetry --no-interaction -v publish --build --repository remote --username "$PYPI_USERNAME" --password "$PYPI_PASSWORD"
+        env:
+          PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          PYPI_PASSWORD: ${{ secrets.PYPI_PASSWORD }}

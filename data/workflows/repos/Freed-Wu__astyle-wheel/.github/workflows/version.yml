@@ -1,0 +1,25 @@
+---
+"on":
+  schedule:
+    # 18:00 on Friday
+    - cron: 0 18 * * 5
+  workflow_dispatch:
+
+# https://github.com/softprops/action-gh-release/issues/236
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+      - name: Update version
+        run: |
+          scripts/update-version.pl README.md pyproject.toml \
+            packages/{py-,}astyle/{CMakeLists.txt,pyproject.toml}
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          tagging_message: 3.6.9

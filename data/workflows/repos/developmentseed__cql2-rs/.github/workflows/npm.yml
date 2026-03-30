@@ -1,0 +1,54 @@
+name: npm
+
+on:
+  push:
+    tags:
+      - "cql2-v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build WASM package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+      - name: Build WASM for npm
+        run: wasm-pack build --target web --out-dir pkg wasm
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: wasm/pkg
+
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/cql2-wasm
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+          path: package
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Upgrade npm version
+        run: npm install -g npm@latest
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: "package/*"
+      - name: Publish to npm
+        working-directory: package
+        run: npm publish --provenance --access public

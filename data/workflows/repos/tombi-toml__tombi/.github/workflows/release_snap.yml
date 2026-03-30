@@ -1,0 +1,78 @@
+name: Release Snap package
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TOMBI_VERSION: ""
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - id: filter
+        uses: ./.github/actions/relevant-changes
+        with:
+          base-sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          head-sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          paths: |
+            .cargo/**
+            .github/actions/relevant-changes/**
+            .github/actions/set-version/**
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+            snapcraft.yaml
+            crates/**
+            extensions/**
+            rust/**
+            xtask/**
+            schemas/**
+            www.schemastore.org/**
+            www.schemastore.tombi/**
+            tombi.toml
+            type-test.toml
+            .github/workflows/release_snap.yml
+
+  release-snap:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.relevant == 'true'
+    name: snapcraft (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64, armhf]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/set-version
+
+      - uses: snapcore/action-build@v1
+        id: build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snap-${{ env.TOMBI_VERSION }}-${{ matrix.arch }}
+          path: ${{ steps.build.outputs.snap }}
+
+      - uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: ${{ github.ref == 'refs/heads/main' && 'edge' || 'stable' }}

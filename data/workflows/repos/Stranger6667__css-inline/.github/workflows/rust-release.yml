@@ -1,0 +1,30 @@
+name: "[Rust] Release"
+
+on:
+  push:
+    tags:
+      - rust-v*
+
+jobs:
+  rust-release:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Extract Version
+        run: echo "version=${GITHUB_REF#refs/tags/rust-v}" >> $GITHUB_ENV
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          make_latest: true
+          draft: true
+          name: "[Rust] Release ${{ env.version }}"
+
+      - run: cargo login ${CRATES_IO_TOKEN}
+        env:
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+      - run: cargo publish --manifest-path css-inline/Cargo.toml

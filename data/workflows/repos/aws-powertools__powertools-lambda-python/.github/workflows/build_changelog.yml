@@ -1,0 +1,25 @@
+# Standalone workflow to update changelog if necessary
+name: Build changelog
+
+# PROCESS
+#
+# 1. Fetch latest changes compared to the latest tag
+# 2. Rebuild CHANGELOG.md using Keep A Changelog format
+# 3. Create a PR with the latest changelog (close and reference any it supersedes)
+
+# USAGE
+#
+# Triggered manually from GitHub UI when needed (e.g., before a release).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    permissions:
+      contents: write       # create temporary branch to store changelog changes
+      pull-requests: write  # create PR with changelog changes
+    uses: ./.github/workflows/reusable_publish_changelog.yml

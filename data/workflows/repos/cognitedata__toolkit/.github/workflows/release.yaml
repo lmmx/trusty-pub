@@ -1,0 +1,103 @@
+name: Release Toolkit
+on:
+  push:
+    branches:
+      - main
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  upload_coverage:
+    name: Upload coverage report
+    runs-on: ubuntu-latest
+    permissions: read-all
+    env:
+      CDF_CLUSTER: ${{ vars.CDF_CLUSTER }}
+      CDF_PROJECT: ${{ vars.CDF_PROJECT }}
+      IDP_CLIENT_ID: ${{ vars.IDP_CLIENT_ID }}
+      IDP_CLIENT_SECRET: ${{ secrets.IDP_CLIENT_SECRET }}
+      IDP_TOKEN_URL: ${{ vars.IDP_TOKEN_URL }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: 3.11
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: Create test coverage report
+        env:
+          IS_GITHUB_ACTIONS: "true"
+        run: uv run pytest --cov=cognite_toolkit/ --cov-config=pyproject.toml --cov-report=xml:coverage.xml tests/ -n8
+      - uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: cognitedata/toolkit
+
+  release-pypi-docker-hub:
+    runs-on: ubuntu-latest
+    environment: CD
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: Dump last commit message to file
+        run: git log -1 --pretty=%B > last_git_message.txt
+      - name: Dump last tag to file
+        run: git describe --tags --abbrev=0 > last_version.txt
+      - name: Bump Version
+        run: uv run python dev.py bump --verbose
+      - id: version
+        name: Read the new version
+        # Read the version from the cognite_toolkit/_version.py file
+        run: echo "version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' cognite_toolkit/_version.py)" >> $GITHUB_ENV
+      - name: Create CHANGELOG entry
+        if: env.version != '0.0.0'
+        run: uv run python dev.py changelog
+      - name: Build package
+        if: env.version != '0.0.0'
+        run: uv build
+      - name: Release to PyPI
+        if: env.version != '0.0.0'
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv run twine upload --skip-existing --verbose dist/*
+      - name: Add entry to CHANGELOG
+        if: env.version != '0.0.0'
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
+        with:
+            token: ${{ secrets.GITHUB_TOKEN }}
+            prerelease: false
+            draft: false
+            tag: ${{ env.version }}
+            bodyFile: last_changelog_entry.md
+
+      - name: Login to Docker Hub
+        if: env.version != '0.0.0'
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_ACCESS_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: env.version != '0.0.0'
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Build and push
+        if: env.version != '0.0.0'
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64/v8
+          push: true
+          tags: cognite/toolkit:${{ env.version }}, cognite/toolkit:latest

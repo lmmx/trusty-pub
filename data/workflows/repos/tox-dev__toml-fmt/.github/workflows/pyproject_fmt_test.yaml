@@ -1,0 +1,213 @@
+name: 🧪 pyproject-fmt
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: 🔍 changes
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.run == 'true' }}
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: 🔍 Check for changes
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
+        id: filter
+        with:
+          filters: |
+            run:
+              - 'common/**'
+              - 'toml-fmt-common/**'
+              - 'pyproject-fmt/**'
+              - '.github/workflows/pyproject_fmt_test.yaml'
+
+  clippy:
+    name: 📎 clippy
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: 🦀 Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1
+        with:
+          components: clippy
+      - name: 📎 Run Clippy
+        run: cargo clippy -p pyproject-fmt --locked --all-targets -- -D warnings
+
+  fmt:
+    name: 🎨 fmt
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: 🦀 Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1
+        with:
+          components: rustfmt
+      - name: 🎨 Check formatting
+        run: cargo fmt -p pyproject-fmt --check
+
+  build:
+    name: 🔨 build
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: 🦀 Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1
+      - name: 🔨 Build
+        run: cargo build -p pyproject-fmt --locked
+
+  test:
+    name: ✅ test
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    environment: test
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: 🦀 Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1
+        with:
+          components: llvm-tools-preview
+      - name: 📦 Install cargo-llvm-cov
+        uses: taiki-e/install-action@7bc99eee1f1b8902a125006cf790a1f4c8461e63 # v2
+        with:
+          tool: cargo-llvm-cov
+      - name: ✅ Run tests with coverage
+        run: cargo llvm-cov -p pyproject-fmt --no-default-features --locked --codecov --output-path coverage.json --ignore-filename-regex 'main\.rs'
+      - name: 📤 Upload coverage
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.json
+          flags: rust
+
+  py:
+    name: 🐍 ${{ matrix.py }} @ ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["3.14", "3.13", "3.12", "3.11", "3.10"]
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    defaults:
+      run:
+        working-directory: pyproject-fmt
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 📦 Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: 🔧 Install tox
+        run: uv tool install --python-preference only-managed --python 3.14 tox --with tox-uv
+      - name: 🐍 Install Python ${{ matrix.py }}
+        if: matrix.py != '3.14'
+        run: uv python install --python-preference only-managed ${{ matrix.py }}
+      - name: 🦀 Setup Rust
+        uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
+        with:
+          cache-base: main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 📝 Generate README.rst
+        run: tox run -e readme
+        working-directory: pyproject-fmt
+      - name: 🔧 Setup test suite
+        run: tox run -vv --notest --skip-missing-interpreters false -e ${{ matrix.py }}
+      - name: ✅ Run tests
+        run: tox run --skip-pkg-install -e ${{ matrix.py }}
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=20"
+
+  check:
+    name: 🔎 ${{ matrix.env }}
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [type, dev, pkg_meta]
+    defaults:
+      run:
+        working-directory: pyproject-fmt
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: 📦 Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🔧 Install tox
+        run: uv tool install --python-preference only-managed --python 3.14 tox --with tox-uv
+      - name: 🦀 Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 # v1
+      - name: 📝 Generate README.rst
+        run: tox run -e readme
+        working-directory: pyproject-fmt
+      - name: 🔧 Setup test suite
+        run: tox run -vv --notest --skip-missing-interpreters false -e ${{ matrix.env }}
+      - name: ✅ Run tests
+        run: tox run --skip-pkg-install -e ${{ matrix.env }}
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=20"
+
+  all-pass:
+    name: ✅ pyproject-fmt
+    if: always()
+    needs: [changes, clippy, fmt, build, test, py, check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether all jobs passed or were skipped
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "Some jobs failed or were canceled"
+            exit 1
+          fi
+          echo "All jobs passed or were skipped"

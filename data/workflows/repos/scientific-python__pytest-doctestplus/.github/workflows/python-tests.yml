@@ -1,0 +1,77 @@
+name: Run unit tests
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+    tags:
+      - '*'
+  workflow_dispatch:
+  schedule:
+    # Run every Tuesday at 03:53 UTC
+    - cron: 53 3 * * 2
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # The aim with the matrix below is to walk through a representative but not full combination of OS, Python, and pytest versions.
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.10'
+            toxenv: py10-test-pytestoldest
+          - os: ubuntu-latest
+            python-version: '3.10'
+            toxenv: py310-test-pytest71
+          - os: windows-latest
+            python-version: '3.11'
+            toxenv: py311-test-pytest72
+          - os: ubuntu-latest
+            python-version: '3.11'
+            toxenv: py311-test-pytest73
+          - os: ubuntu-latest
+            python-version: '3.11'
+            toxenv: py311-test-pytest74
+          - os: ubuntu-latest
+            python-version: '3.12'
+            toxenv: py312-test-pytest80
+          - os: windows-latest
+            python-version: '3.12'
+            toxenv: py312-test-pytest81
+          - os: ubuntu-latest
+            python-version: '3.12'
+            toxenv: py312-test-pytest82
+          - os: macos-latest
+            python-version: '3.13'
+            toxenv: py313-test-pytest83
+          - os: windows-latest
+            python-version: '3.13'
+            toxenv: py313-test-pytest84
+          - os: windows-latest
+            python-version: '3.14'
+            toxenv: py314-test-pytestdev
+            posargs: -v
+          - os: macos-latest
+            python-version: '3.14'
+            toxenv: py314-test-pytestdev
+          - os: ubuntu-latest
+            python-version: '3.14'
+            toxenv: py314-test-pytestdev-numpydev
+          - os: ubuntu-latest
+            python-version: '3.13'
+            toxenv: py313-test-pytest83-pytestasyncio
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        fetch-depth: 0
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install Tox
+      run: python -m pip install tox
+    - name: Run Tox
+      run: tox ${{ matrix.toxargs }} -v -e ${{ matrix.toxenv }}

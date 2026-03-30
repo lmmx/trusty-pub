@@ -1,0 +1,37 @@
+name: Deploy MkDocs
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yaml'
+      - '.github/workflows/deploy-docs.yml'
+
+
+# Prevent concurrent runs that could conflict when pushing to gh-pages
+concurrency:
+  group: build-docs-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - name: Install dependencies
+        run: |
+          pip install mkdocs-material
+          pip install pillow cairosvg  # for social cards
+          pip install mkdocs-glightbox  # for your glightbox plugin
+          
+      - name: Deploy docs
+        run: mkdocs gh-deploy --force 

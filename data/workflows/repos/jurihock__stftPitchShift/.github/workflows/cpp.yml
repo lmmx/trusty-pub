@@ -1,0 +1,21 @@
+name: cpp
+
+on: push
+
+jobs:
+
+  build:
+
+    name: Build .deb distribution package
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@master
+
+    - name: Prep
+      run: sudo apt update && sudo apt install --yes build-essential cmake debhelper devscripts
+
+    - name: Build
+      run: ./debian.sh

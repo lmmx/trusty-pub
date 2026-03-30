@@ -1,0 +1,77 @@
+name: Lint
+
+on:
+  - pull_request
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    # setting any permission will set everything else to none for GITHUB_TOKEN
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: pip install pytest ruff black
+
+      - name: Format with clang-format
+        uses: DoozyX/clang-format-lint-action@v0.18
+        with:
+          source: "./src"
+          extensions: "c"
+          clangFormatVersion: 9
+          inplace: True
+
+      - name: Format with black
+        uses: psf/black@stable
+        with:
+          options: "--verbose"
+          src: "./src"
+          version: "~= 23.0"
+
+      - name: Format with ruff
+        uses: astral-sh/ruff-action@v1
+        with:
+          src: "./src"
+          args: check --fix
+
+      - name: Validate GitHub workflows
+        uses: raven-actions/actionlint@v2
+
+      - name: Debug refs
+        env:
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          echo "github.ref: ${GITHUB_REF}"
+          echo "github.head_ref: ${GITHUB_HEAD_REF}"
+          echo "github.sha: ${GITHUB_SHA}"
+
+      - name: Commit formatting changes
+        uses: iarekylew00t/verified-bot-commit@v1
+        with:
+          message: "style: autoformatting"
+          ref: refs/heads/${{ github.head_ref }}
+          files: |
+            src/**/*.c
+            src/**/*.py

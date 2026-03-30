@@ -1,0 +1,53 @@
+name: Build Docs
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  release:
+    types:
+      - published
+
+jobs:
+  build:
+    name: Build Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install pandoc
+        run: |
+          sudo apt-get install pandoc
+
+      - name: Install and Set Up Poetry
+        run: |
+          python -m pip install --upgrade poetry
+          poetry config virtualenvs.in-project true
+          poetry run python -m pip install --upgrade pip
+  
+      - name: Install Dependencies
+        run: |
+          poetry install
+
+      - name: Execute the notebooks
+        run: |
+          export TF_CPP_MIN_LOG_LEVEL=3
+          find docs/source/notebooks -type f -name '*.md' -maxdepth 1 -print0 | xargs -0 -n 1 -P 2 poetry run jupytext --set-formats ipynb,md --execute
+
+      - name: Build the docs
+        run: |
+          poetry run sphinx-build -b html -j 2 docs/source docs/_build/${{ github.ref }}
+          find ./docs/_build -type d -name '.[^.]*' -prune -exec rm -rf {} +
+
+      - name: Save ref
+        run: echo "${{ github.ref }}" >> docs/_build/ref.txt
+
+      - name: Save docs artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: docs
+          path: docs/_build/*

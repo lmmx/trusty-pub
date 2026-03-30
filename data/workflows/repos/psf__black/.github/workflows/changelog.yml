@@ -1,0 +1,25 @@
+name: changelog
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled, unlabeled, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Grep CHANGES.md for PR number
+        if: >
+          contains(github.event.pull_request.labels.*.name, 'ci: skip news') != true
+        run: |
+          grep -Pz "\((\n\s*)?#${{ github.event.pull_request.number }}(\n\s*)?\)" CHANGES.md || \
+          (echo "Please add '(#${{ github.event.pull_request.number }})' change line to CHANGES.md (or if appropriate, ask a maintainer to add the 'ci: skip news' label)" && \
+          exit 1)

@@ -1,0 +1,54 @@
+name: Verify MSRV version
+
+on:
+  # Temporarily disabled automatic triggers
+  # push:
+  #   branches:
+  #     - main
+  # pull_request:
+  workflow_dispatch: # Can be manually triggered if needed
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify_msrv:
+    name: Verify MSRV version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+      - run: |
+          if ! command -v cargo-msrv &> /dev/null
+          then
+              cargo install cargo-msrv --locked
+          fi
+
+      - name: Override eppo_core for testing against local version
+        run: |
+          mkdir -p ~/.cargo/
+          echo "[patch.crates-io.eppo_core]" >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
+          echo "path = '$PWD/eppo_core'" >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
+
+      - name: Verify MSRV for each package
+        run: |
+          for dir in eppo_core rust-sdk ruby-sdk/ext/eppo_client; do
+            (cd $dir && cargo msrv verify)
+          done

@@ -1,0 +1,21 @@
+name: "Deploy Documentation"
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        type: boolean
+        description: "If true, the docs will be deployed"
+        default: false
+
+env:
+  UV_FROZEN: "1"
+  GOOGLE_ANALYTICS_KEY: ${{ secrets.GOOGLE_ANALYTICS_KEY }}
+
+jobs:
+  build-deploy-docs:
+    uses: ./.github/workflows/generate-docs.yml
+    with:
+      deploy: true
+    permissions:
+      contents: write

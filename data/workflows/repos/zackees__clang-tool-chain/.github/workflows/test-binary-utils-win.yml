@@ -1,0 +1,50 @@
+name: binary-utils-win
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-binary-utils-win:
+    name: Binary Utils (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        irm https://astral.sh/uv/install.ps1 | iex
+      shell: powershell
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+      shell: bash
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Windows x64 - LLVM Binary Utilities"
+        python --version
+      shell: bash
+
+    - name: Download and install toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      shell: bash
+      timeout-minutes: 20
+
+    - name: Run binary-utils tests
+      run: |
+        uv run pytest tests/test_binary_utils.py -v
+      shell: bash

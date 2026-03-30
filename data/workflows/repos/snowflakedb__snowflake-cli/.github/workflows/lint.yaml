@@ -1,0 +1,50 @@
+name: Code quality checks
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  push:
+    tags:
+      - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+    branches:
+      - main
+      - features/*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Check code quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install pre-commit
+        run: python -m pip install pre-commit tomlkit click==8.2.1 hatch==1.15.1 virtualenv==20.39.1 uv
+      - name: Check if pyproject.toml was changed
+        id: pyproject_changed
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          if git diff --name-only $(git merge-base FETCH_HEAD HEAD)...${{ github.sha }} | grep '^pyproject.toml$'; then
+            echo "pyproject_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "pyproject_changed=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Run pre-commit (full)
+        if: steps.pyproject_changed.outputs.pyproject_changed == 'true'
+        run: pre-commit run --all-files
+      - name: Run pre-commit (skip dependency generation)
+        if: steps.pyproject_changed.outputs.pyproject_changed != 'true'
+        run: SKIP=lock-dependencies pre-commit run --all-files

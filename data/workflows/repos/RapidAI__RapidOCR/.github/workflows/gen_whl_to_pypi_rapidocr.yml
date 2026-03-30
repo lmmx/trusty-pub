@@ -1,0 +1,78 @@
+name: Push rapidocr to pypi
+
+on:
+  push:
+    tags:
+      - v*
+
+env:
+  RESOURCES_URL: https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/required_for_whl_v3.0.0.zip
+
+jobs:
+  UnitTesting:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull latest code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          architecture: 'x64'
+
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+
+      - name: Unit testings
+        run: |
+          cd python
+          pip install -r requirements.txt
+          pip install pytest wheel get_pypi_latest_version openvino==2023.3.0 onnxruntime python-bidi MNN
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install paddlepaddle==3.1.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+
+          pytest tests/test_*.py
+
+  GenerateWHL_PushPyPi:
+    needs: UnitTesting
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          architecture: 'x64'
+
+      - name: Download models
+        run: |
+          cd python
+          wget $RESOURCES_URL
+          ZIP_NAME=${RESOURCES_URL##*/}
+          DIR_NAME=${ZIP_NAME%.*}
+          unzip $ZIP_NAME
+          cp $DIR_NAME/resources/models/*.* rapidocr/models
+
+      - name: Run setup.py
+        run: |
+          cd python
+          pip install setuptools get_pypi_latest_version wheel
+          mkdir rapidocr_t
+          mv rapidocr rapidocr_t
+          mv rapidocr_t rapidocr
+          cd rapidocr
+          echo "from .rapidocr.main import RapidOCR, VisRes" > __init__.py
+
+          cd ..
+          python -m pip install --upgrade pip
+          python setup.py bdist_wheel ${{ github.ref_name }}
+          mv dist ../
+
+      - name: Publish distribution 📦 to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.5.0
+        with:
+          password: ${{ secrets.RAPIDOCR }}
+          packages_dir: dist/

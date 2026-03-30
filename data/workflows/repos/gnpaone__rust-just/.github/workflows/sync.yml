@@ -1,0 +1,86 @@
+name: Sync repo
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/checkout@v6
+        with:
+          repository: casey/just
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: ./.sync-repo
+          ref: master
+  
+      - name: Replace files
+        shell: bash
+        run: |
+          rm -rf ./.sync-repo/.git  
+          rsync -av --checksum --exclude='.github/' ./.sync-repo/ .
+          rm -rf ./.sync-repo/
+  
+      - name: Create PR
+        id: cpr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: sync files from source repo"
+          committer: gnpaone <78990165+gnpaone@users.noreply.github.com>
+          author: gnpaone <78990165+gnpaone@users.noreply.github.com>
+          branch: sync-action
+          base: master
+          delete-branch: true
+          title: Sync source repo
+          labels: ":zap: pull"
+
+      # - name: Identify merge conflict
+      #   if: steps.cpr.outputs.pull-request-operation == 'created'
+      #   id: conf
+      #   uses: codytseng/auto-comment-merge-conflicts@v1
+      #   with:
+      #     token: ${{ secrets.GITHUB_TOKEN }}
+      #     label-name: ":no_entry: merge-conflict"
+
+      # - name: Assign PR
+      #   if: steps.conf.outputs.new-conflicting-prs && (Object.keys(steps.conf.outputs.new-conflicting-prs).length > 0) && (String(steps.cpr.outputs.pull-request-number) == String(steps.conf.outputs.new-conflicting-prs.number))
+      #   uses: wow-actions/auto-assign@v3
+      #   with:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     assignees: gnpaone
+
+      - name: Enable pull request automerge
+        if: steps.cpr.outputs.pull-request-operation == 'created'
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+
+      - name: Assign me as assignee
+        if: failure()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            try {
+              await github.rest.issues.addAssignees({
+                assignees: ['gnpaone'],
+                issue_number: `${{ steps.cpr.outputs.pull-request-number }}`,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+            } catch (error) {
+              core.setFailed(error.message);
+            }
+
+      - name: Delete PRs head branch
+        if: steps.cpr.outputs.pull-request-operation == 'created'
+        uses: dawidd6/action-delete-branch@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          numbers: ${{ steps.cpr.outputs.pull-request-number }}
+          

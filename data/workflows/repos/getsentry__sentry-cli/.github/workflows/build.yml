@@ -1,0 +1,465 @@
+name: Release Build
+
+on:
+  push:
+    branches:
+      - release/**
+  workflow_call:
+    inputs:
+      is-snapshot:
+        type: boolean
+        default: false
+      checkout-ref:
+        type: string
+        default: ''
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: i686
+            target: i686-unknown-linux-musl
+            container: i686-musl
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+            container: x86_64-musl
+          - arch: armv7
+            target: armv7-unknown-linux-musleabi
+            container: armv7-musleabi
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+            container: aarch64-musl
+
+    name: Linux ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+
+    container:
+      image: messense/rust-musl-cross:${{ matrix.container }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Add Rustup Target
+        run: |
+          rustup set profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - name: Cache Dependencies
+        uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # 2.8.2
+
+      - name: Build
+        run: cargo build --release --target=${{ matrix.target }} --locked
+
+      - name: Rename Binary
+        run: mv target/${{ matrix.target }}/release/sentry-cli sentry-cli-Linux-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: artifact-bin-linux-${{ matrix.arch }}
+          path: sentry-cli-Linux-${{ matrix.arch }}
+          if-no-files-found: 'error'
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-apple-darwin
+          - arch: arm64
+            target: aarch64-apple-darwin
+
+    name: macOS ${{ matrix.arch }}
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Add Rustup Target
+        run: rustup target add ${{ matrix.target }}
+
+      # On x86_64, this environment variable specifies to the openssl-sys crate
+      # where to find the OpenSSL library.
+      - name: Set OpenSSL env (x86_64)
+        if: matrix.arch == 'x86_64'
+        run: echo "X86_64_APPLE_DARWIN_OPENSSL_DIR=${{ github.workspace }}/openssl-x86_64" >> $GITHUB_ENV
+
+      - name: Get OpenSSL cache month (x86_64)
+        if: matrix.arch == 'x86_64'
+        id: cache-date
+        run: echo "month=$(date +%Y-%m)" >> $GITHUB_OUTPUT
+
+      - name: Cache x86_64 OpenSSL
+        if: matrix.arch == 'x86_64'
+        id: cache-openssl-x86
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # 5.0.3
+        with:
+          path: ${{ env.X86_64_APPLE_DARWIN_OPENSSL_DIR }}
+          key: openssl-x86_64-${{ runner.os }}-${{ steps.cache-date.outputs.month }}
+
+      # To cross-compile for x86_64 from an ARM-based macOS runner, we need to have the
+      # x86_64 OpenSSL libraries installed locally.
+      - name: Download x86_64 OpenSSL
+        if: matrix.arch == 'x86_64' && steps.cache-openssl-x86.outputs.cache-hit != 'true'
+        run: |
+          brew fetch --bottle-tag=sonoma openssl@3
+          mkdir -p $X86_64_APPLE_DARWIN_OPENSSL_DIR
+          tar xzf $(brew --cache --bottle-tag=sonoma openssl@3) -C $X86_64_APPLE_DARWIN_OPENSSL_DIR --strip-components=2
+
+      - name: Cache Dependencies
+        uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # 2.8.2
+
+      - name: Run Cargo Build
+        run: cargo build --target=${{ matrix.target }} --release --locked
+
+      - name: Rename Binary
+        run: mv target/${{ matrix.target }}/release/sentry-cli sentry-cli-Darwin-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: unsigned-bin-macos-${{ matrix.arch }}
+          path: sentry-cli-Darwin-${{ matrix.arch }}
+          if-no-files-found: 'error'
+
+  macos_universal:
+    needs: macos
+    name: macOS universal
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # 8.0.0
+        with:
+          pattern: unsigned-bin-macos-*
+          merge-multiple: true
+
+      - name: Link universal binary
+        run: lipo -create -output sentry-cli-Darwin-universal sentry-cli-Darwin-x86_64 sentry-cli-Darwin-arm64
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: unsigned-bin-macos-universal
+          path: sentry-cli-Darwin-universal
+          if-no-files-found: 'error'
+
+  sign-macos-binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: universal
+          - arch: x86_64
+          - arch: arm64
+
+    needs: [macos, macos_universal]
+    name: Sign & Notarize macOS Binary (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+
+    env:
+      APPLE_CERT_PATH: /tmp/certs.p12
+      APPLE_API_KEY_PATH: /tmp/apple_key.json
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Install `rcodesign`
+        run: |
+          curl -L https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz \
+            -o rcodesign.tar.gz
+          echo "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002  rcodesign.tar.gz" | sha256sum -c -
+          tar -xz --strip-components=1 -f rcodesign.tar.gz
+          mv rcodesign /usr/local/bin/rcodesign
+          rm rcodesign.tar.gz
+
+      - name: Decode Apple signing certificate and API key
+        env:
+          APPLE_CERT_DATA: ${{ secrets.APPLE_CERT_DATA }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          echo "$APPLE_CERT_DATA" | base64 --decode > ${{ env.APPLE_CERT_PATH }}
+          echo "$APPLE_API_KEY" | base64 --decode > ${{ env.APPLE_API_KEY_PATH }}
+
+      - name: Download unsigned binary
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # 8.0.0
+        with:
+          name: unsigned-bin-macos-${{ matrix.arch }}
+
+      - name: Sign binary
+        run: |
+          rcodesign sign \
+            --for-notarization \
+            --entitlements-xml-path entitlements.plist \
+            --p12-file ${{ env.APPLE_CERT_PATH }} \
+            --p12-password ${{ secrets.APPLE_CERT_PASSWORD }} \
+            sentry-cli-Darwin-${{ matrix.arch }}
+
+      - name: Zip signed binary
+        run: |
+          zip sentry-cli-Darwin-${{ matrix.arch }}.zip sentry-cli-Darwin-${{ matrix.arch }}
+
+      - name: Notarize binary
+        run: |
+          rcodesign notary-submit \
+            --api-key-file ${{ env.APPLE_API_KEY_PATH }} \
+            --wait \
+            sentry-cli-Darwin-${{ matrix.arch }}.zip
+
+      - name: Upload signed binary
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: artifact-bin-macos-${{ matrix.arch }}
+          path: sentry-cli-Darwin-${{ matrix.arch }}
+          if-no-files-found: 'error'
+
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [i686, x86_64, aarch64]
+
+    env:
+      TARGET: ${{ matrix.arch }}-pc-windows-msvc
+
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      # When rustup is updated, it tries to replace its binary, which on Windows is somehow locked.
+      # This can result in the CI failure, see: https://github.com/rust-lang/rustup/issues/3029
+      - name: Disable rustup self-update
+        shell: bash
+        run: rustup set auto-self-update disable
+
+      - name: Add Rustup Target
+        run: rustup target add ${{ env.TARGET }}
+
+      - name: Cache Dependencies
+        uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # 2.8.2
+
+      - name: Run Cargo Build
+        run: cargo build --target=${{ env.TARGET }} --release --locked
+
+      - name: Rename Binary
+        run: mv target/${{ env.TARGET }}/release/sentry-cli.exe sentry-cli-Windows-${{ matrix.arch }}.exe
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: artifact-bin-windows-${{ matrix.arch }}
+          path: sentry-cli-Windows-${{ matrix.arch }}.exe
+          if-no-files-found: 'error'
+
+  node:
+    name: NPM Package
+    runs-on: ubuntu-24.04
+    needs: [linux, sign-macos-binaries, windows]
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # 6.2.0
+        with:
+          node-version: '20.10.0'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Download compiled binaries
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # 8.0.0
+        with:
+          pattern: artifact-bin-*
+          merge-multiple: true
+
+      - name: Calculate and store checksums
+        shell: bash
+        run: |
+          sha256sum sentry-cli-* | awk '{printf("%s=%s\n", $2, $1)}' > checksums.txt
+          cat checksums.txt
+
+      - run: npm pack
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: artifact-pkg-node
+          path: '*.tgz'
+          if-no-files-found: 'error'
+
+  python-base:
+    if: ${{ !inputs.is-snapshot }}
+    name: python (base)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+      - name: Add Rustup Target
+        run: rustup target add x86_64-unknown-linux-musl
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # 6.2.0
+        with:
+          python-version: '3.11'
+      - run: python3 -m pip install build && python3 -m build
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: python-base
+          path: dist/*
+          if-no-files-found: 'error'
+
+  python:
+    if: ${{ !inputs.is-snapshot }}
+    name: python
+    runs-on: ubuntu-24.04
+    needs: [linux, sign-macos-binaries, windows, python-base]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # 6.2.0
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # 8.0.0
+        with:
+          pattern: artifact-bin-*
+          merge-multiple: true
+          path: binaries
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # 8.0.0
+        with:
+          name: python-base
+          merge-multiple: true
+          path: python-base
+      - run: scripts/wheels --binaries binaries --base python-base --dest dist
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: artifact-pkg-python
+          path: dist/*
+          if-no-files-found: 'error'
+
+  npm-distributions:
+    name: 'Build NPM distributions'
+    runs-on: ubuntu-24.04
+    needs: [linux, sign-macos-binaries, windows]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # 6.2.0
+        with:
+          node-version: '20.10.0'
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # 8.0.0
+        with:
+          pattern: artifact-bin-*
+          merge-multiple: true
+          path: binary-artifacts
+      - name: Move binaries into distribution packages
+        run: |
+          mv binary-artifacts/sentry-cli-Darwin-universal npm-binary-distributions/darwin/bin/sentry-cli
+          mv binary-artifacts/sentry-cli-Linux-armv7 npm-binary-distributions/linux-arm/bin/sentry-cli
+          mv binary-artifacts/sentry-cli-Linux-aarch64 npm-binary-distributions/linux-arm64/bin/sentry-cli
+          mv binary-artifacts/sentry-cli-Linux-i686 npm-binary-distributions/linux-i686/bin/sentry-cli
+          mv binary-artifacts/sentry-cli-Linux-x86_64 npm-binary-distributions/linux-x64/bin/sentry-cli
+          mv binary-artifacts/sentry-cli-Windows-i686.exe npm-binary-distributions/win32-i686/bin/sentry-cli.exe
+          mv binary-artifacts/sentry-cli-Windows-x86_64.exe npm-binary-distributions/win32-x64/bin/sentry-cli.exe
+          mv binary-artifacts/sentry-cli-Windows-aarch64.exe npm-binary-distributions/win32-arm64/bin/sentry-cli.exe
+      - name: Remove binary placeholders
+        run: rm -rf npm-binary-distributions/*/bin/.gitkeep
+      - name: Make Linux binaries executable
+        run: chmod +x npm-binary-distributions/*/bin/sentry-cli
+      - name: Package distribution packages
+        run: |
+          for dir in npm-binary-distributions/*; do
+            cd $dir
+            npm pack
+            cd -
+          done
+
+      - name: Upload packaged npm binary distributions
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          name: artifact-npm-binary-distributions
+          path: npm-binary-distributions/*/*.tgz
+          if-no-files-found: 'error'
+
+  platform-specific-docker:
+    if: ${{ !inputs.is-snapshot }}
+    name: Build Docker Image (${{ matrix.platform }})
+    strategy:
+      matrix:
+        include:
+          - platform: amd64
+            runner: ubuntu-24.04
+          - platform: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # 4.0.0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # 4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # 7.0.0
+        with:
+          context: .
+          push: true
+          platforms: linux/${{ matrix.platform }}
+          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}-${{ matrix.platform }}
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+
+  multiarch-docker:
+    if: ${{ !inputs.is-snapshot }}
+    name: Create Multi-Architecture Docker Image
+    needs: platform-specific-docker
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # 4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-architecture image
+        run: |
+          docker buildx imagetools create -t ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            ghcr.io/${{ github.repository }}:${{ github.sha }}-amd64 \
+            ghcr.io/${{ github.repository }}:${{ github.sha }}-arm64
+
+  merge:
+    if: ${{ !inputs.is-snapshot }}
+    name: Create Release Artifact
+    runs-on: ubuntu-24.04
+    needs: [linux, sign-macos-binaries, windows, npm-distributions, node, python]
+    steps:
+      - uses: actions/upload-artifact/merge@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # 7.0.0
+        with:
+          # Craft expects release assets to be a single artifact named after the sha.
+          name: ${{ github.sha }}
+          pattern: artifact-*
+          delete-merged: true

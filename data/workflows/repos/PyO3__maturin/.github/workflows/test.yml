@@ -1,0 +1,552 @@
+name: Test
+
+on:
+  pull_request:
+    paths-ignore:
+      - "guide/**"
+      - "sysconfig/**"
+      - "**.md"
+      - ".cirrus.yml"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "renovate.json"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - run: |
+          rustup component add rustfmt
+          rustup component add clippy
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+      - uses: EmbarkStudios/cargo-deny-action@3fd3802e88374d3fe9159b834c7714ec57d6c979 # v2
+        with:
+          arguments: --all-features
+      - name: cargo clippy
+        run: cargo clippy --tests --all-features -- -D warnings
+
+  test:
+    name: Test
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-22.04-arm
+          - macos-15-intel
+          - macos-latest
+          - windows-latest
+          - windows-11-arm
+        python-version:
+          - "3.9"
+          - "3.14"
+          - "3.14t"
+          - "pypy3.11"
+        exclude:
+          # TODO: Tests are getting stuck
+          - os: ubuntu-latest
+            python-version: pypy3.11
+          # macOS and windows arm only have Python 3.11+
+          - os: macos-latest
+            python-version: 3.9
+          - os: windows-11-arm
+            python-version: 3.9
+          # PyPy does not have ARM builds for linux or windows
+          - os: ubuntu-22.04-arm
+            python-version: pypy3.11
+          - os: windows-11-arm
+            python-version: pypy3.11
+    runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: "1"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - name: Enable long paths
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          reg add HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem /v LongPathsEnabled /t REG_DWORD /d 1 /f
+      - name: Cleanup Disk
+        if: ${{ !startsWith(matrix.os, 'windows') }}
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+      - name: sccache setup
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7
+      - name: Install python packages
+        run: |
+          uv tool install virtualenv
+          uv tool install twine
+          uv tool install uniffi-bindgen==0.28.0
+      - uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # v3
+        if: ${{ matrix.os != 'windows-11-arm' }}
+        with:
+          auto-activate-base: "false"
+          activate-environment: ""
+          miniconda-version: "latest"
+      - id: setup-python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set PYTHON_VERSION env var
+        shell: bash
+        run: |
+          set -ex
+          # remove -dev suffix
+          python_version=$(echo ${{ matrix.python-version }} | sed -e s/-dev//)
+          echo "PYTHON_VERSION=$python_version" >> "${GITHUB_ENV}"
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.15.2
+      - run: rustup target add wasm32-wasip1 # Used by the test suite
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@7410117eef9b9bd416593a4ae34d1bda0b4a2766 # nextest
+        with:
+          tool: nextest
+      - name: Install additional Rust target
+        if: startsWith(matrix.os, 'macos')
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Setup Xcode env
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        run: |
+          set -ex
+          sudo xcode-select -s /Applications/Xcode.app
+          bindir="$(xcode-select --print-path)/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+          echo "CC=${bindir}/clang" >> "${GITHUB_ENV}"
+          echo "CXX=${bindir}/clang++" >> "${GITHUB_ENV}"
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "${GITHUB_ENV}"
+
+      - name: Set MATURIN_TEST_PYTHON
+        shell: bash
+        run: echo "MATURIN_TEST_PYTHON=${{ steps.setup-python.outputs.python-path }}" >> $GITHUB_ENV
+      # To save cache disk space
+      - name: Disable debuginfo on Windows
+        if: startsWith(matrix.os, 'windows')
+        run: echo "RUSTFLAGS="-C debuginfo=0"" >> $GITHUB_ENV
+      - name: cargo test
+        run: cargo nextest run --features password-storage
+      - name: test cross compiling with zig
+        if: ${{ !contains(matrix.python-version, '-dev') }}
+        shell: bash
+        run: |
+          set -ex
+          rustup target add aarch64-unknown-linux-gnu
+          rustup target add aarch64-unknown-linux-musl
+          rustup target add aarch64-apple-darwin
+
+          # abi3
+          cargo run build -i $PYTHON_VERSION -m test-crates/pyo3-pure/Cargo.toml --target aarch64-unknown-linux-gnu --zig
+          cargo run build -i $PYTHON_VERSION -m test-crates/pyo3-pure/Cargo.toml --target aarch64-unknown-linux-musl --zig
+          if [[ "$PYTHON_VERSION" != "pypy"* ]]; then
+            cargo run build -i $PYTHON_VERSION -m test-crates/pyo3-pure/Cargo.toml --target aarch64-apple-darwin --zig
+          fi
+
+          if [[ "$PYTHON_VERSION" == "3.1"* ]]; then
+            # Check abi3 wheels with abi3audit on CPython only
+            pip install abi3audit
+            abi3audit test-crates/pyo3-pure/target/wheels/*.whl
+          fi
+          # Check wheels with twine
+          twine check --strict test-crates/pyo3-pure/target/wheels/*.whl
+
+          # non-abi3
+          cargo run build -i $PYTHON_VERSION -m test-crates/pyo3-mixed/Cargo.toml --target aarch64-unknown-linux-gnu --zig
+          if [[ "$PYTHON_VERSION" != "pypy"* ]]; then
+            cargo run build -i $PYTHON_VERSION -m test-crates/pyo3-mixed/Cargo.toml --target aarch64-apple-darwin --zig
+          fi
+          # Check wheels with twine
+          twine check --strict test-crates/pyo3-mixed/target/wheels/*.whl
+      - name: test compiling with PYO3_CONFIG_FILE
+        if: ${{ matrix.os != 'windows-11-arm' }}
+        shell: bash
+        run: |
+          set -ex
+          rustup target add x86_64-unknown-linux-gnu
+          export PYO3_CONFIG_FILE=$(pwd)/test-crates/pyo3-mixed/pyo3-config.txt
+          target/debug/maturin build -m test-crates/pyo3-mixed/Cargo.toml --target x86_64-unknown-linux-gnu --zig
+      - name: test maturin new
+        shell: bash
+        run: |
+          set -ex
+          target/debug/maturin new -b pyo3 test-crates/pyo3-new
+          target/debug/maturin build -m test-crates/pyo3-new/Cargo.toml --target-dir test-crates/targets/
+          target/debug/maturin new --mixed -b pyo3 test-crates/pyo3-new-mixed
+          target/debug/maturin build -m test-crates/pyo3-new-mixed/Cargo.toml --target-dir test-crates/targets/
+
+  build-maturin:
+    name: Build maturin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - run: rustup show
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: sudo apt-get install musl-tools
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - run: cargo build --target x86_64-unknown-linux-musl --release
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: maturin-build
+          path: target/x86_64-unknown-linux-musl/release/maturin
+
+  test-windows-cross:
+    name: Test windows cross
+    needs: build-maturin
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: "1"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Sccache Setup
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        with:
+          version: "v0.10.0"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: 3.12
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: maturin-build
+          path: bin
+      - run: chmod +x bin/maturin
+      - name: test cross compiling windows wheel
+        run: |
+          set -ex
+          sudo apt-get install -y mingw-w64
+          rustup component add llvm-tools-preview
+          rustup target add x86_64-pc-windows-gnu
+          rustup target add x86_64-pc-windows-msvc
+
+          # abi3
+          bin/maturin build -m test-crates/pyo3-pure/Cargo.toml --target x86_64-pc-windows-gnu
+          bin/maturin build -m test-crates/pyo3-pure/Cargo.toml --target x86_64-pc-windows-msvc
+
+          # no-abi3
+          bin/maturin build -i python3.12 -m test-crates/pyo3-mixed/Cargo.toml --target x86_64-pc-windows-msvc
+
+  test-emscripten:
+    name: Test Emscripten
+    runs-on: ubuntu-latest
+    env:
+      PYODIDE_VERSION: "0.29.0"
+      PYTHON_VERSION: "3.13"
+      NODE_VERSION: 18
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        id: setup-python
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: |
+          rustup default nightly
+          rustup component add rust-src
+          rustup target add wasm32-unknown-emscripten
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: maturin-build
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7
+      - run: uv tool install nox
+      - name: Setup Pyodide
+        run: nox -s setup-pyodide
+      - uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
+        with:
+          version: ${{ env.EMSCRIPTEN_VERSION }}
+          actions-cache-folder: emsdk-cache
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Run tests
+        run: nox -s test-emscripten
+
+  test-alpine:
+    name: Test Alpine Linux
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+    container: alpine:latest
+    steps:
+      - name: Install build requirements
+        run: |
+          set -ex
+          apk add cargo python3-dev libffi-dev py3-pip curl \
+            bash tar zstd git patchelf py3-virtualenv
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Fix git permissions
+        run: git config --global --add safe.directory $GITHUB_WORKSPACE
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: maturin-build
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@7410117eef9b9bd416593a4ae34d1bda0b4a2766 # nextest
+        with:
+          tool: nextest
+      - name: cargo test
+        run: |
+          # unset GITHUB_ACTIONS env var to disable zig related tests
+          env -u GITHUB_ACTIONS cargo nextest run --features password-storage
+
+  test-auditwheel:
+    name: Test Auditwheel
+    needs: build-maturin
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        manylinux: ["manylinux_2_28"]
+    container: quay.io/pypa/${{ matrix.manylinux }}_x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: maturin-build
+          path: bin
+      - run: chmod +x bin/maturin
+      - name: Compliant Build
+        run: tests/manylinux_compliant.sh bin/maturin ${{ matrix.manylinux }}
+      - name: Incompliant Build
+        if: matrix.manylinux == 'manylinux_2_28'
+        run: tests/manylinux_incompliant.sh bin/maturin
+
+  test-docker:
+    name: Test Docker
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: false
+          tags: maturin
+          load: true
+          cache-from: type=registry,ref=ghcr.io/pyo3/maturin:buildcache
+      - name: Test the Docker container
+        run: ./test-dockerfile.sh
+
+  test-cross-compile:
+    name: Test Cross Compile
+    needs: build-maturin
+    runs-on: ubuntu-latest
+    container: ${{ matrix.platform.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # CPython
+          - target: aarch64-unknown-linux-gnu
+            abi: cp39-cp39
+            python: python3.9
+            container: ghcr.io/rust-cross/manylinux2014-cross:aarch64
+          - target: armv7-unknown-linux-gnueabihf
+            abi: cp39-cp39
+            python: python3.9
+            container: ghcr.io/rust-cross/manylinux2014-cross:armv7
+          - target: s390x-unknown-linux-gnu
+            abi: cp310-cp310
+            python: python3.10
+            container: ghcr.io/rust-cross/manylinux2014-cross:s390x
+          - target: loongarch64-unknown-linux-gnu
+            abi: cp310-cp310
+            python: python3.10
+            container: ghcr.io/rust-cross/manylinux_2_36-cross:loongarch64
+          - target: riscv64gc-unknown-linux-gnu
+            abi: cp310-cp310
+            python: python3.10
+            container: ghcr.io/rust-cross/manylinux_2_31-cross:riscv64
+            extra-args: --manylinux 2_31
+          # PyPy
+          - target: aarch64-unknown-linux-gnu
+            abi: pp311-pypy311_pp73
+            python: pypy3.11
+            container: ghcr.io/rust-cross/manylinux2014-cross:aarch64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: maturin-build
+          path: bin
+      - run: chmod +x bin/maturin
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.platform.target }}
+      - name: Build wheels
+        run: |
+          set -ex
+          # Use bundled sysconfig
+          bin/maturin build -i ${{ matrix.platform.python }} --release --out dist --target ${{ matrix.platform.target }} -m test-crates/pyo3-mixed/Cargo.toml ${{ matrix.platform.extra-args }}
+
+          # Use PYO3_CROSS_LIB_DIR
+          export PYO3_CROSS_LIB_DIR=/opt/python/${{ matrix.platform.abi }}
+          bin/maturin build -i python3.9 --release --out dist --target ${{ matrix.platform.target }} -m test-crates/pyo3-mixed/Cargo.toml ${{ matrix.platform.extra-args }}
+          unset PYO3_CROSS_LIB_DIR
+
+          # Test abi3
+          bin/maturin build -i ${{ matrix.platform.python }} --release --out dist --target ${{ matrix.platform.target }} -m test-crates/pyo3-pure/Cargo.toml ${{ matrix.platform.extra-args }}
+
+          # --find-interpreter
+          bin/maturin build --find-interpreter --release --out dist --target ${{ matrix.platform.target }} -m test-crates/pyo3-mixed/Cargo.toml ${{ matrix.platform.extra-args }}
+
+  test-bootstrap:
+    name: Test Bootstrap
+    runs-on: ${{ matrix.os }}
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: changes
+        with:
+          filters: |
+            changed:
+              - 'maturin/**'
+              - 'pyproject.toml'
+              - 'setup.py'
+              - 'MANIFEST.in'
+              - 'Cargo.toml'
+              - '.github/workflows/test.yml'
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7
+      # Caching
+      - name: Sccache Setup
+        if: ${{ steps.changes.outputs.changed == 'true' || contains(github.event.pull_request.labels.*.name, 'release') }}
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        with:
+          version: "v0.10.0"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        if: ${{ steps.changes.outputs.changed == 'true' || contains(github.event.pull_request.labels.*.name, 'release') }}
+        with:
+          python-version: "3.10"
+      - name: Build and install
+        shell: bash
+        run: |
+          set -ex
+          cargo run sdist -o dist
+          uv pip install --system -v dist/maturin-*.tar.gz
+        if: ${{ steps.changes.outputs.changed == 'true' || contains(github.event.pull_request.labels.*.name, 'release') }}
+      - run: maturin --version
+        if: ${{ steps.changes.outputs.changed == 'true' || contains(github.event.pull_request.labels.*.name, 'release') }}
+      - run: python3 -m maturin --version
+        if: ${{ steps.changes.outputs.changed == 'true' || contains(github.event.pull_request.labels.*.name, 'release') }}
+      - name: Upload wheel artifacts
+        if: ${{ steps.changes.outputs.changed == 'true' || contains(github.event.pull_request.labels.*.name, 'release') }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: wheels-${{ runner.os }}
+          path: dist
+
+  test-msrv:
+    name: Test MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - run: rustup default 1.88.0
+      # Caching
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - run: cargo build --no-default-features
+      - name: cargo build
+        run: cargo build --all
+
+  test-downstream:
+    name: Test downstream - ${{ matrix.downstream.repository }}
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'sdist') && github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/downstream.yml
+    with:
+      repository: ${{ matrix.downstream.repository }}
+      manifest-dir: ${{ matrix.downstream.manifest-dir }}
+    strategy:
+      fail-fast: false
+      matrix:
+        downstream:
+          - repository: "pola-rs/polars"
+            manifest-dir: "py-polars"
+          - repository: "astral-sh/ruff"
+            manifest-dir: "crates/ruff_cli"
+          - repository: "crate-ci/typos"
+            manifest-dir: "crates/typos-cli"
+          - repository: "ast-grep/ast-grep"
+            manifest-dir: "crates/pyo3"
+          - repository: "oxigraph/oxigraph"
+            manifest-dir: "python"
+
+  check:
+    name: Check ${{ matrix.platform.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - target: armv5te-unknown-linux-gnueabi
+            apt-packages: gcc-arm-linux-gnueabi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.platform.apt-packages }}
+      - run: rustup target add ${{ matrix.platform.target }}
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - name: cargo check
+        run: cargo check --target ${{ matrix.platform.target }}
+
+  conclusion:
+    needs:
+      - test
+      - test-emscripten
+      - test-alpine
+      - test-auditwheel
+      - test-docker
+      - test-cross-compile
+      - test-bootstrap
+      - test-msrv
+      - test-downstream
+      - check
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Result
+        run: |
+          jq -C <<< "${needs}"
+          # Check if all needs were successful or skipped.
+          "$(jq -r 'all(.result as $result | (["success", "skipped"] | contains([$result])))' <<< "${needs}")"
+        env:
+          needs: ${{ toJson(needs) }}

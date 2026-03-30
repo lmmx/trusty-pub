@@ -1,0 +1,62 @@
+name: CI
+on:
+  # Runs on all pushes to branches
+  push:
+    branches:
+      - 'main'
+  # Runs on all PRs
+  pull_request:
+  # Manual Dispatch
+  workflow_dispatch:
+
+jobs:
+  lint_python:
+    name: Lint Python Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+      - name: Lint with Flake8
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          pip install --upgrade pip
+          pip install .[test]
+          flake8 --statistics .
+
+  lint_tcl:
+    name: Lint TCL Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+      - name: Lint with tclint
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          pip install --upgrade pip
+          pip install .[test]
+          tclfmt --check .
+          tclint .
+
+  check_paths:
+    name: Run CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+      - name: Run tests
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          pip install --upgrade pip
+          pip install -e .[test]
+
+          # change running directory
+          mkdir testrun
+          cd testrun
+
+          pytest $GITHUB_WORKSPACE

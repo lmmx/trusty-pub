@@ -1,0 +1,48 @@
+name: Run tests for MinimalModbus
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"] # TODO , "3.12-dev"
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyserial flake8 mypy docformatter pydocstyle coverage coverage[toml] sphinx sphinx_rtd_theme sphinxcontrib-programoutput
+    - name: Test with unittest
+      run: |
+        python tests/test_minimalmodbus.py
+    - name: Run mypy
+      run: |
+        mypy minimalmodbus.py tests/ --strict --no-warn-unused-ignores
+    - name: Run docformatter
+      run: |
+        docformatter --black minimalmodbus.py
+    - uses: psf/black@stable
+    - name: Run pydocstyle
+      run: |
+        pydocstyle minimalmodbus.py
+    - name: Run flake8 # Does not work with python 3.12-dev
+      run: |
+        flake8 minimalmodbus.py tests/dummy_serial.py tests/test_deltaDTB4824.py tests/test_minimalmodbus.py
+    - name: Generate coverage reports
+      run: |
+        coverage run tests/test_minimalmodbus.py
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v1
+      with:
+        fail_ci_if_error: true
+    - name: Build docs
+      run: |
+        sphinx-build -a -E -W docs/ _build/html

@@ -1,0 +1,102 @@
+name: Build wheels
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  vendor:
+    name: Vendor LLVM ${{ matrix.llvm_version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        llvm_version: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Vendor LLVM Demangle
+        run: python vendor_llvm.py --llvm-version ${{ matrix.llvm_version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vendor-llvm${{ matrix.llvm_version }}
+          path: vendor/
+          retention-days: 1
+
+  build_wheels:
+    name: Wheels (${{ matrix.os }})
+    needs: vendor
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vendor-*
+          merge-multiple: true
+          path: vendor/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install cibuildwheel
+        run: pip install cibuildwheel
+      - name: Build wheels
+        env:
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+        run: cibuildwheel --output-dir wheelhouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  build_sdist:
+    name: sdist
+    needs: vendor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vendor-*
+          merge-multiple: true
+          path: vendor/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist
+        run: pip install build && python -m build --sdist
+      - name: Test sdist
+        run: |
+          pip install "Cython>=3.0" "setuptools>=64" wheel pytest
+          pip install --no-build-isolation dist/*.tar.gz
+          pytest tests -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    name: Publish to PyPI
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

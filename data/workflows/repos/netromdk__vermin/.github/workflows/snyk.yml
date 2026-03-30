@@ -1,0 +1,53 @@
+name: Snyk
+
+# On all pushes/PRs.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        requirements: [analysis, coverage]
+
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+      - name: Set up Python
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 18
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.cache/pip
+          key: snyk-pip-${{ hashFiles('**/.*-requirements.txt') }}
+          restore-keys: snyk-pip-
+
+      - name: Upgrade Pip
+        run: pip3 install --upgrade pip
+      - name: Install requirements
+        env:
+          reqs: ${{ matrix.requirements }}
+        run: python3 -m pip install -r misc/.$reqs-requirements.txt
+
+      - name: Install Snyk
+        run: npm install -g snyk
+      - name: Run Snyk
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          FORCE_COLOR: 2
+          SNYK_INTEGRATION_NAME: GITHUB_ACTIONS
+          SNYK_INTEGRATION_VERSION: python
+          reqs: ${{ matrix.requirements }}
+        run: snyk test --project-name=vermin --package-manager=pip --file=misc/.$reqs-requirements.txt --command=python3 --show-vulnerable-paths=all --print-deps

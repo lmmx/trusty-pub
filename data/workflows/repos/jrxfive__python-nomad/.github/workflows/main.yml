@@ -1,0 +1,65 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Python Nomad Test and Publish
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  registry_package:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NOMAD_IP: '127.0.0.1'
+      NOMAD_PORT: '4646'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.13'] # the oldest and newest support versions
+        nomad-version: ['1.4.14', '1.5.17', '1.6.10', '1.7.7', '1.8.4', '1.9.5']
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Setup Nomad ${{ matrix.nomad-version }}
+      env:
+        NOMAD_VERSION: ${{ matrix.nomad-version }}
+      shell: bash
+      run: |
+        echo ${NOMAD_VERSION}
+
+        echo "downloading nomad"
+        curl -L -o /tmp/nomad_${NOMAD_VERSION}_linux_amd64.zip https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_linux_amd64.zip
+
+        echo "unzip nomad"
+        unzip -o -d /usr/local/bin/ /tmp/nomad_${NOMAD_VERSION}_linux_amd64.zip
+        chmod +x /usr/local/bin/nomad
+        /usr/local/bin/nomad version
+    - name: Install Dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install -r requirements-dev.txt
+    - name: Before Tests
+      shell: bash
+      run: |
+        nomad init example.nomad
+        nomad run -output example.nomad > example.json
+    - name: Unit and Integration Tests
+      env:
+        NOMAD_VERSION: ${{ matrix.nomad-version }}
+      shell: bash
+      run: |
+        ./run_tests.sh
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5

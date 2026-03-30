@@ -1,0 +1,135 @@
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    # paths-ignore:
+    #   - 'llm_dialog_manager/__init__.py'
+    #   - 'pyproject.toml'
+    # TODO: fix version issue
+
+permissions:
+  contents: write      # Allows pushing to the repository
+  pull-requests: write # Allows creating PRs if needed
+  issues: write       # Allows creating issues if needed
+
+jobs:
+  publish:
+    if: "!contains(github.event.head_commit.message, 'Bump version') && !contains(github.event.head_commit.message, 'bump version')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure all history and tags are fetched
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine setuptools wheel toml
+
+      - name: Get current version from pyproject.toml
+        id: get_version
+        run: |
+          CURRENT_VERSION=$(python -c '
+          import toml
+          import sys
+          try:
+              config = toml.load("pyproject.toml")
+              if "project" not in config:
+                  print("Error: Missing [project] section in pyproject.toml", file=sys.stderr)
+                  sys.exit(1)
+              print(config["project"]["version"])
+          except Exception as e:
+              print(f"Error: {str(e)}", file=sys.stderr)
+              sys.exit(1)
+          ')
+          
+          echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Debug - Current Version
+        run: |
+          echo "Current Version: ${{ steps.get_version.outputs.current_version }}"
+
+      - name: Determine New Version
+        id: determine_version
+        run: |
+          CURRENT_VERSION="${{ steps.get_version.outputs.current_version }}"
+          echo "Current Version: $CURRENT_VERSION"
+
+          # Split the current version into major, minor, and patch
+          IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+
+          # Check if the current version exists on PyPI
+          PACKAGE_NAME=$(python -c "
+          import toml
+          config = toml.load('pyproject.toml')
+          print(config['project']['name'])
+          ")
+          PYPI_URL="https://pypi.org/pypi/${PACKAGE_NAME}/${CURRENT_VERSION}/json"
+
+          echo "Checking PyPI for ${PACKAGE_NAME} version ${CURRENT_VERSION}..."
+          RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PYPI_URL")
+
+          if [ "$RESPONSE_CODE" -eq 200 ]; then
+            echo "Version ${CURRENT_VERSION} already exists on PyPI. Incrementing patch version."
+            NEW_PATCH=$((patch + 1))
+            NEW_VERSION="${major}.${minor}.${NEW_PATCH}"
+            echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "Version ${CURRENT_VERSION} is available on PyPI."
+            echo "new_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Debug - New Version
+        run: |
+          echo "New Version: ${{ steps.determine_version.outputs.new_version }}"
+
+      - name: Update version in files
+        run: |
+          NEW_VERSION="${{ steps.determine_version.outputs.new_version }}"
+          echo "Updating files to version ${NEW_VERSION}"
+
+          # Update version in __init__.py
+          sed -i "s/__version__ = \".*\"/__version__ = \"${NEW_VERSION}\"/" llm_dialog_manager/__init__.py
+
+          # Update version in pyproject.toml
+          python -c "
+          import toml
+          with open('pyproject.toml', 'r') as f:
+              data = toml.load(f)
+          data['project']['version'] = '${NEW_VERSION}'
+          with open('pyproject.toml', 'w') as f:
+              toml.dump(data, f)
+          "
+
+      - name: Commit version changes
+        run: |
+          NEW_VERSION="${{ steps.determine_version.outputs.new_version }}"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add llm_dialog_manager/__init__.py pyproject.toml
+          git commit -m "Bump version to ${NEW_VERSION} [skip ci]"
+
+      - name: Tag the new version
+        run: |
+          NEW_VERSION="${{ steps.determine_version.outputs.new_version }}"
+          git tag "v${NEW_VERSION}"
+          git push origin main
+          git push origin "v${NEW_VERSION}"
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          twine upload dist/* --verbose

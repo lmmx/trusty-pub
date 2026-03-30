@@ -1,0 +1,36 @@
+name: Build and test
+
+on:
+  push:
+    branches-ignore:
+      - 'dependabot/**'
+    paths-ignore:
+      - '**/dependabot.yml'
+      - '**/bandit.yml'
+      - '.editorconfig'
+      - '.gitignore'
+      - '.gitattributes'
+      - '**.md'
+      - 'LICENSE'
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      checks: write
+    uses: ./.github/workflows/build_inc.yml
+
+  all_tests:
+    needs: build
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      matrix:
+        flavor:
+          - "normal"
+          - "alt"
+    uses: ./.github/workflows/test_inc.yml
+    with:
+      flavor: ${{ matrix.flavor }}
+

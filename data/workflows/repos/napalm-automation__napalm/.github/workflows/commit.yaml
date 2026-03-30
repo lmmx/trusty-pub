@@ -1,0 +1,99 @@
+name: build
+on: [push, pull_request]
+permissions:
+  contents: read
+
+jobs:
+  linters:
+    name: linters
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Run ruff check
+        run: uv run --no-project ruff check .
+
+      - name: Run ruff format
+        run: uv run --no-project ruff format .
+
+      - name: Run type checker
+        env:
+          MYPYC_OPT_LEVEL: 0  # Fixes the Python 3.13 symbol crash
+        run: |
+          uv run --no-project mypy --version
+          uv run --no-project mypy -p napalm --config-file mypy.ini
+
+  std_tests:
+    name: std_tests
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', "3.12", "3.13", "3.14"]
+        platform: [ubuntu-24.04]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run Tests
+        run: uv run pytest --cov=napalm --cov-report term-missing -vs
+
+  std_tests_macos:
+    name: std_tests_macos
+    strategy:
+      matrix:
+        python-version: [ '3.12', '3.13', '3.14' ]
+        platform: [macos-15]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run Tests
+        run: uv run pytest --cov=napalm --cov-report term-missing -vs
+
+  build_docs:
+    name: build_docs
+    needs: std_tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Doctests
+        run: uv run make doctest

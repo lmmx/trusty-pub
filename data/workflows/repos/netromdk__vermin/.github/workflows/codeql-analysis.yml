@@ -1,0 +1,42 @@
+name: "CodeQL"
+
+# On all PRs to master branches and every sunday at 2:34. Not when pushing to master because PRs are
+# required and otherwise it'll run two times: once for the PR and again when the accepted PR is
+# merged to master.
+on:
+  pull_request:
+    branches: [ master ]
+  schedule:
+    - cron: '34 2 * * 6'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'python' ]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@cf1bb45a277cb3c205638b2cd5c984db1c46a412
+      with:
+        languages: ${{ matrix.language }}
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@cf1bb45a277cb3c205638b2cd5c984db1c46a412
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@cf1bb45a277cb3c205638b2cd5c984db1c46a412

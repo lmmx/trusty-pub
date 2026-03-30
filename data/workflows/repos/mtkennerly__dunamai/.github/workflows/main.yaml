@@ -1,0 +1,104 @@
+on:
+  - push
+  - pull_request
+
+name: Main
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: |
+          pip install poetry
+          poetry install
+          poetry run pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          # - '3.5'
+          # - '3.6'
+          - '3.7'
+          - '3.8'
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+          - '3.13'
+        git-version:
+          - default  # 2.28.0 or newer
+        include:
+          - python-version: '3.7'
+            git-version: '2.21.0'  # https://lore.kernel.org/git/CAKqNo6RJqp94uLMf8Biuo=ZvMZB9Mq6RRMrUgsLW4u1ks+mnOA@mail.gmail.com/T/#u
+          - python-version: '3.7'
+            git-version: '2.7.0'
+          - python-version: '3.7'
+            git-version: '2.2.0'
+          - python-version: '3.7'
+            git-version: '1.8.2.3'
+    name: test (python = ${{ matrix.python-version }}, git = ${{ matrix.git-version }})
+    env:
+      DARCS_EMAIL: foo <foo@example.com>
+    steps:
+      - if: ${{ matrix.python-version == '3.5' }}
+        run: |
+          echo "PIP_TRUSTED_HOST=pypi.python.org pypi.org files.pythonhosted.org" >> $GITHUB_ENV
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # - uses: dtolnay/rust-toolchain@1.65.0
+      # - uses: Swatinem/rust-cache@v2
+      - if: ${{ matrix.git-version != 'default' }}
+        env:
+          NO_OPENSSL: 'yes'
+        run: |
+          sudo apt-get update
+          sudo apt-get install dh-autoreconf libcurl4-gnutls-dev libexpat1-dev gettext libz-dev libssl-dev
+          curl -o git.tar.gz https://mirrors.edge.kernel.org/pub/software/scm/git/git-${{ matrix.git-version }}.tar.gz
+          tar -zxf git.tar.gz
+          cd git-${{ matrix.git-version }}
+          make configure
+          ./configure --prefix=/usr
+          sudo make install
+          which git
+          git --version
+      - run: |
+          export PATH="$PATH:/opt"
+          sudo apt-get update
+          sudo apt-get install -y darcs bzr
+          # For Pijul:
+          # sudo apt-get install -y libxxhash-dev libzstd-dev expect
+
+          # rehosted because the official site deletes older artifacts:
+          curl -L -o ~/fossil.tgz https://github.com/mtkennerly/storage/raw/06e29a4005b24a65bc7d639c0aa1fc152a85d0b7/software/fossil-linux-x64-2.13.tar.gz
+          tar -xvf ~/fossil.tgz -C /opt
+      # TODO: Re-enable Pijul tests once this is fixed: https://nest.pijul.com/pijul/pijul/discussions/777
+      # - name: Prepare Pijul
+      #   run: |
+      #     # Same as default features, but without openssl:
+      #     cargo install pijul --version 1.0.0-beta.2 --no-default-features --features keep-changes
+      #     expect -c 'spawn pijul key generate test ; expect "Password for the new key (press enter to leave it unencrypted):" ; send -- "\r" ; expect eof'
+      - run: |
+          export PATH="$PATH:/opt"
+
+          git config --global user.name "foo"
+          git config --global user.email "foo@example.com"
+          bzr whoami 'foo <foo@example.com>'
+      - if: ${{ matrix.python-version == '3.5' || matrix.python-version == '3.6' }}
+        run: |
+          cp poetry.legacy.lock poetry.lock
+      - if: ${{ matrix.python-version == '3.12' || matrix.python-version == '3.13' }}
+        run: |
+          rm poetry.lock
+      - run: |
+          pip install poetry
+          poetry install
+          poetry run pytest --verbose --cov --cov-report term-missing

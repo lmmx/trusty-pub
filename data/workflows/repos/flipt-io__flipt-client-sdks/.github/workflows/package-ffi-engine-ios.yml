@@ -1,0 +1,141 @@
+name: Package FFI Engine (iOS)
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to upload XCFramework to (e.g. flipt-engine-ffi-v0.9.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.FLIPT_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.FLIPT_RELEASE_BOT_APP_PEM }}
+
+      - name: Get Release ID by Tag
+        id: get_release_id
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = '${{ inputs.release_tag }}';
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner,
+              repo,
+              tag
+            });
+            core.setOutput('id', release.id);
+
+      - name: Get Release Asset URL (iOS arm64)
+        id: get_asset_url_arm64
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const release_id = ${{ steps.get_release_id.outputs.id }};
+            const { data } = await github.rest.repos.listReleaseAssets({
+              owner,
+              repo,
+              release_id
+            });
+            const asset = data.find(asset => asset.name === 'flipt-engine-ffi-iOS-aarch64.tar.gz');
+            if (!asset) {
+              throw new Error('Asset not found');
+            }
+            core.setOutput('url', asset.url);
+
+      - name: Get Release Asset URL (iOS arm64 sim)
+        id: get_asset_url_arm64_sim
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const release_id = ${{ steps.get_release_id.outputs.id }};
+            const { data } = await github.rest.repos.listReleaseAssets({
+              owner,
+              repo,
+              release_id
+            });
+            const asset = data.find(asset => asset.name === 'flipt-engine-ffi-iOS-aarch64-sim.tar.gz');
+            if (!asset) {
+              throw new Error('Asset not found');
+            }
+            core.setOutput('url', asset.url);
+
+      - name: Download Asset (iOS arm64)
+        run: |
+          curl -L \
+            -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
+            -H "Accept: application/octet-stream" \
+            "${{ steps.get_asset_url_arm64.outputs.url }}" \
+            -o /tmp/flipt-engine-ffi-iOS-aarch64.tar.gz
+
+      - name: Download Asset (iOS arm64 sim)
+        run: |
+          curl -L \
+            -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
+            -H "Accept: application/octet-stream" \
+            "${{ steps.get_asset_url_arm64_sim.outputs.url }}" \
+            -o /tmp/flipt-engine-ffi-iOS-aarch64-sim.tar.gz
+
+      - name: Extract Artifacts
+        run: |
+          for platform in iOS-aarch64 iOS-aarch64-sim; do
+            mkdir -p /tmp/flipt-engine-ffi-${platform}
+            tar -xzvf /tmp/flipt-engine-ffi-${platform}.tar.gz -C /tmp/flipt-engine-ffi-${platform}
+          done
+
+      - name: Move Artifacts
+        run: |
+          for platform in ios-arm64 ios-arm64-simulator; do
+            mkdir -p /tmp/build/xcframework/${platform}/Headers
+          done
+
+          mv /tmp/flipt-engine-ffi-iOS-aarch64/target/aarch64-apple-ios/release/libfliptengine.a \
+             /tmp/build/xcframework/ios-arm64/
+          mv /tmp/flipt-engine-ffi-iOS-aarch64-sim/target/aarch64-apple-ios-sim/release/libfliptengine.a \
+             /tmp/build/xcframework/ios-arm64-simulator/
+
+          for platform in ios-arm64 ios-arm64-simulator; do
+            cp flipt-engine-ffi/include/flipt_engine.h /tmp/build/xcframework/${platform}/Headers/
+            cp flipt-engine-ffi/include/module.modulemap /tmp/build/xcframework/${platform}/Headers/
+          done
+
+      - name: Strip Libraries
+        run: |
+          for platform in ios-arm64 ios-arm64-simulator; do
+            strip -x /tmp/build/xcframework/${platform}/libfliptengine.a
+          done
+
+      - name: Xcode Build
+        run: |
+          mkdir -p /tmp/Sources
+
+          xcodebuild -create-xcframework \
+            -library "/tmp/build/xcframework/ios-arm64/libfliptengine.a" \
+            -headers "/tmp/build/xcframework/ios-arm64/Headers" \
+            -library "/tmp/build/xcframework/ios-arm64-simulator/libfliptengine.a" \
+            -headers "/tmp/build/xcframework/ios-arm64-simulator/Headers" \
+            -output "/tmp/Sources/FliptEngineFFI.xcframework"
+
+      - name: Archive XCFramework
+        run: |
+          tar -czvf /tmp/Sources/FliptEngineFFI.xcframework.tar.gz -C /tmp/Sources FliptEngineFFI.xcframework
+
+      - name: Upload Release Assets (Tag)
+        uses: softprops/action-gh-release@v2.6.1
+        if: startsWith(inputs.release_tag, 'flipt-engine-ffi-v')
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: /tmp/Sources/FliptEngineFFI.xcframework.tar.gz

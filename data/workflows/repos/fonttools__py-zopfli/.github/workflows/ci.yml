@@ -1,0 +1,151 @@
+name: Build + Deploy
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [master]
+  release:
+    types:
+      - published
+
+env:
+  CIBW_TEST_EXTRAS: test
+  CIBW_TEST_COMMAND: pytest {package}/tests -v
+  # Skip old Python, free-threaded, and single-arch x86_64 macOS (universal2 covers both archs)
+  CIBW_SKIP: "cp38-* cp39-* cp314t-* cp*-macosx_x86_64"
+
+jobs:
+
+  build_sdist:
+    name: Build Source Distribution
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+    - name: Install dependencies
+      run: pip install --upgrade setuptools twine
+    - name: Build sdist
+      run: python setup.py sdist
+    - name: Check metadata
+      run: twine check dist/*.tar.gz
+    - uses: actions/upload-artifact@v4
+      with:
+        path: dist/*.tar.gz
+        name: sdist
+
+  build_wheels:
+    name: ${{ matrix.type }} ${{ matrix.arch }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15-intel runners are x86_64 (available until Aug 2027);
+        # macos-14+ (latest) are arm64
+        # Note: abi3 wheel is built once for cp310 but tested on all versions listed
+        os: [macos-15-intel, windows-latest]
+        arch: [auto64]
+        build: ["cp310-* cp311-* cp312-* cp313-* cp314-* pp311-*"]
+        CIBW_ENABLE: [pypy]
+        include:
+          # manylinux2014: build cp310 abi3 wheel (works on 3.10+) and pypy3.11
+          # abi3 wheel is built once but tested on all cp versions listed
+          - os: ubuntu-latest
+            arch: auto
+            type: manylinux2014
+            build: "cp310-* cp311-* cp312-* cp313-* cp314-* pp311-*"
+            CIBW_ENABLE: pypy
+            CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+            CIBW_MANYLINUX_I686_IMAGE: manylinux2014
+
+          - os: macos-latest
+            arch: universal2
+            build: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+
+          - os: windows-latest
+            arch: auto32
+            build: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+    - name: Install dependencies
+      run: pip install cibuildwheel
+    - name: Build Wheels
+      run: python -m cibuildwheel --output-dir wheelhouse .
+      env:
+        CIBW_BUILD: ${{ matrix.build }}
+        CIBW_ENABLE: ${{ matrix.CIBW_ENABLE }}
+        CIBW_MANYLINUX_I686_IMAGE: ${{ matrix.CIBW_MANYLINUX_I686_IMAGE }}
+        CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.CIBW_MANYLINUX_X86_64_IMAGE }}
+        CIBW_ARCHS: ${{ matrix.arch }}
+    - uses: actions/upload-artifact@v4
+      with:
+        path: wheelhouse/*.whl
+        name: wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.type }}
+
+
+  build_arch_wheels:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # aarch64 CPython: build cp310 abi3 wheel (no need to test on 3.11+ since already tested on x86_64)
+          - name: "CPython abi3 on aarch64"
+            build: "cp310-*"
+            arch: aarch64
+          # aarch64 PyPy: build and test pp311
+          - name: "PyPy 3.11 on aarch64"
+            build: "pp311-*"
+            arch: aarch64
+            enable: pypy
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - uses: docker/setup-qemu-action@v3
+      with:
+        platforms: all
+    - name: Install dependencies
+      run: pip install cibuildwheel
+    - name: Build Wheels
+      run: python -m cibuildwheel --output-dir wheelhouse .
+      env:
+        CIBW_BUILD: ${{ matrix.build }}
+        CIBW_ENABLE: ${{ matrix.enable || '' }}
+        CIBW_ARCHS: ${{ matrix.arch }}
+    - uses: actions/upload-artifact@v4
+      with:
+        path: wheelhouse/*.whl
+        name: wheels-${{ matrix.arch }}-${{ matrix.name }}
+
+  deploy:
+    name: Upload if release
+    needs: [build_wheels, build_arch_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
+
+    - uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_PASSWORD }}

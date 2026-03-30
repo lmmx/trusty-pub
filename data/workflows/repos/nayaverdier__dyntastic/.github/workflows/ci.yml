@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # run CI every day to catch issues with external dependency updates
+  # (18th minute to avoid delays during high GH Action loads)
+  schedule:
+    - cron: '18 13 * * *'
+
+jobs:
+  test:
+    name: "Test Python ${{ matrix.python-version }} (${{ (matrix.pin-versions == '' && 'Latest Dependencies') || (contains(matrix.pin-versions, 'pydantic<2') && 'Pydantic v1') || 'Compatibility Check' }})"
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12']
+        # TODO: Import error with boto3==1.10.0 on python3.12 through boto3->botocore->urllib3
+        pin-versions: ["", '"\"pydantic<2\""', '"\"boto3==1.10.0; python_version<''3.12''\"" "\"boto3==1.20.0; python_version>=''3.12''\"" pydantic==1.7.1 "\"importlib_metadata==1.0.0; python_version<''3.8''\""']
+
+    env:
+      PYTHON: ${{ matrix.python-version }}
+
+    runs-on: ${{ (matrix.python-version == '3.7' && 'ubuntu-22.04') || 'ubuntu-latest' }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: set up python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
+        cache-dependency-path: setup.py
+
+    - uses: extractions/setup-just@v2
+
+    - name: install
+      run: 'just install-dev ${{ matrix.pin-versions }}'
+    - name: Lint
+      run: just pre-commit
+      env:
+        # Note: Skip black on python 3.7 since latest black with breaking
+        # changes does not support python 3.7 anymore
+        SKIP: "pytest${{ (matrix.python-version == '3.7' && ',black') || '' }}"
+    - name: test
+      run: just test
+    - name: coverage
+      run: just coverage
+
+    - uses: codecov/codecov-action@v4
+      with:
+        file: coverage.xml
+        env_vars: PYTHON
+
+  deploy:
+    name: Build and Deploy
+    needs: test
+    if: "success() && startsWith(github.ref, 'refs/tags/')"
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: set up python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.9
+
+    - uses: extractions/setup-just@v2
+
+    - name: install
+      run: just install-deploy
+
+    - name: build
+      run: just build
+
+    - name: Publish package distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1

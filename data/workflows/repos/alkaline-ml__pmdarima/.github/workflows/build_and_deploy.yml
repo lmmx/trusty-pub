@@ -1,0 +1,101 @@
+name: Mac and Windows Builds
+
+on:
+  push:
+    branches:
+      - 'master'
+    tags:
+      - '*'
+
+  pull_request:
+    branches:
+      - '*'
+
+# Cancel older runs of the same workflow on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    strategy:
+      matrix:
+        python3-minor-version: [10, 11, 12, 13, 14]
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHON_VERSION: ${{ format('3.{0}', matrix.python3-minor-version) }}
+      PYTHON_EXECUTABLE: ${{ format('cp3{0}', matrix.python3-minor-version) }}
+
+    runs-on: ${{ matrix.os }}
+    name: Build and Deploy (${{ matrix.os }}, 3.${{ matrix.python3-minor-version }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Python interpreter used by cibuildwheel, but it uses a different one internally
+      - name: Setting up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      # We build the source archive separately because of this: https://github.com/alkaline-ml/pmdarima/pull/136#discussion_r279781731
+      # We build it first because of this: https://github.com/alkaline-ml/pmdarima/issues/448
+      - name: Building source distribution
+        run: |
+          pip install build
+          make sdist
+
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel
+
+      - name: Building and testing wheels
+        run: python -m cibuildwheel --output-dir dist
+        env:
+          # TODO: Move Linux x86_64 builds to GHA?
+          CIBW_ARCHS_LINUX: "aarch64"
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_ARCHS_WINDOWS: "AMD64"
+          CIBW_BEFORE_TEST: pip install .[test]
+          CIBW_BUILD: "${{ env.PYTHON_EXECUTABLE }}-*"
+          CIBW_ENVIRONMENT: CC=gcc
+          CIBW_ENVIRONMENT_MACOS: PMD_MPL_BACKEND=TkAgg PYTHON_CROSSENV=true
+          CIBW_ENVIRONMENT_PASS_LINUX: GITHUB_REF
+          # No support for pypy or musl
+          CIBW_SKIP: "*-musllinux_*"
+          CIBW_TEST_COMMAND: pytest --showlocals --durations=20 --pyargs pmdarima
+          # Avoid testing on emulated architectures
+          CIBW_TEST_SKIP: "*-*linux_{aarch64,ppc64le,s390x} *-macosx_arm64"
+
+      - name: Checking README compatibility
+        run: |
+          python -m pip install "twine>=1.13.0" readme_renderer
+          if python -c "from twine.commands.check import check; check(['dist/*'])" | grep  "warning"; then
+              echo "README will not render properly on PyPI"
+              exit 1
+          else
+              echo "README rendered appropriately"
+          fi
+
+      - name: Ensuring sdist can be installed
+        run: pip install dist/$(ls dist | grep tar)
+
+      - name: Deploying to PyPI
+        # Only deploy on tags
+        if: startsWith(github.ref, 'refs/tags') && success()
+        run: |
+          chmod +x build_tools/github/deploy.sh
+          ./build_tools/github/deploy.sh
+        env:
+          TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+          TEST_PYPI_PASSWORD: ${{ secrets.TEST_PYPI_PASSWORD }}

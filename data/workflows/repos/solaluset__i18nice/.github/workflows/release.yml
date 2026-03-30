@@ -1,0 +1,25 @@
+name: Publish package
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+
+    - name: Build
+      run: >
+        pip install -r requirements/build.txt
+        && python -m build
+
+    - name: Upload binaries to release
+      uses: pypa/gh-action-pypi-publish@release/v1

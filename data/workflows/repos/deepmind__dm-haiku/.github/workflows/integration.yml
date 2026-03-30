@@ -1,0 +1,40 @@
+name: integration
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  test-ubuntu:
+    name: "integration tests on ${{ matrix.python-version }} on ${{ matrix.os }}"
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      matrix:
+        python-version: ['3.12']
+        os: [ubuntu-latest]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt -r requirements-jax.txt -r requirements-flax.txt -r requirements-test.txt
+        pip install .
+        pip install pytest pytest-xdist
+    - name: Print installed dependencies
+      run: |
+        pip freeze
+    - name: Test with pytest (integration tests)
+      run: |
+        # Isolate the float64 test because it needs to set a flag at start-up,
+        # so no other tests can be run before it.
+        pytest haiku/_src/integration/float64_test.py
+        pytest -n auto haiku/_src/integration/ --ignore=haiku/_src/integration/float64_test.py

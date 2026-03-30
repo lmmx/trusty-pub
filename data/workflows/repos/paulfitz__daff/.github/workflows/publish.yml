@@ -1,0 +1,106 @@
+name: Publish packages
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run npm publish in dry-run mode'
+        required: false
+        default: 'false'
+jobs:
+
+  package_js:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.4
+
+      - name: Install Haxe libraries
+        run: |
+          haxelib install hx3compat
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 23
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install Node.js dependencies
+        run: npm install
+
+      - name: Build js
+        run: make js
+
+      - name: Run js tests
+        run: |
+          make test
+
+      - name: Publish package on NPM
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            npm publish --dry-run
+          else
+            npm publish
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  package_py:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.4
+
+      - name: Install Haxe libraries
+        run: |
+          haxelib install hx3compat
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 23
+
+      - name: Install Node.js dependencies
+        run: npm install
+
+      - name: Install twine and upgrade related packages
+        run: |
+          python3 -m pip install --upgrade packaging setuptools wheel twine pkginfo
+
+      - name: Build py
+        run: make py
+
+      - name: Run py tests
+        run: |
+          make ntest_py
+
+      - name: Build sdist and wheel
+        run: |
+          rm -rf dist
+          make sdist_no_twine
+
+      - name: Check py package (dry run)
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          twine check dist/*
+
+      - name: Upload to PyPI
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          twine upload dist/*

@@ -1,0 +1,30 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  src-test:
+    name: unit-tests
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+
+    - name: Install python dependencies
+      run: |
+        pip install numpy pytest
+        pip install -r requirements.txt
+        pip install -e .
+        python --version
+        pip --version
+        python -m pip list
+      shell: bash
+
+    - name: Source code tests
+      run: |
+        py.test tests

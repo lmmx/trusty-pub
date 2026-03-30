@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install .[testing]
+    - name: Test with pytest
+      run: |
+        pytest --cov=logging_json --cov-fail-under=100 --cov-report=term-missing
+    - name: Create packages
+      run: |
+        python -m pip install build
+        python -m build .
+    - name: Publish packages
+      run: |
+        python -m pip install twine
+        python -m twine upload dist/* --skip-existing --username __token__ --password ${{ secrets.pypi_password }}

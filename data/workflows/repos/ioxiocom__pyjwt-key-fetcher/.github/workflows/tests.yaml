@@ -1,0 +1,33 @@
+name: Test the library
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited]
+
+jobs:
+  run_tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout 🔁
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 #v4.1.1
+
+      - name: Set up Python ${{ matrix.python-version }} 🐍
+        uses: actions/setup-python@65d7f2d534ac1bc67fcd62888c5f4f3d2cb2b236 #v4.7.1
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry and pre-commit 💈
+        run: pip install poetry==2.2.1 pre-commit
+
+      - name: Install dependencies 🛠
+        run: poetry install
+
+      - name: Run pre-commit 🤔
+        run: pre-commit run --all-files
+
+      - name: Run tests 🌈
+        run: poetry run invoke test

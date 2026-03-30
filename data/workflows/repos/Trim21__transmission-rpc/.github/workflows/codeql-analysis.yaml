@@ -1,0 +1,39 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+
+  pull_request:
+    branches: [master]
+
+  schedule:
+    - cron: 0 3 * * 5
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+      # Override automatic language detection by changing the below list
+      # Supported options are ['csharp', 'cpp', 'go', 'java', 'javascript', 'python']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config.yaml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4

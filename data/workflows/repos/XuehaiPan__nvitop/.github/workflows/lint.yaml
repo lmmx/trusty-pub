@@ -1,0 +1,77 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: "1"
+  CLICOLOR_FORCE: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.8 - 3.14"
+          update-environment: true
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip setuptools
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Import tests
+        run: |
+          python -c 'import nvitop'
+          python -m nvitop --version
+          python -m nvitop --help
+          python -m nvitop.select --version
+          python -m nvitop.select --help
+
+      - name: Install dependencies for nvitop-exporter
+        run: |
+          python -m pip install -r nvitop-exporter/requirements.txt
+
+      - name: Import tests for nvitop-exporter
+        run: |
+          (
+            cd nvitop-exporter &&
+            python -c 'import nvitop_exporter' &&
+            python -m nvitop_exporter --version &&
+            python -m nvitop_exporter --help
+          )
+
+      - name: Install linters
+        run: python -m pip install --upgrade pre-commit 'pylint[spelling]' mypy typing-extensions
+
+      - name: pre-commit
+        run: |
+          python -m pre_commit --version
+          python -m pre_commit install --install-hooks
+          python -m pre_commit run --all-files
+
+      - name: xdoctest
+        run: |
+          python -m pip install xdoctest
+          python -m xdoctest --version
+          grep -P -l -r '^\s*(import|from) (doctest|unittest)\b' nvitop |
+            xargs -r -L 1 python -m xdoctest

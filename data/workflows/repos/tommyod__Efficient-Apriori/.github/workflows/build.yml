@@ -1,0 +1,56 @@
+name: Python CI
+
+on: 
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 0 * * 0' # weekly
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # Allow one of the matrix builds to fail without failing others
+      matrix:
+        # https://www.python.org/downloads/
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        
+    # The job
+    name: Python ${{ matrix.python-version }}
+    
+    # The steps in the job. Each step either RUNS code, or USES an action
+    steps:
+    
+      - name: Checkout
+        uses: actions/checkout@v3
+        
+      - name: Setup python
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+          
+      - name: Run tests and linting
+        run: |
+          pip install pep8 flake8 black mypy pytest twine setuptools wheel --upgrade --quiet
+          flake8 --show-source --ignore=F811,W293,W391,W292,W291,E252,W503,E203 --max-line-length=120 --exclude='conf.py';
+          black . --check -l 120;
+          python3 -m pip install types-dataclasses;
+          mypy efficient_apriori/*.py --ignore-missing-imports --show-error-context;
+          pip install .
+          pytest --doctest-modules -v efficient_apriori
+
+# ======================= BUILD WHEELS AND UPLOAD TO PYPI ==================================
+
+      - name: Build wheels ${{ matrix.python-version }} on ${{ matrix.os }}
+        run: |
+          python -m pip install build
+          python -m build;
+
+      - name: Publish Python distribution to PyPI
+        if: github.ref == 'refs/heads/master'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+          user: __token__
+          password: ${{ secrets.pypi_password }}
+          

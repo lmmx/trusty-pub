@@ -1,0 +1,92 @@
+name: cosmocc-valgrind-linux-x86
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-cosmocc-valgrind-linux-x86:
+    name: Cosmocc + Valgrind (Linux x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Linux x86_64 - Cosmocc + Valgrind"
+        uname -a
+        python --version
+        docker --version
+
+    - name: Download and install cosmocc toolchain
+      run: |
+        uv run clang-tool-chain install cosmocc
+      timeout-minutes: 20
+
+    - name: Compile test program with cosmocc (debug build)
+      run: |
+        uv run clang-tool-chain-cosmocc -g -O0 tests/test_data/cosmocc_valgrind_test.c -o cosmocc_valgrind_test.com
+      timeout-minutes: 10
+
+    - name: Verify .dbg sidecar was produced
+      run: |
+        if [ -f cosmocc_valgrind_test.com.dbg ]; then
+          echo "OK: .com.dbg sidecar found"
+          file cosmocc_valgrind_test.com.dbg
+        elif [ -f cosmocc_valgrind_test.dbg ]; then
+          echo "OK: .dbg sidecar found (stem form)"
+          file cosmocc_valgrind_test.dbg
+        else
+          echo "ERROR: No .dbg sidecar produced by cosmocc"
+          ls -la cosmocc_valgrind_test*
+          exit 1
+        fi
+
+    - name: Run Valgrind on .com file (tests APE auto-redirect to .dbg)
+      run: |
+        # Valgrind should auto-detect the APE and redirect to the .dbg sidecar.
+        # The test program uses an uninitialized variable, so Valgrind should detect it.
+        # NOTE: Cosmocc uses a custom statically-linked malloc, so Valgrind cannot
+        # detect heap leaks. But it CAN detect uninitialized value errors.
+        if uv run clang-tool-chain-valgrind --track-origins=yes --error-exitcode=1 ./cosmocc_valgrind_test.com; then
+          echo "ERROR: Valgrind should have detected an uninitialized value error but didn't!"
+          exit 1
+        else
+          echo "OK: Valgrind correctly detected the uninitialized value error via .com auto-redirect."
+        fi
+      timeout-minutes: 10
+
+    - name: Run Valgrind directly on .dbg file (manual path)
+      run: |
+        # Find the .dbg file
+        if [ -f cosmocc_valgrind_test.com.dbg ]; then
+          DBG_FILE=cosmocc_valgrind_test.com.dbg
+        else
+          DBG_FILE=cosmocc_valgrind_test.dbg
+        fi
+        echo "Running Valgrind directly on: $DBG_FILE"
+        if uv run clang-tool-chain-valgrind --track-origins=yes --error-exitcode=1 ./$DBG_FILE; then
+          echo "ERROR: Valgrind should have detected an uninitialized value error but didn't!"
+          exit 1
+        else
+          echo "OK: Valgrind correctly detected the uninitialized value error on .dbg file."
+        fi
+      timeout-minutes: 10

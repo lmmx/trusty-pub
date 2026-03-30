@@ -1,0 +1,148 @@
+name: Build + Deploy
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-2025]
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+    - name: Install dependencies
+      run: pip install cibuildwheel
+    - name: Build Wheels
+      run: python -m cibuildwheel --output-dir wheelhouse
+    - uses: actions/upload-artifact@v4
+      with:
+        name: uharfbuzz-${{ matrix.os }}
+        path: wheelhouse/*.whl
+
+  build-pyodide:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        # Must match Pyodide's Python version (0.28.x uses 3.13)
+        python-version: "3.13"
+    - name: Install cibuildwheel
+      run: pip install cibuildwheel
+    - name: Build and test Pyodide wheel
+      run: python -m cibuildwheel --platform pyodide --output-dir wheelhouse
+    - uses: actions/upload-artifact@v4
+      with:
+        name: uharfbuzz-pyodide
+        path: wheelhouse/*.whl
+
+  deploy:
+    name: Create and populate release
+    needs: [build, build-pyodide]
+    runs-on: ubuntu-latest
+    if: contains(github.ref, 'refs/tags/')
+    env:
+      GH_TOKEN: ${{ github.token }}
+    environment:
+      name: publish-to-pypi
+      url: https://pypi.org/p/uharfbuzz
+    permissions:
+      id-token: write # IMPORTANT: mandatory for trusted publishing
+      contents: write # Needed to create GH release
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: wheelhouse/
+    - name: Move wheels to dist/ directory
+      run: |
+        ls wheelhouse/*
+        mkdir -p dist/
+        for wheel_dir in wheelhouse/uharfbuzz*/; do
+          mv "${wheel_dir}"/*.whl dist/
+        done
+        # Separate Pyodide wheels (PyPI doesn't accept wasm32 wheels yet)
+        # https://github.com/pypi/warehouse/issues/10416
+        # https://discuss.python.org/t/pep-783-emscripten-packaging
+        mkdir -p dist-pyodide/
+        mv dist/*pyodide*.whl dist-pyodide/ 2>/dev/null || true
+    - name: Extract release notes from annotated tag message
+      id: release_notes
+      env:
+        # e.g. v0.1.0a1, v1.2.0b2 or v2.3.0rc3, but not v1.0.0
+        PRERELEASE_TAG_PATTERN: "v[[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+([ab]|rc)[[:digit:]]+"
+      run: |
+        # GH checkout action doesn't preserve tag annotations, we must fetch them
+        # https://github.com/actions/checkout/issues/290
+        git fetch --tags --force
+        # Dump tag message body to temporary .md file
+        echo "$(git tag -l --format='%(contents:body)' ${{ github.ref_name }})" > "${{ runner.temp }}/release_body.md"
+        # Set RELEASE_NAME env var to tag message subject
+        echo "RELEASE_NAME=$(git tag -l --format='%(contents:subject)' ${{ github.ref_name }})" >> $GITHUB_ENV
+        # if the tag has a pre-release suffix mark the Github Release accordingly
+        if egrep -q "$PRERELEASE_TAG_PATTERN" <<< "${{ github.ref_name }}"; then
+          echo "Tag contains a pre-release suffix"
+          echo "IS_PRERELEASE=true" >> "$GITHUB_ENV"
+        else
+          echo "Tag does not contain pre-release suffix"
+          echo "IS_PRERELEASE=false" >> "$GITHUB_ENV"
+        fi
+    - name: Create GitHub release
+      id: create_release
+      run: |
+          notes="--notes-file \"${{ runner.temp }}/release_body.md\""
+          # If the notes file is empty, use --generate-notes instead
+          if ! grep -q "[^[:space:]]" "${{ runner.temp }}/release_body.md"; then
+            notes="--generate-notes"
+          fi
+          prerelease=""
+          if [ "$IS_PRERELEASE" = true ]; then
+            prerelease="--prerelease"
+          fi
+          gh release create ${{ github.ref }} \
+                            --title "${{ env.RELEASE_NAME }}" \
+                            $notes \
+                            $prerelease
+    - name: Upload Pyodide wheel to GitHub release
+      run: |
+        if [ -d dist-pyodide ] && [ "$(ls -A dist-pyodide)" ]; then
+          gh release upload ${{ github.ref }} dist-pyodide/*.whl
+        fi
+    - name: Build sdist
+      run: |
+        if [ "$IS_PRERELEASE" == true ]; then
+          echo "DEBUG: This is a pre-release"
+        else
+          echo "DEBUG: This is a final release"
+        fi
+        pipx run build --sdist --outdir dist/
+    - name: Publish package distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1

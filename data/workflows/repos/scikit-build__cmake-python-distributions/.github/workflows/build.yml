@@ -1,0 +1,270 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * 5'  # "At 18:00 on Friday."
+  pull_request:
+  push:
+    branches:
+      - main
+      - py2-legacy
+      - v3.x
+    tags:
+      - "*.*.*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - uses: pre-commit/action@v3.0.1
+
+
+  build_wheels:
+    name: Build ${{ matrix.build }}${{ matrix.arch }} wheels on ${{ matrix.os }}
+    needs: [lint]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: "x86_64"
+            build: "manylinux_"
+          - os: ubuntu-latest
+            arch: "x86_64"
+            build: "musllinux_"
+          - os: ubuntu-latest
+            arch: "i686"
+            build: "manylinux_"
+          - os: ubuntu-latest
+            arch: "i686"
+            build: "musllinux_"
+          - os: ubuntu-24.04-arm
+            arch: "aarch64"
+            build: "manylinux_"
+          - os: ubuntu-24.04-arm
+            arch: "aarch64"
+            build: "musllinux_"
+          - os: ubuntu-latest
+            arch: "ppc64le"
+            build: "manylinux_"
+          - os: ubuntu-latest
+            arch: "ppc64le"
+            build: "musllinux_"
+          - os: ubuntu-latest
+            arch: "s390x"
+            build: "manylinux_"
+          - os: ubuntu-latest
+            arch: "s390x"
+            build: "musllinux_"
+          - os: ubuntu-latest
+            arch: "riscv64"
+            build: "manylinux_"
+          - os: ubuntu-latest
+            arch: "riscv64"
+            build: "musllinux_"
+          - os: ubuntu-24.04-arm
+            arch: "armv7l"
+            build: "manylinux_"
+          - os: ubuntu-24.04-arm
+            arch: "armv7l"
+            build: "musllinux_"
+          - os: windows-2022
+            arch: "AMD64"
+            build: ""
+          - os: windows-11-arm
+            arch: "ARM64"
+            build: ""
+          - os: windows-2022
+            arch: "x86"
+            build: ""
+          - os: macos-14
+            arch: "universal2"
+            build: ""
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # required for versioneer to find tags
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4.0.0
+        if: matrix.arch == 'ppc64le' || matrix.arch == 'riscv64' || matrix.arch == 's390x'
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4
+        env:
+          CIBW_ARCHS: "${{ matrix.arch }}"
+          CIBW_BUILD: "cp310-${{ matrix.build }}*"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cibw-${{ runner.os }}-${{ matrix.build }}${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # required for versioneer to find tags
+
+      - name: Build SDist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  test_sdist:
+    name: Test SDist with python ${{ matrix.python }}
+    needs: [build_sdist]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.8", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+
+      - name: Setup environment
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install --group test
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libssl-dev
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: cibw-sdist
+          path: dist
+
+      - name: Install SDist
+        env:
+          CMAKE_ARGS: "-DBUILD_CMAKE_FROM_SOURCE:BOOL=OFF"
+        run: |
+          uv pip install dist/*.tar.gz
+          rm -rf dist
+
+      - name: Test installed SDist
+        run: .venv/bin/pytest ./tests
+
+  bootstrap_build:
+    name: Source only build on ${{ matrix.os }}
+    needs: [lint]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "windows-latest", "macos-latest"]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: "3.x"
+
+      - name: Remove cmake and ninja
+        shell: bash
+        run: |
+          # Remove cmake and ninja
+          set -euxo pipefail
+          # https://github.com/scikit-build/scikit-build-core/blob/3943920fa267dc83f9295279bea1c774c0916f13/src/scikit_build_core/program_search.py#L51
+          # https://github.com/scikit-build/scikit-build-core/blob/3943920fa267dc83f9295279bea1c774c0916f13/src/scikit_build_core/program_search.py#L70
+          for TOOL in cmake cmake3 ninja-build ninja samu; do
+            while which ${TOOL}; do
+              if [ "$RUNNER_OS" == "Windows" ]; then
+                rm -f "$(which ${TOOL})"
+              else
+                sudo rm -f $(which -a ${TOOL})
+              fi
+            done
+          done
+
+      - name: Build SDist
+        run: pipx run --python '${{ steps.python.outputs.python-path }}' build --sdist
+
+      - name: Install dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libssl-dev
+
+      - name: Install SDist
+        shell: bash
+        env:
+          CMAKE_ARGS: "-DBUILD_CMAKE_FROM_SOURCE:BOOL=OFF"
+          CMAKE_BUILD_PARALLEL_LEVEL: "4"
+          MACOSX_DEPLOYMENT_TARGET: "10.10"
+        run: |
+          python -m pip install -v --no-binary='cmake,ninja' dist/*.tar.gz
+          rm -rf dist
+
+      - name: Test installed SDist
+        shell: bash
+        run: python -m pip install pytest pytest-cov && pytest ./tests
+
+  check_dist:
+    name: Check dist
+    needs: [build_wheels, build_sdist, test_sdist, bootstrap_build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cibw-*
+          merge-multiple: true
+          path: dist
+
+      - run: pipx run twine check --strict dist/*
+
+  upload_pypi:
+    name: Upload to PyPI
+    needs: [check_dist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.repository == 'scikit-build/cmake-python-distributions' && startsWith(github.ref, 'refs/tags/')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cmake
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cibw-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate artifact attestation for sdist and wheel
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: "dist/cmake-*"
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true

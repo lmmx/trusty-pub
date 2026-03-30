@@ -1,0 +1,140 @@
+name: Test and Release PyPI Package
+
+env:
+  version: 10.0.0
+
+
+# runs only when a release is published, not on drafts
+on:
+  release:
+    types:
+      - published
+
+jobs:
+
+  check-tag:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: check tag ${{ github.ref }}
+        run: |
+          echo "checking for release tag:"
+          if [[ ${{ github.ref }} =~ ^refs\/tags\/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Found release tag ${{ github.ref }}, generating packages and documentation."
+            exit 0
+          else
+            echo "Did not find release tag. Ref was: ${{ github.ref }}. Exiting."
+            exit 1
+          fi
+
+  release-integration-test:
+    needs: check-tag
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install dependencies (SCIPOptSuite)
+        run: |
+          wget --quiet --no-check-certificate https://github.com/scipopt/scip/releases/download/$(echo "v${{env.version}}" | tr -d '.')/scipoptsuite_${{ env.version }}-1+jammy_amd64.deb
+          sudo apt-get update && sudo apt install -y ./scipoptsuite_${{ env.version }}-1+jammy_amd64.deb
+
+      - name: Setup python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Prepare python environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/test.txt
+
+      - name: Install PySCIPOpt
+        run: python -m pip install .
+
+      - name: Run pyscipopt tests
+        run: |
+          py.test -nauto
+
+  windows-test:
+    needs: release-integration-test
+    env:
+      SCIPOPTDIR: C:\scipoptdir
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download dependencies (SCIPOptSuite)
+        shell: powershell
+        run: |
+          $url = "https://github.com/scipopt/scip/releases/download/v${{ env.version }}/scipoptsuite-${{ env.version }}-win-x64.exe"
+          Invoke-WebRequest -Uri $url -OutFile scipopt-installer.exe
+
+      - name: Install dependencies (SCIPOptSuite)
+        shell: cmd
+        run: scipopt-installer.exe /S /D=${{ env.SCIPOPTDIR }}
+
+      - name: Setup python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Prepare python environment
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/test.txt
+        
+      - name: Install PySCIPOpt
+        shell: powershell
+        run: |
+          $Env:SCIPOPTDIR = "${{ env.SCIPOPTDIR }}"
+          python -m pip install .
+      - name: Run pyscipopt tests
+        shell: powershell
+        run: |
+          py.test -nauto
+
+
+  deploy-packages-and-generate-documentation:
+    needs: windows-test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install dependencies (SCIPOptSuite)
+        run: |
+          wget --quiet --no-check-certificate https://github.com/scipopt/scip/releases/download/$(echo "v${{env.version}}" | tr -d '.')/scipoptsuite_${{ env.version }}-1+jammy_amd64.deb
+          sudo apt-get update && sudo apt install -y ./scipoptsuite_${{ env.version }}-1+jammy_amd64.deb
+
+      - name: Setup python 3
+        uses: actions/setup-python@v4
+        with:
+         python-version: '3.x'
+
+      - name: Prepare python environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install wheel cython build
+
+      - name: Build package
+        run: |
+          python -m build --sdist --no-isolation --outdir dist/
+
+      - name: Generate documentation
+        run: |
+          sudo apt-get install doxygen graphviz
+          bash -ex generate-docs.sh "${{ secrets.GITHUB_TOKEN }}" "gh-pages"
+
+      - name: Publish package to pypi.org
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verbose: true
+          packages_dir: dist/

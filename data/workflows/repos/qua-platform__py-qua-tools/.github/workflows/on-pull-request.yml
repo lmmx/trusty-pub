@@ -1,0 +1,87 @@
+name: on-pull-request
+on: [workflow_dispatch,pull_request]
+jobs:
+  build-n-test:
+    env:
+      JUNIT_REPORT_PATH: pytest-junit-report
+    runs-on: ubuntu-latest
+    strategy:
+        matrix:
+          python-version: [3.9, 3.10.13, 3.12]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup pip Cache
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip
+
+      - name: Bootstrap poetry
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade virtualenv
+          pip install poetry
+          [ -d ${JUNIT_REPORT_PATH} ] || mkdir -p ${JUNIT_REPORT_PATH}
+
+      - name: Setup venv Cache
+        id: cache-python
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key:  poetry-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            poetry-
+
+      - name: Set up the project
+        run: poetry install --extras "datahandler two-qubit-rb interplot configbuilder" 
+        
+      - name: Check formatting
+        run: poetry run poe check-format
+
+      - name: Check linting
+        run: poetry run poe lint
+
+      - name: Run tests
+        run: poetry run poe test --junitxml=test-results-${{ matrix.python-version }}.xml
+
+      - name: Build
+        run: poetry build
+
+      - name: Collect PyTest report
+        id: collect-pytest-reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: ${{ env.JUNIT_REPORT_PATH }}
+
+      - name: Display JUnit results
+        if: >
+          always() &&
+          github.event.sender.login != 'dependabot[bot]' &&
+          ( github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository )
+        uses: EnricoMi/publish-unit-test-result-action@v1
+        with:
+          files: ${{env.JUNIT_REPORT_PATH}}/*.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-python-${{ matrix.python-version }}
+          path: test-results-${{ matrix.python-version }}.xml
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: python_pkg_py${{ matrix.python-version }}
+          path: |
+            dist/*.tar.gz
+            dist/*.whl
+          retention-days: 3

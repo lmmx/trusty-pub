@@ -1,0 +1,44 @@
+name: Build and Test Linux/Windows/MacOSX
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  run:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Setup micromamba Env
+      uses: mamba-org/setup-micromamba@v2
+      with:
+        environment-name: TEST
+        generate-run-shell: true
+        create-args: >-
+          python=${{ matrix.python-version }}
+          numpy>2.0.0
+          cython>=0.29.20
+          wheel
+          pyproj
+          eccodes
+          pytest
+
+    - name: Install pygrib
+      #shell: micromamba-shell {0}
+      shell: bash -l {0}
+      run: |
+        python -m pip install -v -e  . --no-deps --force-reinstall
+
+    - name: Tests
+      #shell: micromamba-shell {0}
+      shell: bash -l {0}
+      run: |
+        cd test
+        python test.py
+        pytest -vv -s test_latlons.py test_open.py test_misc.py

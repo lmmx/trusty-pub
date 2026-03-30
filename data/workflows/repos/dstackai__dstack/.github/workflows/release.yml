@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+a[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+.post[0-9]+"
+
+jobs:
+  compute-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+      latest: ${{ steps.set-latest.outputs.latest }}
+    steps:
+      - name: Set up Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: 3.11
+          # settings to prevent warnings when running uv without a repo checkout
+          enable-cache: false
+          ignore-empty-workdir: true
+      - id: set-version
+        run: |
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - id: set-latest
+        run: |
+          uv pip install packaging
+          VERSION=${{ steps.set-version.outputs.version }}
+          LATEST=$(python -c "from packaging import version as pkg_version; print('' if pkg_version.parse('$VERSION').is_prerelease else '1', end='')")
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+  build-artifacts:
+    needs: [compute-version]
+    uses: ./.github/workflows/build-artifacts.yml
+    with:
+      version: ${{ needs.compute-version.outputs.version }}
+      staging: false
+      go-integration-tests: true
+
+  upload-pre-pypi-artifacts:
+    needs: [compute-version, build-artifacts]
+    uses: ./.github/workflows/upload-pre-pypi-artifacts.yml
+    with:
+      version: ${{ needs.compute-version.outputs.version }}
+      staging: false
+    secrets: inherit
+
+  pypi-upload:
+    needs: [compute-version, upload-pre-pypi-artifacts]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: 3.11
+          # settings to prevent warnings when running uv without a repo checkout
+          enable-cache: false
+          ignore-empty-workdir: true
+      - name: Download Python package
+        uses: actions/download-artifact@v4
+        with:
+          name: python-build
+          path: dist
+      - name: Upload Python package to PyPI
+        run: |
+          uv publish --username ${{ secrets.PYPI_USERNAME }} --password ${{ secrets.PYPI_PASSWORD }}   
+
+  upload-post-pypi-artifacts:
+    needs: [compute-version, pypi-upload]
+    uses: ./.github/workflows/upload-post-pypi-artifacts.yml
+    with:
+      version: ${{ needs.compute-version.outputs.version }}
+      is-latest-version: ${{ needs.compute-version.outputs.latest == '1' }}
+      staging: false
+    secrets: inherit
+
+  server-docker-upload:
+    needs: [compute-version, pypi-upload]
+    defaults:
+      run:
+        working-directory: docker/server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Build and upload to DockerHub
+        run: |
+          VERSION=${{ needs.compute-version.outputs.version }}
+          docker buildx build --platform linux/arm64/v8 --build-arg VERSION=$VERSION --push --provenance=false --tag dstackai/dstack:$VERSION-arm64 -f release/Dockerfile .
+          docker buildx build --platform linux/amd64 --build-arg VERSION=$VERSION --push --provenance=false --tag dstackai/dstack:$VERSION-amd64 -f release/Dockerfile .
+          docker buildx build --platform linux/arm64/v8 --build-arg BASE_IMAGE=dstackai/dstack:$VERSION-arm64 --push --provenance=false --tag dstackai/dstack:nebius-$VERSION-arm64 -f Dockerfile.nebius .
+          docker buildx build --platform linux/amd64 --build-arg BASE_IMAGE=dstackai/dstack:$VERSION-amd64 --push --provenance=false --tag dstackai/dstack:nebius-$VERSION-amd64 -f Dockerfile.nebius .
+          docker manifest create dstackai/dstack:$VERSION --amend dstackai/dstack:$VERSION-arm64 --amend dstackai/dstack:$VERSION-amd64
+          docker manifest push dstackai/dstack:$VERSION
+          docker manifest create dstackai/dstack:nebius-$VERSION --amend dstackai/dstack:nebius-$VERSION-arm64 --amend dstackai/dstack:nebius-$VERSION-amd64
+          docker manifest push dstackai/dstack:nebius-$VERSION
+          if [ -n "${{ needs.compute-version.outputs.latest }}" ]; then
+            docker manifest create dstackai/dstack:latest --amend dstackai/dstack:$VERSION-arm64 --amend dstackai/dstack:$VERSION-amd64
+            docker manifest push dstackai/dstack:latest
+            docker manifest create dstackai/dstack:nebius-latest --amend dstackai/dstack:nebius-$VERSION-arm64 --amend dstackai/dstack:nebius-$VERSION-amd64
+            docker manifest push dstackai/dstack:nebius-latest
+          fi
+      - name: Docker Hub Description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: dstackai/dstack
+          readme-filepath: ./docker/server/README.md

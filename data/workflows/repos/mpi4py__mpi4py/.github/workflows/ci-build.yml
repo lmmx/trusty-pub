@@ -1,0 +1,181 @@
+name: ci-build
+
+on:  # yamllint disable-line rule:truthy
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_call:
+    inputs:
+      py:
+        description: 'Python version'
+        required: false
+        default: 3
+        type: string
+  workflow_dispatch:
+    inputs:
+      py:
+        description: 'Python version'
+        required: true
+        default: 3
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - skbuild
+          - mesonpy
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - macos-26
+          - windows-2025
+        mpi:
+          - mpich
+          - openmpi
+          - impi
+          - msmpi
+        exclude:
+          - os:  ubuntu-24.04
+            mpi: msmpi
+          - os:  ubuntu-24.04-arm
+            mpi: impi
+          - os:  ubuntu-24.04-arm
+            mpi: msmpi
+          - os:  macos-26
+            mpi: impi
+          - os:  macos-26
+            mpi: msmpi
+          - os:  windows-2025
+            mpi: mpich
+          - os:  windows-2025
+            mpi: openmpi
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v6
+
+    - name: Setup MSVC
+      if:   matrix.backend == 'mesonpy' && runner.os == 'Windows'
+      uses: bus1/cabuild/action/msdevshell@v1
+      with:
+        architecture: x64
+
+    - name: Setup MPI (${{ matrix.mpi }})
+      uses: mpi4py/setup-mpi@v1
+      with:
+        mpi: ${{ matrix.mpi }}
+
+    - name: Setup Python (${{ github.event.inputs.py || 3 }})
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ github.event.inputs.py || 3 }}
+        check-latest: true
+        pip-install: build
+        cache: pip
+        cache-dependency-path: |
+          conf/requirements-build-cython.txt
+          conf/requirements-build-${{ matrix.backend }}.txt
+
+    - name: Build sdist and wheel (${{ matrix.backend }})
+      run:  python -m build --verbose
+      env:
+        MPI4PY_BUILD_BACKEND: ${{ matrix.backend }}
+        MPI4PY_LOCAL_VERSION: ${{ matrix.mpi }}
+
+    - name: Upload wheel
+      uses: actions/upload-artifact@v7
+      with:
+        name: mpi4py-${{ matrix.backend }}-${{ matrix.os }}-${{ matrix.mpi }}
+        path: dist/mpi4py-*.whl
+
+    - name: Install wheel
+      run:  python -m pip install mpi4py
+              --verbose --no-index --find-links=dist
+
+    - name: Test wheel after install (cmdline)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-vendor
+
+    - name: Test wheel after install (cmdline)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-library
+
+    - name: Test wheel after install (cmdline)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-abi-version
+
+    - name: Test wheel after install (cmdline)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-std-version
+
+    - name: Test wheel after install (cmdline)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-lib-version
+
+    - name: Test wheel after install (test_package)
+      run:  mpiexec -n 1 python test/main.py test_package
+
+    - name: Test wheel after install (helloworld)
+      run:  mpiexec -n 2 python -m mpi4py.bench helloworld
+
+    - name: Test wheel after install (ringtest)
+      run:  mpiexec -n 3 python -m mpi4py.bench ringtest
+
+    - name: Test wheel after install (I_MPI_LIBRARY_KIND=debug)
+      if:   matrix.mpi == 'impi' && runner.os == 'Windows'
+      run:  |
+        mpiexec -n 1 python -m mpi4py --mpi-vendor
+        mpiexec -n 1 python -m mpi4py --mpi-library
+        mpiexec -n 2 python -m mpi4py.bench helloworld
+        mpiexec -n 3 python -m mpi4py.bench ringtest
+      env:
+        I_MPI_LIBRARY_KIND: debug
+
+    - name: Test wheel after install (I_MPI_LIBRARY_KIND=release)
+      if:   matrix.mpi == 'impi' && runner.os == 'Windows'
+      run:  |
+        mpiexec -n 1 python -m mpi4py --mpi-vendor
+        mpiexec -n 1 python -m mpi4py --mpi-library
+        mpiexec -n 2 python -m mpi4py.bench helloworld
+        mpiexec -n 3 python -m mpi4py.bench ringtest
+      env:
+        I_MPI_LIBRARY_KIND: release
+
+    - name: Uninstall wheel after testing
+      run:  python -m pip uninstall mpi4py
+              --verbose --yes
+
+    - name: Install package with pip (${{ matrix.backend }})
+      run:  python -m pip install .
+              --verbose
+      env:
+        MPI4PY_BUILD_BACKEND: ${{ matrix.backend }}
+        MPI4PY_LOCAL_VERSION: ${{ matrix.mpi }}
+
+    - name: Test wheel after install (cmdline:mpi-vendor)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-vendor
+
+    - name: Test wheel after install (cmdline:mpi-library)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-library
+
+    - name: Test wheel after install (cmdline:mpi-abi-version)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-abi-version
+
+    - name: Test wheel after install (cmdline:mpi-std-version)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-std-version
+
+    - name: Test wheel after install (cmdline:mpi-lib-version)
+      run:  mpiexec -n 1 python -m mpi4py --mpi-lib-version
+
+    - name: Test package after install (test_package)
+      run:  mpiexec -n 1 python test/main.py test_package
+
+    - name: Test package after install (helloworld)
+      run:  mpiexec -n 2 python -m mpi4py.bench helloworld
+
+    - name: Uninstall package after testing
+      run:  python -m pip uninstall mpi4py
+              --verbose --yes

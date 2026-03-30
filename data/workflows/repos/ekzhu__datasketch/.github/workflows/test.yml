@@ -1,0 +1,48 @@
+name: Test
+
+# Triggers the workflow on push or pull request events
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: "ubuntu-22.04"
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv and setup python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          activate-environment: true
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install dependencies
+        run: |
+          uv pip install pytest
+          if [ -f requirements.txt ]; then uv pip install -r requirements.txt; fi
+      - name: Install package
+        run: |
+          # Disable Cassandra optional extensions (faster testing).
+          export CASS_DRIVER_NO_EXTENSIONS=1
+          uv pip install -e ."[test,experimental_aio,bloom]"
+          uv pip list
+      - name: Test with pytest
+        run: |
+          uv run pytest --cov=datasketch
+      - name: Statistics
+        run: |
+          coverage report
+          coverage xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests
+          env_vars: OS,PYTHON
+          name: codecov-umbrella
+          fail_ci_if_error: false
+      - name: Minimize uv cache
+        run: uv cache prune --ci

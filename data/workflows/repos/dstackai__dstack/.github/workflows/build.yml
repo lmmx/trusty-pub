@@ -1,0 +1,69 @@
+name: Test Build
+
+on:
+  push:
+    branches:
+      - "master"
+    paths-ignore:
+      - "docs/**"
+      - "mkdocs.yml"
+  pull_request:
+    branches:
+      - "master"
+  workflow_dispatch:
+    inputs:
+      go-integration-tests:
+        type: boolean
+        required: true
+        default: false
+        description: Go integration tests
+
+env:
+  BUILD_INCREMENT: 150
+
+jobs:
+  compute-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+    steps:
+      - id: set-version
+        run: |
+          echo "version=$((${{ github.run_number }} + ${{ env.BUILD_INCREMENT }}))" >> $GITHUB_OUTPUT
+
+  build-artifacts:
+    needs: [compute-version]
+    uses: ./.github/workflows/build-artifacts.yml
+    with:
+      version: ${{ needs.compute-version.outputs.version }}
+      staging: true
+      # TODO: run integration tests on every 'push' event
+      # https://github.com/dstackai/dstack/issues/3005
+      go-integration-tests: ${{ github.event_name == 'workflow_dispatch' && inputs.go-integration-tests }}
+  
+  upload-pre-pypi-artifacts:
+    needs: [compute-version, build-artifacts]
+    # Skip for PRs from forks, where AWS S3 credentials are not available
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/upload-pre-pypi-artifacts.yml
+    with:
+      version: ${{ needs.compute-version.outputs.version }}
+      staging: true
+    secrets: inherit
+  
+  upload-post-pypi-artifacts:
+    needs: [compute-version, build-artifacts]
+    # Skip for PRs from forks, where AWS S3 credentials are not available
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/upload-post-pypi-artifacts.yml
+    with:
+      version: ${{ needs.compute-version.outputs.version }}
+      is-latest-version: true
+      staging: true
+    secrets: inherit
+
+  build-docs:
+    # Skip for PRs from forks, where mkdocs-material-insiders is not available
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/build-docs.yml
+    secrets: inherit

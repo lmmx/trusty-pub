@@ -1,0 +1,89 @@
+name: Unit tests
+on:
+  push:
+    branches:
+      - master
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull request number (required when running on a fork)'
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: 1
+
+jobs:
+  required-checks:
+    if: >
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        contains(github.event.comment.body, '/run-checks') &&
+        (
+          github.event.comment.author_association == 'OWNER' ||
+          github.event.comment.author_association == 'MEMBER' ||
+          github.event.comment.author_association == 'COLLABORATOR'
+        )
+      )
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        # Matches what is in setup.cfg
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Determine ref
+        id: ref
+        run: |
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            echo "ref=refs/pull/${{ github.event.issue.number }}/head" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.pr_number }}" ]]; then
+            echo "ref=refs/pull/${{ github.event.inputs.pr_number }}/head" >> $GITHUB_OUTPUT
+          else
+            echo "ref=${{ github.ref }}" >> $GITHUB_OUTPUT
+          fi
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install ".[formulas,dev]"
+      - name: Run static type checker and verify formatting guidelines
+        run: bash check.sh
+      - name: Set up Java for PlantUML
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Install Graphviz for PlantUML
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+          dot -V
+      - name: Download PlantUML JAR
+        env:
+          PLANTUML_VERSION: "1.2026.2"
+        run: |
+          curl -L -o plantuml.jar https://github.com/plantuml/plantuml/releases/download/v${{ env.PLANTUML_VERSION }}/plantuml-${{ env.PLANTUML_VERSION }}.jar
+          java -jar plantuml.jar -version
+      - name: Set up Node.js for Mermaid
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install Mermaid CLI
+        run: npm install -g @mermaid-js/mermaid-cli
+      - name: Run unit tests
+        env:
+          TEST_MERMAID: 1
+          TEST_PLANTUML: 1
+        run: python -m unittest discover -s tests

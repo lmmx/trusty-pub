@@ -1,0 +1,71 @@
+---
+name: Test Suite
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  tests:
+    name: "Python ${{ matrix.python-version }} / SQLAlchemy ${{ matrix.sqlalchemy-version }}"
+    runs-on: "ubuntu-latest"
+
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        sqlalchemy-version: ["1.4", "2.0"]
+
+    services:
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_USER: username
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      - uses: "actions/checkout@v3"
+      - uses: "actions/setup-python@v4"
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - name: "Install dependencies"
+        run: uv sync --all-groups
+      - name: Force SQLAlchemy version
+        run: uv pip install "sqlalchemy>=${{ matrix.sqlalchemy-version }}"
+      - name: "Run linting checks"
+        run: make lint
+      - name: "Build package & docs"
+        run: |
+          make build
+          make docs-build
+      - name: "Run tests with SQLite"
+        env:
+          TEST_DATABASE_URI_SYNC: "sqlite:///test.db?check_same_thread=False"
+          TEST_DATABASE_URI_ASYNC: "sqlite+aiosqlite:///test.db?check_same_thread=False"
+        run: make test
+      - name: "Run tests with PostgreSQL (pyscopg2)"
+        env:
+          TEST_DATABASE_URI_SYNC: "postgresql+psycopg2://username:password@localhost:5432/test_db"
+          TEST_DATABASE_URI_ASYNC: "postgresql+asyncpg://username:password@localhost:5432/test_db"
+        run: make test
+      - name: "Run tests with PostgreSQL (pyscopg)"
+        if: matrix.sqlalchemy-version == '2.0'
+        env:
+          TEST_DATABASE_URI_SYNC: "postgresql+psycopg://username:password@localhost:5432/test_db"
+          TEST_DATABASE_URI_ASYNC: "postgresql+asyncpg://username:password@localhost:5432/test_db"
+        run: make test
+      - name: "Enforce coverage"
+        run: make cov
+      - name: "Upload Coverage"
+        uses: codecov/codecov-action@v3
+        with:
+          files: coverage.xml

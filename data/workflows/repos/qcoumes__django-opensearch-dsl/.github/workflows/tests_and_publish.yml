@@ -1,0 +1,190 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+      - '*.*.*'
+
+  pull_request:
+    branches:
+      - master
+      - '*.*.*'
+
+  release:
+    types: [ published ]
+
+jobs:
+
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@master
+        with:
+          python-version: '3.13'
+
+      - name: Install packages
+        run: pip install -r requirements_dev.txt
+
+      - name: Black
+        run: |
+          black --check -l 120 django_opensearch_dsl/ tests/
+
+  isort:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@master
+        with:
+          python-version: '3.13'
+
+      - name: Install packages
+        run: pip install -r requirements_dev.txt
+
+      - name: Isort
+        run: |
+          isort --check django_opensearch_dsl/ tests/
+
+  pycodestyle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@master
+        with:
+          python-version: '3.13'
+
+      - name: Install packages
+        run: pip install -r requirements_dev.txt
+
+      - name: Pycodestyle
+        run: |
+          pycodestyle django_opensearch_dsl/ tests/
+
+  pydocstyle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@master
+        with:
+          python-version: '3.13'
+
+      - name: Install packages
+        run: pip install -r requirements_dev.txt
+
+      - name: Pydocstyle
+        run: |
+          pydocstyle --count django_opensearch_dsl/ tests/
+
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@master
+        with:
+          python-version: '3.13'
+
+      - name: Install packages
+        run: pip install -r requirements_dev.txt
+
+      - name: Mypy
+        run: |
+          mypy django_opensearch_dsl --disallow-untyped-def
+
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@master
+        with:
+          python-version: '3.13'
+
+      - name: Install packages
+        run: pip install -r requirements_dev.txt
+
+      - name: Bandit
+        run: |
+          bandit --ini=setup.cfg -ll 2> /dev/null
+
+
+  test:
+    needs: [black, isort, pycodestyle, pydocstyle, bandit]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.9', '3.10', '3.11', '3.12', '3.13' ]
+        django-version: [ '42', '50', '51', '52' ]
+        opensearch-version: [ '10', '20', '30' ]
+        exclude:
+          - python-version: 3.9
+            django-version: 50
+          - python-version: 3.9
+            django-version: 51
+          - python-version: 3.9
+            django-version: 52
+          - python-version: 3.13
+            django-version: 42
+          - python-version: 3.13
+            django-version: 50
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@master
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run Opensearch in docker
+        run: |
+          docker compose up -d opensearch_test_${{ matrix.opensearch-version }}_0 opensearch_test_${{ matrix.opensearch-version }}_1
+          sleep 30
+
+      - name: Install Tox and any other packages
+        run: |
+          pip install tox
+      - name: Python ${{ matrix.python-version }}, Django ${{ matrix.django-version }}, Opensearch ${{ matrix.opensearch-version }}
+        run: tox -e py-django${{ matrix.django-version }}-opensearch${{ matrix.opensearch-version }}
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == 3.13 && matrix.django-version == 52
+        uses: codecov/codecov-action@v1
+        with:
+          file: ./coverage.xml
+
+  publish:
+    needs: test
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@master
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Creating Built Distributions
+        run: |
+          pip install build
+          python -m build
+
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.pypi_password }}
+          skip_existing: true

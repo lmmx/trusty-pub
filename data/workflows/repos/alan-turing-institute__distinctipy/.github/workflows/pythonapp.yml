@@ -1,0 +1,108 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install .[tests]
+
+    - name: Code quality checks
+      run: |
+        isort --check-only --diff .
+        black --check --diff .
+        flake8
+
+  build_and_test:
+
+    name: ${{ matrix.python-version }} ${{ matrix.depsize }} on ${{ matrix.os }}, arch=${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+        arch: [auto]
+        python-version: 
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+        depsize: 
+          - 'minimal'
+          - 'full'
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Display Python version
+      run: python -c "import sys; print(sys.version)"
+
+    - name: Upgrade pip 
+      run: |
+        python -m pip install --upgrade pip
+
+    - name: Install full dependencies
+      if: matrix.depsize == 'full' 
+      shell: bash
+      run: |
+        pip install .[extras,tests]
+
+    - name: Install minimal dependencies
+      if: matrix.depsize == 'minimal' 
+      shell: bash
+      run: |
+        pip install .[tests]
+
+    - name: Test with pytest
+      shell: bash
+      run: |
+        mkdir -p _empty_workspace
+        cd _empty_workspace
+        pytest --cov=distinctipy --cov-report=term ../tests
+        # Give coverage file a distinct name for each runner
+        CUSTOM_RUNNER_ID="${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"
+        mv .coverage "../.coverage.${CUSTOM_RUNNER_ID}"
+        cd ..
+
+    - name: Set up Python to combine coverage Linux
+      if: runner.os == 'Linux'
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+
+    - name: Combine coverage Linux
+      if: runner.os == 'Linux'
+      run: |
+        python -m pip install coverage[toml]
+        coverage combine .
+        coverage xml -o ./tests/coverage.xml
+        find . -name .coverage.*
+        find . -name coverage.xml
+
+    - name: Codecov Upload
+      uses: codecov/codecov-action@v3
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./tests/coverage.xml

@@ -1,0 +1,38 @@
+name: apidocs
+
+on:
+  push:
+    branches: [ master ]
+    tags:
+      - '*'
+
+# Set minimal permissions by default
+permissions: {}
+
+jobs:
+  deploy:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install requirements for documentation generation
+        run: python -m pip install --upgrade pip pydoctor
+
+      - name: Generate API documentation with pydoctor
+        run: ./apidocs.sh
+
+      - name: Push API documentation to Github Pages
+        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e   # v4.0.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./apidocs
+          commit_message: "Generate API documentation"

@@ -1,0 +1,255 @@
+name: Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  create:
+    branches: [master]
+    tags: ['**']
+
+
+jobs:
+
+  # Test on Python 2.7 with Linux and latest SDL2
+  test-linux-py27:
+
+    name: Linux (Python 2.7, SDL ${{ matrix.sdl2 }})
+    runs-on: ubuntu-20.04
+    container: python:2.7
+
+    strategy:
+      matrix:
+        sdl2: ['2.30.10']
+
+    env:
+      PYSDL2_DLL_VERSION: ${{ matrix.sdl2 }}
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+      SDL_RENDER_DRIVER: software
+      PYTHONFAULTHANDLER: 1
+    
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install dependencies and latest SDL2 binaries
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --prefer-binary numpy pytest pillow
+          python -m pip install pysdl2-dll==$PYSDL2_DLL_VERSION
+
+      - name: Install and test PySDL2
+        run: |
+          python -m pip install .
+          python -B -m pytest -vvl -rxXP
+
+
+  # Test on all supported Python versions with Linux and latest SDL2
+  # Experimental: Also test on latest PyPy 2.7 and 3.x versions with Linux and latest SDL2
+  test-linux:
+
+    name: ${{ matrix.name-prefix }}${{ matrix.python-version }}, SDL ${{ matrix.sdl2 }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.10', '3.11', '3.12', '3.13']
+        sdl2: ['2.30.10']
+        name-prefix: ['Linux (Python ']
+        include:
+          - python-version: 'pypy-2.7'
+            sdl2: '2.30.10'
+            name-prefix: 'Experimental / Linux ('
+          - python-version: 'pypy-3.10'
+            sdl2: '2.30.10'
+            name-prefix: 'Experimental / Linux ('
+
+    env:
+      PYSDL2_DLL_VERSION: ${{ matrix.sdl2 }}
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+      SDL_RENDER_DRIVER: software
+      PYTHONFAULTHANDLER: 1
+    
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Pillow build dependencies for PyPy 2.7
+        if: ${{ matrix.python-version == 'pypy-2.7' }}
+        run: |
+          sudo apt-get install -y libjpeg8-dev zlib1g-dev
+
+      - name: Install dependencies and latest SDL2 binaries
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --prefer-binary numpy pytest pillow
+          python -m pip install pysdl2-dll==$PYSDL2_DLL_VERSION
+
+      - name: Install and test PySDL2
+        run: |
+          python -m pip install .
+          python -B -m pytest -vvl -rxXP
+
+
+  # Test on previous Python release with last 3 SDL2 releases on macOS
+  # All tests run without Numpy/Pillow deps to make sure things work without them
+  # Experimental: Test on previous Python release with latest Homebrew SDL2
+  test-macos:
+
+    name: ${{ matrix.name-prefix }}${{ matrix.python-version }}, SDL ${{ matrix.sdl2 }})
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12']
+        sdl2: ['2.30.10', '2.28.5', '2.26.5']
+        name-prefix: ['macOS (Python ']
+        include:
+          - python-version: '3.12'
+            sdl2: 'from Homebrew'
+            name-prefix: 'Experimental / macOS (Python '
+
+    env:
+      PYSDL2_DLL_VERSION: ${{ matrix.sdl2 }}
+      SDL_VIDEODRIVER: dummy
+      SDL_RENDER_DRIVER: software
+    
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install setuptools pytest
+
+      - name: Install latest SDL2 via Homebrew
+        if: ${{ matrix.sdl2 == 'from Homebrew' }}
+        run: |
+          brew install sdl2 sdl2_mixer sdl2_ttf sdl2_image sdl2_gfx
+
+      - name: Download SDL2 binaries
+        if: ${{ matrix.sdl2 != 'from Homebrew' }}
+        run: |
+          python .ci/getsdl2.py
+      
+      - name: Install and test PySDL2
+        run: |
+          export PYSDL2_DLL_PATH=$(pwd)/dlls
+          python -m pip install .
+          python -B -m pytest -vvl -rxXP
+
+
+  # Test against all supported versions of SDL2 on Windows
+  test-windows:
+
+    name: ${{ matrix.name-prefix }}${{ matrix.python-version }}, SDL ${{ matrix.sdl2 }})
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11']
+        architecture: ['x64']
+        sdl2: [
+          '2.0.5', '2.0.6', '2.0.7', '2.0.8', '2.0.9', '2.0.10', '2.0.12',
+          '2.0.14', '2.0.16', '2.0.18', '2.0.20', '2.0.22', '2.24.0', '2.26.5',
+          '2.28.5', '2.30.10'
+        ]
+        name-prefix: ['Windows (Python ']
+        include:
+          - python-version: '3.11'
+            architecture: 'x86'
+            sdl2: '2.30.10'
+            name-prefix: 'Windows 32-bit (Python '
+          - python-version: '3.11'
+            architecture: 'x86'
+            sdl2: '2.0.22'
+            name-prefix: 'Windows 32-bit (Python '
+          - python-version: '3.11'
+            architecture: 'x86'
+            sdl2: '2.0.5'
+            name-prefix: 'Windows 32-bit (Python '
+
+    env:
+      PYSDL2_DLL_VERSION: ${{ matrix.sdl2 }}
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+      SDL_RENDER_DRIVER: software
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.architecture }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --prefer-binary numpy pytest pillow
+
+      - name: Download SDL2 binaries
+        run: |
+          python .ci/getsdl2.py
+
+      - name: Install and test PySDL2
+        run: |
+          $env:PYSDL2_DLL_PATH = "$pwd\dlls"
+          python -m pip install .
+          python -B -m pytest -vvl -rxXP
+
+
+  # Test select versions of SDL2 on Windows with Python 2.7
+  test-windows-py27:
+
+    name: Windows 32-bit (Python 2.7, SDL ${{ matrix.sdl2 }})
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: ['x86']
+        sdl2: ['2.30.10', '2.0.5']
+
+    env:
+      PYSDL2_DLL_VERSION: ${{ matrix.sdl2 }}
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+      SDL_RENDER_DRIVER: software
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python 2.7
+        run: |
+          choco install python2 --x86
+
+      - name: Install dependencies
+        run: |
+          C:\Python27\python -m pip install --upgrade pip
+          C:\Python27\python -m pip install --prefer-binary numpy pytest pillow
+
+      - name: Download SDL2 binaries
+        run: |
+          C:\Python27\python .ci/getsdl2.py
+
+      - name: Install and test PySDL2
+        run: |
+          $env:PYSDL2_DLL_PATH = "$pwd\dlls"
+          C:\Python27\python -m pip install .
+          C:\Python27\python -B -m pytest -vvl -rxXP

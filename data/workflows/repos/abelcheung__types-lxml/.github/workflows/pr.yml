@@ -1,0 +1,43 @@
+name: PR review
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/dependabot.yml'
+      - '**/bandit.yml'
+      - '.editorconfig'
+      - '.gitignore'
+      - '.gitattributes'
+      - '**.md'
+      - 'LICENSE'
+
+jobs:
+  pyrefly:
+    uses: ./.github/workflows/inc_tc_pyrefly.yml
+    with:
+        tarball-flavor: none
+
+  pyright:
+    uses: ./.github/workflows/inc_tc_pyright.yml
+    with:
+      tarball-flavor: none
+
+  basedpyright:
+    uses: ./.github/workflows/inc_tc_basedpyright.yml
+    with:
+      tarball-flavor: none
+
+  mypy:
+    uses: ./.github/workflows/inc_tc_mypy.yml
+    with:
+      tarball-flavor: none
+
+  ty:
+    uses: ./.github/workflows/inc_tc_ty.yml
+    with:
+      tarball-flavor: none

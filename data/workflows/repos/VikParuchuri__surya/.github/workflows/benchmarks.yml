@@ -1,0 +1,44 @@
+name: Integration test
+
+on: [push]
+
+env:
+  PYTHONIOENCODING: "utf-8"
+
+jobs:
+  build:
+    runs-on: t4_gpu
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+      - name: Install python dependencies
+        run: |
+          pip install poetry
+          poetry install
+      - name: Run detection benchmark test
+        run: |
+          poetry run python benchmark/detection.py --max_rows 2
+          poetry run python benchmark/utils/verify_benchmark_scores.py results/benchmark/det_bench/results.json --bench_type detection
+      - name: Run recognition benchmark test
+        run: |
+          poetry run python benchmark/recognition.py --max_rows 2
+          poetry run python benchmark/utils/verify_benchmark_scores.py results/benchmark/rec_bench/results.json --bench_type recognition
+      - name: Run layout benchmark test
+        run: |
+          poetry run python benchmark/layout.py --max_rows 5
+          poetry run python benchmark/utils/verify_benchmark_scores.py results/benchmark/layout_bench/results.json --bench_type layout
+      - name: Run ordering benchmark
+        run: |
+          poetry run python benchmark/ordering.py --max_rows 5
+          poetry run python benchmark/utils/verify_benchmark_scores.py results/benchmark/order_bench/results.json --bench_type ordering
+      - name: Run table recognition benchmark
+        run: |
+          poetry run python benchmark/table_recognition.py --max_rows 5
+          poetry run python benchmark/utils/verify_benchmark_scores.py results/benchmark/table_rec_bench/results.json --bench_type table_recognition
+      - name: Run texify benchmark
+        run: |
+          poetry run python benchmark/texify.py --max_rows 5
+          poetry run python benchmark/utils/verify_benchmark_scores.py results/benchmark/texify_bench/results.json --bench_type texify

@@ -1,0 +1,27 @@
+name: ✨ Style
+
+on:
+    pull_request:
+        branches: [master, dev]
+    push:
+        branches: [master, dev]
+
+jobs:
+    style:
+        name: Lint and Format Check
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v5
+              with:
+                  enable-cache: true
+                  python-version: "3.10"
+
+            - name: Check Style
+              # Run both checks even if one fails, then exit with error if either failed
+              run: |
+                  uvx ruff check . || FAILED=1
+                  uvx ruff format --check . || FAILED=1
+                  exit ${FAILED:-0}

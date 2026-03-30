@@ -1,0 +1,37 @@
+---
+name: mypy
+
+on: push  # yamllint disable-line rule:truthy
+
+jobs:
+  mypy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/setup.cfg
+            **/pyproject.toml
+      - run: |
+          uv pip install --system -U \
+            black \
+            git+https://github.com/akaihola/darkgraylib.git@main \
+            flynt \
+            isort \
+            mypy>=1.15 \
+            pytest \
+            types-requests \
+            types-toml
+      - uses: wearerequired/lint-action@v2.3.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          mypy: true
+          mypy_args: "src"
+          continue_on_error: false

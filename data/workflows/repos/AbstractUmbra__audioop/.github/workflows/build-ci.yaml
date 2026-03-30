@@ -1,0 +1,109 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - feat/*
+    tags:
+      - "*.*.*"
+    paths:
+      - audioop/**
+      - tests/**
+      - .github/workflows/build-ci.yaml
+
+  pull_request:
+    branches:
+      - main
+    types: [opened, reopened, synchronize]
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }} [${{ matrix.archs }}]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # macOS Intel & ARM
+          - os: macos-latest
+            archs: all
+          # Windows x86 32-bit and 64-bit
+          - os: windows-latest
+            archs: auto
+          # Windows ARM
+          - os: windows-latest
+            archs: ARM64
+          # Linux x86 32-bit and 64-bit
+          - os: ubuntu-latest
+            archs: auto
+          # Linux aarch64
+          - os: ubuntu-latest
+            archs: aarch64
+          # Linux ppc64le
+          - os: ubuntu-latest
+            archs: ppc64le
+          # Linux s390x
+          - os: ubuntu-latest
+            archs: s390x
+          - os: ubuntu-latest
+            archs: riscv64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: all
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        env:
+          CIBW_BUILD: "cp313-* cp313t-* cp314-* cp314t-*"
+          CIBW_ARCHS: ${{ matrix.archs }}
+          CIBW_ENABLE: cpython-freethreading
+          CIBW_TEST_SKIP: "*-win_arm64"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: artifact-cibw-wheels-${{ matrix.os }}-${{ matrix.archs }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  make-sdist:
+    name: Make source distribution
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+
+    - run: pipx run --python 3.13 build --sdist
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: artifact-source-dist
+        path: "./**/dist/*.tar.gz"
+
+  upload_pypi:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    name: Publish built wheels to Pypi
+    runs-on: ubuntu-latest
+    environment: release
+    needs: [make-sdist, build_wheels]
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+
+      - name: Copy artifacts to dist/ folder
+        run: |
+          find . -name 'artifact-*' -exec unzip '{}' \;
+          mkdir -p dist/
+          find . -name '*.tar.gz' -exec mv '{}' dist/ \;
+          find . -name '*.whl' -exec mv '{}' dist/ \;
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        name: Publish to PyPI

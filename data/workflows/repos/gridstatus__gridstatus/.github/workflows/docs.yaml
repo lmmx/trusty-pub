@@ -1,0 +1,24 @@
+name: Build Docs
+on: [pull_request]
+jobs:
+  build_docs:
+    name: ${{ matrix.python_version }} build docs
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python_version: ["3.11"]
+    steps:
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python_version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+      - name: Install gridstatus
+        run: uv sync
+      - name: Build docs
+        run: make docs

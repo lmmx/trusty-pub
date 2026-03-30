@@ -1,0 +1,57 @@
+name: Publish Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package-name:
+        description: 'Package to Publish (utils/selenium)'
+        required: true
+        type: choice
+        options:
+          - lambdatest-utils
+          - lambdatest-selenium-driver
+          - lambdatest-playwright-driver
+        default: 'lambdatest-utils'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.x'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install setuptools wheel twine
+    - name: Build and publish lambdatest-utils
+      if: github.event.inputs.package-name == 'lambdatest-utils'
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        cd utils
+        python setup.py sdist bdist_wheel
+        twine upload dist/*
+    - name: Build and publish lambdatest-selenium-driver
+      if: github.event.inputs.package-name == 'lambdatest-selenium-driver'
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        cd selenium
+        python setup.py sdist bdist_wheel
+        twine upload dist/*
+    - name: Build and publish lambdatest-playwright-driver
+      if: github.event.inputs.package-name == 'lambdatest-playwright-driver'
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        cd playwright
+        python setup.py sdist bdist_wheel
+        twine upload dist/*

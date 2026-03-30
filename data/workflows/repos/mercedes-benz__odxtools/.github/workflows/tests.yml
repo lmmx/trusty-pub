@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2023 MBition GmbH
+
+name: odxtools CI pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lint-coding-style:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3"
+
+      - name: Setup up YaPF formatting linter
+        run: |
+          pip install toml yapf
+
+      - name: Lint coding style (yapf)
+        # make yapf fail if any file needs to be re-formatted
+        run: |
+          yapf -r --diff examples/ odxtools/ tests/
+
+  linting:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        # restrict the matrix to the oldest and the latest Python
+        # version being supported by odxtools
+        python-version: ["3.10", "3"]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{matrix.python-version}}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{matrix.python-version}}
+          cache: "pip"
+
+      - name: Install odxtools development and testing dependencies
+        run: |
+          pip install --upgrade pip
+          pip install .
+          pip install .[test]
+          rm -rf build
+
+      - name: Static type checking (mypy)
+        run: |
+          python -m mypy .
+
+      - name: Lint code quality (ruff)
+        run: |
+          ruff check .
+
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # restrict the matrix to the oldest and the latest Python
+        # version being supported by odxtools
+        python-version: ["3.10", "3"]
+
+        # due to the slow windows runners, we refrain from testing every python
+        # version on windows-latest
+        exclude:
+          - os: windows-latest
+            python-version: "3.10"
+
+    runs-on: ${{matrix.os}}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python ${{matrix.python-version}}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{matrix.python-version}}
+          cache: "pip"
+
+      # dependency are likely cached on ubuntu-latest
+      - name: Install odxtools development and testing dependencies
+        run: |
+          pip install --upgrade pip
+          pip install .
+          pip install .[test]
+
+      - name: Create somersault.pdx
+        run: |
+          python -m examples.mksomersaultpdx examples/somersault.pdx
+
+      - name: Run unit tests and report line coverage
+        # use `python -m pytest ...` instead of `pytest ...` to avoid setting the
+        # PYTHONPATH environment variable. This works independently of the OS.
+
+        # For some reason, pytest-cov reports invalid line coverage. As a remedy,
+        # we utilize the `coverage` module instead of `pytest-cov`. Line coverage
+        # shall be only reported for the odxtools package, i.e., the tests package
+        # should be ignored.
+        run: |
+          coverage run --source=odxtools --omit=tests -m pytest
+          coverage report

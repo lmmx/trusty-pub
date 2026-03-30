@@ -1,0 +1,40 @@
+name: Run MyPy
+
+on:
+  push:
+    branches: [ main, 7.x]
+  pull_request:
+    branches: [ main, 7.x]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.14"]
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    - name: Install dependencies
+      run: |
+        uv pip install --system mypy pyflakes flake8 types-decorator '.[all]'
+    - name: Lint with mypy
+      run: |
+        set -e
+        mypy IPython
+    - name: Lint with pyflakes
+      run: |
+        set -e
+        flake8  IPython/core/magics/script.py
+        flake8  IPython/core/magics/packaging.py

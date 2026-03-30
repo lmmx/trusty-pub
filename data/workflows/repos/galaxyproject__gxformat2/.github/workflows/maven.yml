@@ -1,0 +1,32 @@
+name: Java CI
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.9'
+        cache: pip
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt -r dev-requirements.txt
+    - name: Run Python tests to generate workflow examples.
+      run: |
+        pytest tests/test_lint.py tests/test_cytoscape.py
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        distribution: 'temurin'
+        java-version: '25'
+        cache: 'maven'
+    - name: Run Java maven (mvn) tests for generated workflow examples.
+      run: |
+        cd java
+        mvn -B test --file pom.xml

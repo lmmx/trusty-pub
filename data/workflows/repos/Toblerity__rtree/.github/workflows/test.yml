@@ -1,0 +1,189 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+  release:
+    types: [published, prereleased, released]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conda:
+    name: Conda Python ${{ matrix.python-version }}, SIDX-${{ matrix.sidx-version }}, ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash -l {0}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['ubuntu-latest', 'macos-latest', 'windows-latest']
+        # test oldest and newest versions of python and libspatialindex
+        python-version: ['3.9', '3.14']
+        sidx-version: ['1.8.5', '2.1.0']
+        exclude:
+          - os: 'macos-latest'
+            sidx-version: '1.8.5'
+
+    steps:
+    - uses: actions/checkout@v6
+    - uses: conda-incubator/setup-miniconda@v3
+      with:
+        channels: conda-forge
+        auto-update-conda: true
+        conda-remove-defaults: true
+        python-version: ${{ matrix.python-version }}
+
+    - name: Setup
+      run: conda install -c conda-forge pip numpy pytest libspatialindex=${{ matrix.sidx-version }} -y
+
+    - name: Install
+      run: pip install -e .
+
+    - name: Test with pytest
+      run: pytest -Werror -v --doctest-modules rtree tests
+
+  ubuntu:
+    name: Ubuntu Python ${{ matrix.python-version }}
+    defaults:
+      run:
+        shell: bash -l {0}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # test all supported minor versions of python
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      name: Install Python
+      with:
+        python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
+
+    - name: Setup
+      run: |
+          sudo apt-get -y install libspatialindex-c6
+          pip install --upgrade pip
+          pip install numpy pytest
+
+    - name: Build
+      run: pip install --user .
+
+    - name: Test with pytest
+      run: pytest -Werror -v --doctest-modules rtree tests
+
+    - name: Run doctests
+      run: pytest -Werror -v --doctest-modules docs/source/*.rst
+
+  build_wheels:
+    name: Wheel ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: [ build_sdist]
+    strategy:
+      matrix:
+        include:
+          - os: "windows-latest"
+            msvc_arch: "x64"
+          - os: "windows-11-arm"
+            msvc_arch: "ARM64"
+          - os: "ubuntu-latest"
+          - os: "ubuntu-24.04-arm"
+          - os: "macos-latest"
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      name: Install Python
+      with:
+        python-version: '3.x'
+
+    - uses: ilammy/msvc-dev-cmd@v1.13.0
+      with:
+        arch: ${{ matrix.msvc_arch }}
+      if: startsWith(matrix.os, 'windows')
+
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v3.4.0
+      env:
+         CIBW_BUILD: ${{ runner.os == 'Windows' && runner.arch == 'ARM64' && 'cp311-*' || 'cp39-*' }}
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: cibw-wheels-${{ matrix.os }}
+        path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Source Distribution
+    runs-on: ubuntu-latest
+    needs: [ conda, ubuntu ]
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Build sdist
+      run: pipx run build --sdist
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: cibw-sdist
+        path: dist/*.tar.gz
+
+  attest:
+    name: "Attest Artifacts"
+    if: ${{ github.ref == 'refs/heads/main' && github.repository_owner == 'Toblerity' }}
+    runs-on: ubuntu-latest
+    needs: [build_wheels]
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: 'dist/**/*'
+
+  publish:
+    name: Gather ${{ github.ref_name }} release
+    runs-on: ubuntu-latest
+    needs: [attest]
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        name: Download release artifacts
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        name: Publish release as draft
+        with:
+          make_latest: false
+          fail_on_unmatched_files: true
+          prerelease: true
+          generate_release_notes: true
+          draft: true
+          files: |
+           dist/*
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: github.event_name == 'release' && github.event.action == 'released'
+        name: "Publish to PyPI"

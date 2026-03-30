@@ -1,0 +1,83 @@
+name: Unittest
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '**.py'
+      - '.github/workflows/unittests.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - '**.py'
+      - '.github/workflows/unittests.yml'
+
+concurrency:
+  group: unittests-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  unittests:
+
+    name: ${{ matrix.os }}+py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-20.04, ubuntu-latest, macos-11]
+        python-version: ['3.9', '3.11']
+        experimental: [false]
+        include:
+          - os: ubuntu-20.04
+            python-version: 3.6
+          - os: macos-11
+            python-version: 3.6
+
+    steps:
+
+    - name: Checkout ${{ github.ref }}
+      uses: actions/checkout@v2
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Get detailed Python version
+      id: full-python-version
+      run: echo ::set-output name=version::$(python -c "import sys; print('-'.join(str(v) for v in sys.version_info))")
+
+    - name: Python Cache - ${{ matrix.os }}-python-${{ steps.full-python-version.outputs.version }}
+      uses: actions/cache@v2
+      with:
+        path: ${{ env.pythonLocation }}
+        key: new-${{ matrix.os }}-python-${{ steps.full-python-version.outputs.version }}
+
+    - name: Install Python dependencies
+      run: |
+        python3 -m pip install --upgrade --upgrade-strategy eager pip setuptools wheel babel
+        pip3 install --upgrade --upgrade-strategy eager pillow scipy numpy
+
+    - name: List environment
+      env:
+        GITHUB_CONTEXT: ${{ toJSON(github) }}
+        JOB_CONTEXT: ${{ toJSON(job) }}
+        STEPS_CONTEXT: ${{ toJSON(steps) }}
+        RUNNER_CONTEXT: ${{ toJSON(runner) }}
+        STRATEGY_CONTEXT: ${{ toJSON(strategy) }}
+        MATRIX_CONTEXT: ${{ toJSON(matrix) }}
+      run: |
+        pip3 list
+        env
+
+    - name: Run Unittests
+      run: |
+        python -m unittest discover test -v
+        if ${{ matrix.experimental }} == true; then
+            exit 0
+        fi

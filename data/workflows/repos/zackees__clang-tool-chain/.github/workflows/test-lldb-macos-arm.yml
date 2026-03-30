@@ -1,0 +1,64 @@
+name: lldb-macos-arm
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-lldb-macos-arm:
+    name: LLDB (macOS ARM64)
+    runs-on: macos-latest
+
+    steps:
+    - name: Skip test (platform not yet supported)
+      run: |
+        echo "LLDB support not yet implemented for this platform"
+        echo "Framework ready, implementation pending"
+        exit 0
+      shell: bash
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+      shell: bash
+
+    - name: Display platform information
+      run: |
+        echo "Platform: macOS ARM64 - LLDB"
+        python --version
+      shell: bash
+
+    - name: Download and install clang toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      shell: bash
+      timeout-minutes: 20
+
+    - name: Purge old LLDB installation (force re-download)
+      run: |
+        rm -rf ~/.clang-tool-chain/lldb
+        echo "Purged old LLDB installation to force fresh download"
+      shell: bash
+
+    - name: Run LLDB tests
+      run: |
+        uv run pytest tests/test_lldb.py -v
+      shell: bash

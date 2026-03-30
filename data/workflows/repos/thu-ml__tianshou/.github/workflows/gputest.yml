@@ -1,0 +1,55 @@
+name: Ubuntu GPU
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+        - master
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'
+        required: false
+        default: false
+
+jobs:
+  gpu:
+    runs-on: [self-hosted, Linux, X64]
+    if: "!contains(github.event.head_commit.message, 'ci skip')"
+    steps:
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+      - name: Cancel previous run
+        uses: styfle/cancel-workflow-action@0.11.0
+        with:
+          access_token: ${{ github.token }}
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      # use poetry and cache installed packages, see https://github.com/marketplace/actions/python-poetry-action
+      - name: Install poetry
+        uses: abatilo/actions-poetry@v2
+      - name: Setup a local virtual environment (if no poetry.toml file)
+        run: |
+          poetry config virtualenvs.create true --local
+          poetry config virtualenvs.in-project true --local
+      - uses: actions/cache@v3
+        name: Define a cache for the virtual environment based on the dependencies lock file
+        with:
+          path: ./.venv
+          key: venv-${{ hashFiles('poetry.lock') }}
+      - name: Install the project dependencies
+        run: |
+          poetry install --with dev --extras "envpool"
+      - name: wandb login
+        run: |
+          poetry run wandb login e2366d661b89f2bee877c40bee15502d67b7abef
+      - name: Test with pytest
+        run: |
+          poetry run poe test

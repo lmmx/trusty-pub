@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  FORCE_COLOR: 3
+
+concurrency:
+  group: ${ github.workflow }-${ github.ref }
+  cancel-in-progress: true
+
+jobs:
+  pylint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: astral-sh/setup-uv@v7
+    - name: Install nox
+      run: uv tool install nox
+    - name: PyLint
+      run: nox -s pylint -- --output-format=github
+
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+        - "3.10"
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - "3.14"
+
+    name: Check Python ${{ matrix.python-version }}
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
+
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Prepare venv
+      run: uv venv
+
+    - name: Install package
+      run: uv pip install -e . --group test --group dask
+
+    - name: Test package
+      run: .venv/bin/python -m pytest
+
+    - name: Install plotting requirements too
+      run: uv pip install -e . --group plot
+
+    - name: Test plotting too
+      run: .venv/bin/python -m pytest --mpl
+
+  minimums:
+    name: Check minimums
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.10'
+
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Install nox
+      run: uv tool install nox
+
+    - name: Run nox
+      run: nox -s minimums
+
+
+
+  pass:
+    if: always()
+    needs: [pylint, checks, minimums]
+    runs-on: ubuntu-slim
+    timeout-minutes: 2
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

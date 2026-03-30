@@ -1,0 +1,249 @@
+name: Publish to NuGet and PowerShell Gallery
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to NuGet and PowerShell Gallery (uncheck to build only)'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  get-version:
+    runs-on: ubuntu-latest
+    outputs:
+      sdk-version: ${{ steps.extract-sdk-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract SDK version
+        id: extract-sdk-version
+        working-directory: ./sdk/dotNet
+        run: |
+          VERSION=$(dotnet msbuild SecretsManager/SecretsManager.csproj -getProperty:PackageVersion)
+          echo "SDK Version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  check-version:
+    needs: get-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if NuGet package version exists
+        run: |
+          VERSION="${{ needs.get-version.outputs.sdk-version }}"
+          echo "Checking if Keeper.SecretsManager $VERSION exists on NuGet..."
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://api.nuget.org/v3-flatcontainer/keeper.secretsmanager/$VERSION/keeper.secretsmanager.nuspec")
+
+          if [ "$STATUS" = "200" ]; then
+            echo "ERROR: Version $VERSION already exists on NuGet"
+            echo "Update PackageVersion in sdk/dotNet/SecretsManager/SecretsManager.csproj"
+            exit 1
+          else
+            echo "Version $VERSION is available (NuGet returned HTTP $STATUS)"
+          fi
+
+      - name: Check if PowerShell Gallery version exists
+        shell: pwsh
+        run: |
+          $version = "${{ needs.get-version.outputs.sdk-version }}"
+          Write-Host "Checking if SecretManagement.Keeper $version exists on PowerShell Gallery..."
+
+          try {
+            $module = Find-Module -Name SecretManagement.Keeper -RequiredVersion $version -ErrorAction Stop
+            Write-Host "ERROR: Version $version already exists on PowerShell Gallery"
+            Write-Host "Update ModuleVersion in sdk/dotNet/SecretManagement.Keeper/*.psd1 files"
+            exit 1
+          } catch {
+            if ($_.Exception.Message -match "No match was found") {
+              Write-Host "Version $version is available on PowerShell Gallery"
+            } else {
+              throw
+            }
+          }
+
+  # Generate and upload SBOM for SDK
+  generate-sdk-sbom:
+    needs: check-version
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./sdk/dotNet
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Restore and build production projects for dependency resolution
+        run: |
+          dotnet restore SecretsManager/SecretsManager.csproj
+          dotnet build SecretsManager/SecretsManager.csproj --configuration Release --no-restore
+          dotnet restore SecretManagement.Keeper/SecretManagement.Keeper.csproj
+          dotnet build SecretManagement.Keeper/SecretManagement.Keeper.csproj --configuration Release --no-restore
+
+      - name: Generate and publish SBOM
+        env:
+          MANIFEST_TOKEN: ${{ secrets.MANIFEST_TOKEN }}
+          SYFT_PACKAGE_CATALOGER_DOTNET_ENABLED: "true"
+        run: |
+          # Install tools
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.18.1
+          curl -sSfL https://raw.githubusercontent.com/manifest-cyber/cli/main/install.sh | sh -s -- -b /usr/local/bin v0.18.3
+
+          # Create temp directory with only .NET production projects
+          SCAN_DIR="${{ runner.temp }}/dotnet-scan"
+          mkdir -p "$SCAN_DIR"
+
+          # Copy only production project directories
+          cp -r SecretsManager "$SCAN_DIR/"
+          cp -r SecretManagement.Keeper "$SCAN_DIR/"
+
+          # Generate and publish SBOM from clean directory (no Go modules, no test projects)
+          cd "$SCAN_DIR"
+          manifest sbom . \
+            --generator=syft \
+            --name=keeper-secrets-manager-dotnet \
+            --version=${{ needs.get-version.outputs.sdk-version }} \
+            --output=spdx-json \
+            --file=sbom.json \
+            --api-key=${MANIFEST_TOKEN} \
+            --publish=true \
+            --asset-label=application,sbom-generated,dotnet,ksm,sdk,security
+
+          # Move SBOM back to working directory
+          mv sbom.json "${{ github.workspace }}/sdk/dotNet/"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-keeper-secrets-manager-dotnet-${{ needs.get-version.outputs.sdk-version }}
+          path: ./sdk/dotNet/sbom.json
+          retention-days: 90
+  
+  build-nuget:
+    needs: generate-sdk-sbom
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./sdk/dotNet
+
+    steps:
+      - name: Get the source code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Install dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages-${{ github.run_number }}
+          path: |
+            ${{ github.workspace }}/sdk/dotNet/SecretsManager/bin/Release/*.nupkg
+
+  publish-nuget:
+    environment: prod
+    needs: build-nuget
+    if: ${{ github.event.inputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download NuGet packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages-${{ github.run_number }}
+          path: ./packages
+
+      - name: Retrieve secrets from KSM
+        id: ksmsecrets
+        uses: Keeper-Security/ksm-action@master
+        with:
+          keeper-secret-config: ${{ secrets.KSM_KSM_CONFIG }}
+          secrets: |
+            Sq4nnb5HXXNp1l6KryXynw/field/password > NUGET_AUTH_TOKEN
+
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Publish package
+        run: dotnet nuget push ./packages/*.nupkg --api-key ${{steps.ksmsecrets.outputs.NUGET_AUTH_TOKEN}} --source https://api.nuget.org/v3/index.json
+
+  build-powershell:
+    needs: generate-sdk-sbom
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./sdk/dotNet
+
+    steps:
+      - name: Get the source code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Install dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Package PowerShell module
+        shell: pwsh
+        run: |
+          Set-Location ./SecretManagement.Keeper/
+          ./build.ps1 -Package
+
+      - name: Upload PowerShell module
+        uses: actions/upload-artifact@v4
+        with:
+          name: powershell-module-${{ github.run_number }}
+          path: |
+            ${{ github.workspace }}/sdk/dotNet/SecretManagement.Keeper/out/
+
+  publish-powershell:
+    environment: prod
+    needs: build-powershell
+    if: ${{ github.event.inputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download PowerShell module
+        uses: actions/download-artifact@v4
+        with:
+          name: powershell-module-${{ github.run_number }}
+          path: ./out
+
+      - name: Retrieve secrets from KSM
+        id: ksmsecrets
+        uses: Keeper-Security/ksm-action@master
+        with:
+          keeper-secret-config: ${{ secrets.KSM_KSM_CONFIG }}
+          secrets: |
+            FeE4uHTMEVJJhAdWK0ubMg/field/password > NUGET_AUTH_TOKEN
+
+      - name: Publish module to PowerShell Gallery
+        shell: pwsh
+        run: |
+          Publish-Module -Path ./out/SecretManagement.Keeper -NuGetApiKey ${{steps.ksmsecrets.outputs.NUGET_AUTH_TOKEN}} -Verbose

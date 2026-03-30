@@ -1,0 +1,42 @@
+name: validate-links
+
+on:
+  push:
+    branches:
+      - v*
+    tags:
+      - v*
+  pull_request:
+    branches:
+      - v*
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env: 
+      PYTHON_VER: 3.12
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check Microsoft URLs do not pin localized versions
+        run: |
+          localized=$(find . -name '*.md' | xargs grep -ol "\.microsoft\.com/[[:alpha:]]\{2\}-[[:alpha:]]\{2\}/") || true
+          if [ -z "$localized" ]; then
+            echo "All Microsoft Docs links ok."
+          else
+            echo "The following files contain links to Microsoft Docs that pin a localized version:"
+            echo $localized
+            exit 1
+          fi
+      - name: Set up Python ${{ env.PYTHON_VER }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VER }}
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install setuptools wheel twine tox mechanical-markdown
+          pip3 uninstall -y mistune
+          pip3 install mistune~=2.0.5 --no-cache-dir
+      - name: Check Markdown Files
+        run: |
+          for name in `find . -name "*.md"`; do echo -e "------\n$name" ; mm.py -l $name || exit 1 ;done
+

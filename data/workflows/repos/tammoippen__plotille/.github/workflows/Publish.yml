@@ -1,0 +1,32 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Set Up Python 3.12
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.12
+
+      - name: Build
+        run: uv build -v
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          path: dist/*
+
+      - name: Publish
+        run: uv publish -v -n -t ${{ secrets.PYPI_PASS }}

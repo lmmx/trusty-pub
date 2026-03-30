@@ -1,0 +1,261 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  pull_request:
+  schedule:
+  - cron:  '17 3 * * 0'
+
+concurrency:
+    group: ${{ github.head_ref || github.ref_name }}
+    cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: PyO3/maturin-action@v1
+      with:
+        manylinux: auto
+        command: build
+        rust-toolchain: stable
+        args: --release --sdist -o dist --find-interpreter
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-linux
+        path: dist/*
+
+  linux-cross:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [aarch64, armv7]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: PyO3/maturin-action@v1
+      with:
+        manylinux: auto
+        target: ${{ matrix.target }}
+        command: build
+        rust-toolchain: stable
+        args: --release -o dist -i 3.9 -i 3.10 -i 3.11 -i 3.12 -i 3.13
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-linux-${{ matrix.target }}
+        path: dist/*.whl
+
+  windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: PyO3/maturin-action@v1
+      with:
+        command: build
+        rust-toolchain: stable
+        args: --release -o dist --find-interpreter
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-windows
+        path: dist/*.whl
+
+  macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: PyO3/maturin-action@v1
+      with:
+        command: build
+        rust-toolchain: stable
+        args: --release -o dist --find-interpreter
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-macos
+        path: dist/*.whl
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: "startsWith(github.ref, 'refs/tags/')"
+    needs: [ macos, windows, linux, linux-cross ]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: PyO3/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          command: upload
+          args: --skip-existing dist/*.whl dist/*.tar.gz
+
+  pytest:
+    name: Pytest
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.x']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: 'requirements-dev.txt'
+
+      - name: Create virtual environment
+        run: |
+          python -m venv venv
+          echo "$GITHUB_WORKSPACE/venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install
+        run: |
+          source activate
+          maturin develop
+
+      - name: Run tests
+        run: pytest --tb=native test
+
+      - name: Validate stubs
+        run: python -m mypy.stubtest --allowlist stubtest-allowlist.txt starlark
+
+      - name: Run example
+        run: |
+            cd examples
+            for f in *.py; do
+                python "$f"
+            done
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          cache: 'pip'
+          cache-dependency-path: 'requirements-dev.txt'
+
+      - name: Create virtual environment
+        run: |
+          python -m venv venv
+          echo "$GITHUB_WORKSPACE/venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install and build docs
+        run: |
+          source activate
+          maturin develop
+          cd doc
+          make html SPHINXOPTS="-W --keep-going -n"
+
+      - name: Upload docs
+        run: |
+            if test "$GITHUB_REF" = "refs/heads/main"; then
+                cat > doc_upload_ssh_config <<END
+            Host doc-upload
+                User doc
+                IdentityFile doc_upload_key
+                IdentitiesOnly yes
+                Hostname documen.tician.de
+                StrictHostKeyChecking false
+                Port 2222
+            END
+
+                echo "${DOC_UPLOAD_KEY}" > doc_upload_key
+                chmod 0600 doc_upload_key
+                RSYNC_RSH="ssh -F doc_upload_ssh_config" rsync --verbose --archive --delete doc/_build/html/* doc-upload:doc/starlark-pyo3
+            fi
+        env:
+            DOC_UPLOAD_KEY: ${{ secrets.DOC_UPLOAD_KEY }}
+
+  ruff:
+      name: Ruff
+      runs-on: ubuntu-latest
+      steps:
+      -   uses: actions/checkout@v4
+      -
+          uses: actions/setup-python@v5
+          with:
+              python-version: '3.x'
+      -   name: "Main Script"
+          run: |
+              pip install ruff
+              ruff check
+
+  typos:
+      name: Typos
+      runs-on: ubuntu-latest
+      steps:
+      -   uses: actions/checkout@v5
+      -   uses: crate-ci/typos@master
+
+  basedpyright:
+      runs-on: ubuntu-latest
+      steps:
+      -   uses: actions/checkout@v5
+      -   uses: actions/setup-python@v5
+          with:
+              python-version: '3.x'
+      - name: Create virtual environment
+        run: |
+          python -m venv venv
+          echo "$GITHUB_WORKSPACE/venv/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install
+        run: |
+          source activate
+          maturin develop
+
+      -   name: "Main Script"
+          run: |
+              pip install basedpyright typing_extensions
+              basedpyright
+

@@ -1,0 +1,91 @@
+name: IBM CE Tests
+
+on:  
+  workflow_dispatch: 
+  # this allows to run the workflow manually through the github dashboard
+
+env:
+  HAVE_LITHOPS_CONFIG: ${{ secrets.LITHOPS_CONFIG != '' }}
+  LITHOPS_CONFIG_FILE: /tmp/lithops_config.yaml
+
+jobs:
+
+  determine_runnable_test_jobs:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+
+    outputs:
+      localhost: ${{ steps.script.outputs.localhost }}
+      code_engine: ${{ steps.script.outputs.code_engine }}
+
+    steps:
+      - name: Set jobs to run
+        id: script
+        run: |
+          echo "localhost=true" >> $GITHUB_OUTPUT
+          echo "code_engine=false" >> $GITHUB_OUTPUT
+
+
+  localhost_tests:
+    runs-on: ubuntu-latest
+    needs: determine_runnable_test_jobs
+    if: needs.determine_runnable_test_jobs.outputs.localhost == 'true'
+
+    steps:
+      - name: Clone Lithops repository
+        uses: actions/checkout@v4
+
+      - name: Install Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Lithops
+        run: |
+          pip3 install -U .[tests]
+
+      - name: Run Lithops tests
+        run: |
+          cd lithops/tests
+          pytest -v --backend localhost --storage localhost
+
+
+  ibm_ce_cos_tests:
+    runs-on: ubuntu-latest
+    needs: determine_runnable_test_jobs
+    if: needs.determine_runnable_test_jobs.outputs.code_engine == 'true'
+
+    steps:
+      - name: Clone Lithops repository
+        uses: actions/checkout@v4
+
+      - name: Install Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Lithops
+        run: |
+          pip3 install -U .[tests]
+
+      - name: Install Lithops config
+        id: config
+        run: |
+          echo -n -e "${{ secrets.LITHOPS_CONFIG }}" > $LITHOPS_CONFIG_FILE
+
+      - name: Build new runtime
+        run: |
+          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+          cd runtime/code_engine
+          lithops runtime build -f Dockerfile.githubci ${{ secrets.DOCKER_USER }}/lithops-ce-gihub-ci:${{ github.run_id }} -b code_engine
+          sed -i '/runtime: lithops-ce/c\    runtime: '${{ secrets.DOCKER_USER }}'/lithops-ce-gihub-ci:'${{ github.run_id }} $LITHOPS_CONFIG_FILE
+
+      - name: Run Lithops tests
+        run: |
+          cd lithops/tests
+          pytest -v --backend code_engine --storage ibm_cos
+
+      - name: Delete Lithops CE runtime
+        if: needs.determine_runnable_test_jobs.outputs.code_engine == 'true'
+        run: |
+          lithops runtime delete ${{ secrets.DOCKER_USER }}/lithops-ce-gihub-ci:${{ github.run_id }} -b code_engine -s ibm_cos

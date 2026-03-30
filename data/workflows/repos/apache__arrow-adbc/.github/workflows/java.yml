@@ -1,0 +1,237 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Java
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "java/**"
+      - ".github/workflows/java.yml"
+  push:
+    branches-ignore:
+      - 'dependabot/**'
+    paths:
+      - "java/**"
+      - ".github/workflows/java.yml"
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash -l -eo pipefail {0}
+
+jobs:
+  java:
+    name: "Java ${{ matrix.java }}/Linux"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: ['11', '17', '21', '25']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-java@v5
+        with:
+          cache: "maven"
+          distribution: "temurin"
+          java-version: ${{ matrix.java }}
+      - name: Start test services
+        run: |
+          docker compose up --detach --wait flightsql-sqlite-test mssql-test postgres-test
+          cat .env | grep -v -e '^#' | awk NF | tee -a $GITHUB_ENV
+      - name: Build/Test
+        run: |
+          cd java
+          mvn install
+
+  java-errorprone:
+    name: "Java ${{ matrix.java }}/Linux with ErrorProne"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: ['21', '25']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-java@v5
+        with:
+          cache: "maven"
+          distribution: "temurin"
+          java-version: ${{ matrix.java }}
+      - name: Build/Test
+        run: |
+          cd java
+          mkdir .mvn
+          cat <<HERE > .mvn/jvm.config
+          --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
+          --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+          --add-exports jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED
+          --add-exports jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED
+          --add-exports jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED
+          --add-exports jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED
+          --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED
+          --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED
+          --add-opens jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED
+          --add-opens jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED
+          HERE
+          # Our linters are compile-time, no point re-running tests
+          mvn -P errorprone install -DskipTests
+
+  java-jni-artifacts:
+    name: "JNI Libraries/${{ matrix.os }} ${{ matrix.arch }}"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { os: Linux, arch: amd64, vcpkg_arch: x64, runner: ubuntu-latest }
+          - { os: macOS, arch: arm64v8, vcpkg_arch: arm64, runner: macos-latest }
+    env:
+      VCPKG_ROOT: "${{ github.workspace }}/vcpkg"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          cache: "maven"
+          distribution: "temurin"
+          java-version: 11
+      - name: Retrieve Go, VCPKG version from .env
+        run: |
+          (. .env && echo "GO_VERSION=${GO}") >> $GITHUB_ENV
+          (. .env && echo "VCPKG_VERSION=${VCPKG}") >> $GITHUB_ENV
+      - name: Install vcpkg
+        run: |
+          ./ci/scripts/install_vcpkg.sh $VCPKG_ROOT $VCPKG_VERSION
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          check-latest: true
+          cache: true
+          cache-dependency-path: adbc/go/adbc/go.sum
+      - name: Install Homebrew dependencies
+        if: matrix.os == 'macOS'
+        run: brew install autoconf bash pkg-config ninja
+      - name: Build artifacts
+        if: matrix.os != 'macOS'
+        run: |
+          docker compose run python-wheel-manylinux-build
+      - name: Build artifacts (macOS)
+        if: matrix.os == 'macOS'
+        run: |
+          # XXX(https://github.com/apache/arrow-adbc/issues/3382)
+          sudo xcode-select -s "/Applications/Xcode_16.app"
+
+          export ADBC_BUILD_STATIC=ON
+          export ADBC_BUILD_TESTS=OFF
+          export ADBC_USE_ASAN=OFF
+          export ADBC_USE_UBSAN=OFF
+          ./ci/scripts/python_wheel_unix_build.sh ${{ matrix.arch }} $(pwd) $(pwd)/build
+      - name: Build JNI artifacts
+        run: |
+          export ADBC_BUILD_STATIC=ON
+          export ADBC_BUILD_TESTS=OFF
+          export ADBC_USE_ASAN=OFF
+          export ADBC_USE_UBSAN=OFF
+          ./ci/scripts/java_build.sh $(pwd)
+          ./ci/scripts/java_jni_build.sh $(pwd) $(pwd)/build_jni $(pwd)/build/${{ matrix.vcpkg_arch }}
+      - name: Assemble artifacts
+        run: |
+          mkdir artifacts
+          cp -r java/driver/jni/src/main/resources/ artifacts/jni
+          cp -r build/${{ matrix.vcpkg_arch }}/lib artifacts/driver
+          ls -laR artifacts
+          mv artifacts artifacts-${{ matrix.os }}-${{ matrix.arch }}
+          tar czf artifacts-${{ matrix.os }}-${{ matrix.arch }}.tgz artifacts-${{ matrix.os }}-${{ matrix.arch }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jni-artifacts-${{ matrix.os }}-${{ matrix.arch }}
+          retention-days: 7
+          path: |
+            artifacts-${{ matrix.os }}-${{ matrix.arch }}.tgz
+      - name: Assemble logs
+        if: failure()
+        run: |
+          mkdir ~/logs
+          find "$VCPKG_ROOT" -name 'build-*.log' -exec cp '{}' ~/logs ';'
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jni-artifacts-${{ matrix.os }}-${{ matrix.arch }}
+          retention-days: 7
+          path: ~/logs
+
+  java-jni:
+    name: "Java ${{ matrix.java }} JNI/${{ matrix.os }} ${{ matrix.arch }}"
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - java-jni-artifacts
+    strategy:
+      matrix:
+        include:
+          - { java: '11', os: Linux, arch: amd64, vcpkg_arch: x64, runner: ubuntu-latest }
+          - { java: '25', os: Linux, arch: amd64, vcpkg_arch: x64, runner: ubuntu-latest }
+          - { java: '11', os: macOS, arch: arm64v8, vcpkg_arch: arm64, runner: macos-latest }
+          - { java: '25', os: macOS, arch: arm64v8, vcpkg_arch: arm64, runner: macos-latest }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: jni-artifacts-*
+          merge-multiple: true
+      - uses: actions/setup-java@v5
+        with:
+          cache: "maven"
+          distribution: "temurin"
+          java-version: 11
+      - name: Build/Test
+        run: |
+          set -x
+          pushd artifacts
+          for archive in artifacts*.tgz; do
+            tar xvf $archive
+          done
+          popd
+          cp -r artifacts/*/jni/adbc_driver_jni java/driver/jni/src/main/resources
+          for driver in artifacts/*/driver; do
+            export LD_LIBRARY_PATH=$(pwd)/$driver:${LD_LIBRARY_PATH:-}
+            export DYLD_LIBRARY_PATH=$(pwd)/$driver:${DYLD_LIBRARY_PATH:-}
+          done
+          env BUILD_JNI=ON ./ci/scripts/java_build.sh $(pwd)
+          cd java
+          mvn -B -Pjni test -pl :adbc-driver-jni

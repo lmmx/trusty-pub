@@ -1,0 +1,151 @@
+name: UI Tests
+
+on:
+  workflow_call:
+    secrets:
+      DOCKERHUB_LIMITED_TOKEN:
+        required: true
+      R2_ACCESS_KEY_ID:
+        required: true
+      R2_SECRET_ACCESS_KEY:
+        required: true
+    inputs:
+      is_merge_group:
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  ui-tests:
+    runs-on: ubuntu-latest
+    if: github.repository == 'tensorzero/tensorzero'
+
+    strategy:
+      matrix:
+        clickhouse_version: ${{ inputs.is_merge_group && fromJSON('["lts", "latest"]') || fromJSON('["lts"]') }}
+
+    steps:
+      - name: Set DNS
+        run: echo "127.0.0.1 howdy.tensorzero.com" | sudo tee -a /etc/hosts
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Cleanup disk space
+        run: bash ci/free-disk-space.sh
+
+      - name: Install Rust (from rust-toolchain.toml)
+        working-directory: crates
+        run: |
+          for attempt in 1 2 3; do
+            if rustup show; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install Rust toolchain after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.13.0"
+
+      - name: Setup `pnpm`
+        run: |
+          for attempt in 1 2 3; do
+            if npm install -g pnpm@10.15.0; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+        shell: bash
+
+      - name: Install `pnpm` dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm install --frozen-lockfile; then
+              break
+            fi
+            if [ $attempt -eq 3 ]; then
+              echo "Failed to install pnpm dependencies after 3 attempts"
+              exit 1
+            fi
+            sleep $((10 * attempt))
+          done
+
+      - name: Build `tensorzero-node`
+        working-directory: crates/tensorzero-node
+        run: pnpm build:debug
+
+      - name: Login to DockerHub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          username: tensorzero
+          password: ${{ secrets.DOCKERHUB_LIMITED_TOKEN }}
+
+      - name: Pull container images
+        run: |
+          ./ci/docker-pull-with-retry.sh \
+            tensorzero/gateway-dev:sha-${{ github.sha }} \
+            tensorzero/mock-provider-api:sha-${{ github.sha }}
+          docker tag tensorzero/gateway-dev:sha-${{ github.sha }} tensorzero/gateway:sha-${{ github.sha }}
+
+      - name: Start Docker containers and apply fixtures
+        working-directory: ui
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          echo "FIREWORKS_ACCOUNT_ID=not_used" >> fixtures/.env
+          echo "TENSORZERO_GATEWAY_TAG=sha-${{ github.sha }}" >> fixtures/.env
+          echo "TENSORZERO_INTERNAL_MOCK_PROVIDER_API=http://mock-provider-api:3030" >> fixtures/.env
+          echo "TENSORZERO_MOCK_PROVIDER_API_TAG=sha-${{ github.sha }}" >> fixtures/.env
+          echo "TENSORZERO_UI_TAG=sha-${{ github.sha }}" >> fixtures/.env
+
+          # Environment variables only used by the gateway container
+          # We deliberately leave these unset when starting the UI container, to ensure
+          # that it doesn't depend on them being set
+          echo "FIREWORKS_API_KEY=not_used" >> fixtures/.env-gateway
+          echo "OPENAI_API_KEY=not_used" >> fixtures/.env-gateway
+
+          TENSORZERO_CLICKHOUSE_VERSION=${{ matrix.clickhouse_version }} docker compose -f fixtures/docker-compose.yml up clickhouse fixtures mock-provider-api -d
+          docker compose -f fixtures/docker-compose.yml wait fixtures
+
+      - name: Run `pnpm test`
+        env:
+          TENSORZERO_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/tensorzero_ui_fixtures
+          TENSORZERO_GATEWAY_URL: http://localhost:3000
+        run: pnpm ui:test
+
+      - name: Print Docker Compose logs
+        if: always()
+        working-directory: ui
+        run: docker compose -f fixtures/docker-compose.yml logs -t
+
+      - name: Print Docker Compose status
+        if: always()
+        working-directory: ui
+        run: docker compose -f fixtures/docker-compose.yml ps --all
+
+      - name: Print ClickHouse error logs
+        if: always()
+        working-directory: ui
+        run: docker cp fixtures-clickhouse-1:/var/log/clickhouse-server/clickhouse-server.err.log -
+
+      - name: Print ClickHouse trace logs
+        if: always()
+        working-directory: ui
+        run: docker cp fixtures-clickhouse-1:/var/log/clickhouse-server/clickhouse-server.log -

@@ -1,0 +1,122 @@
+name: misc-tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - mainline
+      - 'release_*'
+  schedule:
+    - cron: "0 7 * * *"  # Run once daily
+
+permissions:
+  contents: read  # to fetch code (actions/checkout)
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-sdist:
+    name: Test sdist
+    runs-on: ubuntu-latest
+    env:
+      COMMIT_ID: ${{ github.sha }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_IAM_S3_UPLOADER }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_IAM_S3_UPLOADER }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniforge-variant: Miniforge3
+        miniforge-version: latest
+        conda-remove-defaults: "true"
+        activate-environment: dev
+        environment-file: ops/conda_env/dev.yml
+        use-mamba: true
+    - name: Display Conda env
+      run: |
+        conda info
+        conda list
+    - name: Test sdist
+      run: |
+        bash ops/test-sdist.sh
+  test-cmake-import:
+    name: Test using Treelite as a library, via CMake export (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniforge-variant: Miniforge3
+        miniforge-version: latest
+        conda-remove-defaults: "true"
+        activate-environment: dev
+        environment-file: ops/conda_env/dev.yml
+        use-mamba: true
+    - name: Display Conda env
+      run: |
+        conda info
+        conda list
+    - name: Test using Treelite as a library
+      run: |
+        bash ops/test-cmake-import.sh
+  test-serializer-compatibility:
+    name: Test backward compatibility of serializers
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniforge-variant: Miniforge3
+        miniforge-version: latest
+        activate-environment: dev
+        environment-file: ops/conda_env/dev.yml
+        use-mamba: true
+    - name: Display Conda env
+      run: |
+        conda info
+        conda list
+    - name: Test compatibility
+      run: |
+        bash ops/test-serializer-compatibility.sh
+  test-custom-libpath:
+    name: Test Treelite with custom libpath
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniforge-variant: Miniforge3
+        miniforge-version: latest
+        activate-environment: dev
+        environment-file: ops/conda_env/dev.yml
+        use-mamba: true
+    - name: Display Conda env
+      run: |
+        conda info
+        conda list
+    - name: Test Treelite with custom libpath
+      run: |
+        mkdir build
+        cd build
+        cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=/opt/treelite
+        ninja install -v
+        cd ../python
+        pip install --force-reinstall -v . --config-settings use_system_libtreelite=True \
+          --config-settings system_libtreelite_dir=/opt/treelite/lib
+        cd ..
+        rm -rf build/
+        python -c "import treelite; print(treelite.core._LIB)"

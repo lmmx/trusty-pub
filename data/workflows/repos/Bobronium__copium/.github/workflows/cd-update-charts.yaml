@@ -1,0 +1,104 @@
+name: Update Charts
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  generate-charts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: 
+          submodules: recursive
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # Download wheels and run README benchmarks
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "Wheels-3.14-Linux-x86_64"
+          path: wheelhouse
+
+      - name: Find wheel
+        id: wheel
+        shell: bash
+        run: |
+          wheel=$(find wheelhouse -name "*-cp314-*-manylinux*_x86_64.whl" -type f | head -n1)
+          if [[ -z "$wheel" ]]; then
+            wheel=$(find wheelhouse -name "*-cp314-*-musllinux*_x86_64.whl" -type f | head -n1)
+          fi
+          if [[ -z "$wheel" ]]; then
+            echo "No wheel found for cp314"
+            exit 1
+          fi
+          echo "path=$wheel" >> "$GITHUB_OUTPUT"
+
+      - name: Setup venv
+        run: |
+          uv venv --python 3.14 --clear
+          uv sync --extra benchmark --no-install-project
+          uv pip install ${{ steps.wheel.outputs.path }}
+
+      - name: Run benchmarks and generate charts
+        run: |
+          .venv/bin/python -m tools.benchmark_chart \
+            --notebook showcase.ipynb \
+            --runs 5 \
+            --output-dir assets \
+            --save-results .bench/chart_results.json \
+            --save-notebook showcase.ipynb
+
+      - name: Commit and push assets, then update README
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          # Get parent commit (the one that triggered this workflow)
+          PARENT_SHA="${{ github.sha }}"
+          PARENT_SHORT_SHA="${PARENT_SHA:0:7}"
+
+          git add assets/*.svg showcase.ipynb
+
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            SPEEDUP=$(python -c "import json; d=json.load(open('.bench/chart_results.json')); print(f\"{d['stdlib']['average']/d['copium']['average']:.0f}\")")
+            git commit -m "Update benchmark charts for (${PARENT_SHORT_SHA} – ${SPEEDUP}x faster)"
+            git push
+          fi
+
+          CHARTS_SHA="$(git rev-parse HEAD)"
+          CHARTS_SHORT_SHA="${CHARTS_SHA:0:7}"
+
+          # Update chart URLs in README
+          sed -i "s|https://raw.githubusercontent.com/Bobronium/copium/[^/]*/assets/chart_|https://raw.githubusercontent.com/Bobronium/copium/${CHARTS_SHA}/assets/chart_|g" README.md
+
+          # Update showcase.ipynb link to charts commit (notebook is updated with charts)
+          sed -i "s|https://github.com/Bobronium/copium/blob/[^/]*/showcase.ipynb|https://github.com/Bobronium/copium/blob/${CHARTS_SHA}/showcase.ipynb|g" README.md
+
+          git add README.md
+
+          if git diff --staged --quiet; then
+            echo "README already points to ${CHARTS_SHA}"
+          else
+            git commit -m "Update README to reference charts @ ${CHARTS_SHORT_SHA}"
+            git push
+          fi
+
+      # Upload artifacts for sdist build
+      - name: Upload prepared assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-assets
+          path: assets/*.svg
+
+      - name: Upload updated README
+        uses: actions/upload-artifact@v4
+        with:
+          name: updated-readme
+          path: README.md

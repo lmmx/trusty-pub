@@ -1,0 +1,437 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "*"
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "pyproject.toml"
+      - ".github/workflows/CI.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "pyproject.toml"
+      - ".github/workflows/CI.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-22.04
+            target: x86_64
+          # - runner: ubuntu-22.04
+          #   target: x86
+          - runner: ubuntu-22.04
+            target: aarch64
+          - runner: ubuntu-22.04
+            target: armv7
+          # - runner: ubuntu-22.04
+          #   target: s390x
+          # - runner: ubuntu-22.04
+          #   target: ppc64le
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist -i python3.10
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          manylinux: auto
+      - name: Validate cp310 wheel install
+        if: ${{ matrix.platform.target == 'x86_64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*cp310*.whl' | head -n 1)"
+          if [ -z "$wheel" ]; then
+            echo "Missing cp310 wheel in dist"
+            exit 1
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install --force-reinstall --no-deps "$wheel"
+          python tests/test_smock.py
+      - name: Build free-threaded wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist -i python3.14t
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          manylinux: auto
+      - uses: actions/setup-python@v6
+        if: ${{ matrix.platform.target == 'x86_64' }}
+        with:
+          python-version: 3.14t
+      - name: Validate cp314t wheel install
+        if: ${{ matrix.platform.target == 'x86_64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*cp314t*.whl' | head -n 1)"
+          if [ -z "$wheel" ]; then
+            echo "Missing cp314t wheel in dist"
+            exit 1
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install --force-reinstall --no-deps "$wheel"
+          python tests/test_smock.py
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-linux-${{ matrix.platform.target }}
+          path: dist
+
+  musllinux:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-22.04
+            target: x86_64
+          # - runner: ubuntu-22.04
+          #   target: x86
+          - runner: ubuntu-22.04
+            target: aarch64
+          - runner: ubuntu-22.04
+            target: armv7
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist -i python3.10
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          manylinux: musllinux_1_2
+      - name: Validate cp310 wheel install
+        if: ${{ false }} # Temporarily disabled for musllinux debugging.
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*cp310*musllinux*.whl' | head -n 1)"
+          if [ -z "$wheel" ]; then
+            echo "Missing cp310 musllinux wheel in dist"
+            exit 1
+          fi
+          docker run --rm -v "$PWD:/src:ro" -w /src quay.io/pypa/musllinux_1_2_x86_64 /bin/bash -lc '
+            set -euo pipefail
+            /opt/python/cp310-cp310/bin/pip install --upgrade pip
+            /opt/python/cp310-cp310/bin/pip install --force-reinstall --no-deps /src/dist/*cp310*musllinux*.whl
+            /opt/python/cp310-cp310/bin/python /src/tests/test_smock.py
+          '
+      - name: Build free-threaded wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist -i python3.14t
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          manylinux: musllinux_1_2
+      - name: Validate cp314t wheel install
+        if: ${{ false }} # Temporarily disabled for musllinux debugging.
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*cp314t*musllinux*.whl' | head -n 1)"
+          if [ -z "$wheel" ]; then
+            echo "Missing cp314t musllinux wheel in dist"
+            exit 1
+          fi
+          docker run --rm -v "$PWD:/src:ro" -w /src quay.io/pypa/musllinux_1_2_x86_64 /bin/bash -lc '
+            set -euo pipefail
+            pybin="$(find /opt/python -maxdepth 3 -type f -path "/opt/python/cp314t-*/bin/python" | sort | head -n 1)"
+            if [ -z "$pybin" ]; then
+              echo "Missing cp314t interpreter in musllinux container"
+              exit 1
+            fi
+            pipbin="${pybin%/python}/pip"
+            "$pipbin" install --upgrade pip
+            "$pipbin" install --force-reinstall --no-deps /src/dist/*cp314t*musllinux*.whl
+            "$pybin" /src/tests/test_smock.py
+          '
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-musllinux-${{ matrix.platform.target }}
+          path: dist
+
+  windows:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        platform:
+          - runner: windows-latest
+            target: x64
+            python_arch: x64
+          - runner: windows-latest
+            target: x86
+            python_arch: x86
+          - runner: windows-11-arm
+            target: aarch64
+            python_arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"  # Github Actions minimum Python version on Windows for ARM64 runners is 3.11
+          architecture: ${{ matrix.platform.python_arch }}
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist -i python3.10
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Validate cp310 wheel install
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*cp310*.whl' | head -n 1)"
+          if [ -z "$wheel" ]; then
+            echo "Missing cp310 wheel in dist"
+            exit 1
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install --force-reinstall --no-deps "$wheel"
+          python tests/test_smock.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.14t
+          architecture: ${{ matrix.platform.python_arch }}
+      - name: Build free-threaded wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist -i python3.14t
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Validate cp314t wheel install
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*cp314t*.whl' | head -n 1)"
+          if [ -z "$wheel" ]; then
+            echo "Missing cp314t wheel in dist"
+            exit 1
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install --force-reinstall --no-deps "$wheel"
+          python tests/test_smock.py
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-windows-${{ matrix.platform.target }}
+          path: dist
+
+  macos:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        platform:
+          - runner: macos-15
+            target: x86_64
+          - runner: macos-15
+            target: aarch64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist -i python3.10
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Validate cp310 wheel install
+        if: ${{ matrix.platform.target == 'aarch64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*cp310*.whl' | head -n 1)"
+          if [ -z "$wheel" ]; then
+            echo "Missing cp310 wheel in dist"
+            exit 1
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install --force-reinstall --no-deps "$wheel"
+          python tests/test_smock.py
+      - name: Build free-threaded wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist -i python3.14t
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - uses: actions/setup-python@v6
+        if: ${{ matrix.platform.target == 'aarch64' }}
+        with:
+          python-version: 3.14t
+      - name: Validate cp314t wheel install
+        if: ${{ matrix.platform.target == 'aarch64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*cp314t*.whl' | head -n 1)"
+          if [ -z "$wheel" ]; then
+            echo "Missing cp314t wheel in dist"
+            exit 1
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install --force-reinstall --no-deps "$wheel"
+          python tests/test_smock.py
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-macos-${{ matrix.platform.target }}
+          path: dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: Upload sdist
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: dist
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    needs: [linux, musllinux, windows, macos, sdist]
+    environment: release
+    permissions:
+      # Use to sign the release artifacts
+      id-token: write
+      # Used to upload release artifacts
+      contents: write
+      # Used to generate artifact attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download linux wheels (x86_64, aarch64)
+        uses: actions/download-artifact@v8
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels-linux-aarch64
+          path: dist
+      - name: Download musllinux wheels (x86_64, aarch64)
+        uses: actions/download-artifact@v8
+        with:
+          name: wheels-musllinux-x86_64
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels-musllinux-aarch64
+          path: dist
+      - name: Download windows wheel (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: wheels-windows-x64
+          path: dist
+      - name: Download macOS wheels (x86_64, aarch64)
+        uses: actions/download-artifact@v8
+        with:
+          name: wheels-macos-x86_64
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels-macos-aarch64
+          path: dist
+      - name: Download sdist
+        uses: actions/download-artifact@v8
+        with:
+          name: wheels-sdist
+          path: dist
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: "dist/*"
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: ${{ startsWith(github.ref, 'refs/tags/') && (contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta')) }}
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+          skip-existing: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: ${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta') }}
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  upload-to-release:
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+      - name: Collect release assets
+        id: collect-assets
+        shell: bash
+        run: |
+          shopt -s nullglob
+          artifact_dirs=(wheels-*)
+          if [ ${#artifact_dirs[@]} -eq 0 ]; then
+            echo "No artifact directories matched wheels-*"
+            exit 1
+          fi
+
+          echo "Downloaded artifacts:"
+          find "${artifact_dirs[@]}" -maxdepth 2 -mindepth 1 | sort
+
+          {
+            echo 'files<<EOF'
+            find "${artifact_dirs[@]}" -type f | sort
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ${{ steps.collect-assets.outputs.files }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+
+  update-release-wheels-csv:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: upload-to-release
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/UpdateReleaseWheelsCsv.yml

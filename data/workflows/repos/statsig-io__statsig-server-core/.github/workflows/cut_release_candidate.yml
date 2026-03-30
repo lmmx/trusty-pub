@@ -1,0 +1,111 @@
+name: Cut Release Candidate
+
+on:
+  workflow_dispatch:
+  schedule:
+     - cron: '0 1 * * 2' #Weekly: Monday 5-6pm PT
+
+env:
+  # GH Octokit (Kong App)
+  GH_APP_ID: '229901'
+  GH_APP_INSTALLATION_ID: '36921303'
+  GH_APP_PRIVATE_KEY: ${{ secrets.KONG_APP_KEY_V2 }}
+  PUBLIC_RELEASE_REPO: statsig-io/statsig-server-core
+
+jobs:
+  release_candidate:
+    if: github.event.repository.private
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 7.32.4
+
+      - name: Install CLI Dependencies
+        run: pnpm install --dir cli
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+            repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Config user
+        run: |
+          git config user.name "Xin Li (Bot)"
+          git config user.email ${{ secrets.XIN_GH_EMAIL }}
+
+      - name: Check latest stable release For Monday
+        id: check_stable_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          latest_stable_date=$(gh api "repos/${PUBLIC_RELEASE_REPO}/releases" --paginate --jq '[.[] | select(.prerelease == false) | .published_at][0]')
+          if [ -z "$latest_stable_date" ] || [ "$latest_stable_date" = "null" ]; then
+            echo "No stable releases found."
+            echo "should_sync=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          today_pt=$(TZ=America/Los_Angeles date +%F)
+          stable_day_pt=$(TZ=America/Los_Angeles date -d "$latest_stable_date" +%F)
+
+          if [ "$stable_day_pt" = "$today_pt" ]; then
+            echo "should_sync=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Latest stable release day (PT) is ${stable_day_pt}, not today (${today_pt})."
+            echo "should_sync=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync rc branch with main branch
+        if: steps.check_stable_release.outputs.should_sync == 'true'
+        run: |
+            git fetch origin rc
+            git fetch origin main
+            git checkout rc 
+            git merge origin/main -X theirs -m "[automated] sync rc with main"
+            git push 
+            ./tore merge-to-main
+
+      - name: Bump Version In RC Branch
+        id: bump_version
+        if: steps.check_stable_release.outputs.should_sync == 'true'
+        run: git checkout rc &&
+            ./tore bump-version --create-branch --rc
+
+      - name: Merge Version Bump Changes to RC Branch
+        if: steps.check_stable_release.outputs.should_sync == 'true'
+        run: |
+            git fetch origin rc
+            git checkout rc 
+            git fetch origin ${{ steps.bump_version.outputs.version_branch }}
+            git merge origin/${{ steps.bump_version.outputs.version_branch }}
+            git push
+
+      - name: Wait to avoid RC timestamp collision
+        if: steps.check_stable_release.outputs.should_sync == 'true'
+        run: |
+          # waiting until next minute avoids collisions on retries
+          secs=$(date +%S)
+          wait=$((60 - 10#$secs + 2))
+          if [ $wait -lt 2 ]; then wait=2; fi
+          echo "Sleeping for $wait seconds..."
+          sleep $wait
+          
+      - name: Merge Version Bump to Main
+        if: steps.check_stable_release.outputs.should_sync == 'true'
+        run: |
+          git checkout main
+          git pull
+          ./tore bump-version --rc --create-branch
+          ./tore merge-to-main
+
+      - name: Create Release
+        if: steps.check_stable_release.outputs.should_sync == 'true'
+        run: ./tore gh-create-release private-statsig-server-core

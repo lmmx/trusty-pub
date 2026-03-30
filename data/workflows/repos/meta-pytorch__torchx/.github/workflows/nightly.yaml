@@ -1,0 +1,29 @@
+name: Push Nightly
+
+on:
+  # run every day at 11:15am
+  schedule:
+    - cron:  '15 11 * * *'
+
+jobs:
+  nightly:
+    runs-on: linux.24_04.4x
+    steps:
+      - name: Checkout TorchX
+        uses: actions/checkout@v2
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: |
+          set -eux
+          uv sync --frozen --extra dev
+          uv pip install twine build
+      - name: Run tests
+        run: uv run pytest --cov=./ --cov-report=xml
+      - name: Push nightly
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: scripts/push_nightly.sh

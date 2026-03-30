@@ -1,0 +1,53 @@
+name: Publish Python 🐍 distributions 📦 to PyPI
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-n-publish:
+    name: Build and publish Python 🐍 distributions 📦 to TestPyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    - name: Install Python
+      run: uv python install
+    - name: Build
+      run: uv build
+
+    - name: Publish distribution 📦 to Test PyPI
+      run: uv publish --index testpypi
+    - name: Check test install and import
+      run: |
+        sleep 5  # Wait for Test Pypi to publish
+        # Include pypi index for deps not available from test pypi...
+        uv run \
+          --with exchange-calendars \
+          --refresh-package exchange-calendars \
+          --index https://test.pypi.org/simple \
+          --index https://pypi.org/simple \
+          --index-strategy unsafe-best-match \
+          --no-project \
+          --isolated \
+          -- \
+          python -c 'import exchange_calendars; print(f"{exchange_calendars.__version__=}")'
+
+    - name: Publish distribution 📦 to PyPI
+      run: uv publish
+    - name: Check install and import
+      run: |
+        sleep 5  # Wait for Pypi to publish
+        uv run \
+        --with exchange-calendars \
+        --refresh-package exchange-calendars \
+        --no-project \
+        --isolated \
+        -- \
+        python -c 'import exchange_calendars;print(f"{exchange_calendars.__version__=}")'

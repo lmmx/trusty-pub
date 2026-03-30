@@ -1,0 +1,72 @@
+name: Conda build
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: "Operating system, e.g., ubuntu-24.04, macos-15-intel, or windows-2022"
+        required: true
+        type: string
+      target:
+        description: "Conda target: linux_64, osx_64, osx_arm64, or win_64"
+        required: true
+        type: string
+      python-version:
+        description: "Python version such as 3.11"
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash -l {0} # required for conda env
+
+jobs:
+  build_conda:
+    name: Package build (${{ inputs.target }}, py${{ inputs.python-version }})
+    runs-on: ${{ inputs.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0 # history required so cmake can determine version
+
+      - uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # Use the main branch to get auto-activate
+        with:
+          miniforge-version: latest
+          conda-remove-defaults: true
+          auto-activate: true
+
+      - name: Create variant file for conda build
+        run: |
+          echo "python:" > dynamic_var.yaml
+          if [[ "${{ inputs.python-version }}" == "3.13" || "${{ inputs.python-version }}" == "3.14" ]]; then
+            echo "- ${{ inputs.python-version }}.* *_cp$(echo ${{ inputs.python-version }} | tr -d '.')" >> dynamic_var.yaml
+          else
+            echo "- ${{ inputs.python-version }}.* *_cpython" >> dynamic_var.yaml
+          fi
+          echo "numpy:" >> dynamic_var.yaml
+          echo "- '2'" >> dynamic_var.yaml
+          echo "python_impl:" >> dynamic_var.yaml
+          echo "- cpython" >> dynamic_var.yaml
+          echo "is_python_min:" >> dynamic_var.yaml
+          echo "- false" >> dynamic_var.yaml
+      - run: cat dynamic_var.yaml
+      - run: >
+          conda install
+          --channel conda-forge
+          --yes
+          conda-build conda-forge-pinning
+      - run: >
+          conda build
+          --channel conda-forge
+          --variant-config-files=${CONDA_PREFIX}/conda_build_config.yaml
+          --variant-config-files=${GITHUB_WORKSPACE}/conda/variants/${{ inputs.target }}.yaml
+          --variant-config-files=dynamic_var.yaml
+          --no-anaconda-upload
+          --override-channels
+          --output-folder conda/package conda
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conda-package-${{ inputs.target }}-py${{ inputs.python-version }}
+          path: conda/package/*/scipp*.conda

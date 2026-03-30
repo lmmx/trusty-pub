@@ -1,0 +1,125 @@
+name: CI
+permissions: read-all
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_LOCKED: 1
+  NPTC_BUILD: 20251206
+
+jobs:
+  lint:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: repo review
+        uses: scientific-python/repo-review@v0.12.3
+        with:
+          plugins: sp-repo-review
+
+      - name: dprint
+        uses: dprint/check@v2.3
+
+      - name: typos
+        uses: crate-ci/typos@v1.44.0
+
+      - uses: astral-sh/setup-uv@v7.6.0
+        with:
+          python-version: "3.14"
+
+      - name: ruff check
+        run: uv run ruff check --output-format=github
+
+      - name: ruff format
+        run: uv run ruff format --check
+
+      - name: basedpyright --verifytypes
+        run: uv run basedpyright --ignoreexternal --verifytypes optype
+
+  typecheck:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        np: ["1.26", "2.0", "2.1", "2.2", "2.3", "2.4"]
+        py: ["3.11", "3.13"]
+        exclude:
+          - py: "3.13"
+            np: "1.26"
+          - py: "3.13"
+            np: "2.0"
+        include:
+          - py: "3.14"
+            np: "2.3"
+          - py: "3.14"
+            np: "2.4"
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: astral-sh/setup-uv@v7.6.0
+        with:
+          activate-environment: true
+          python-version: ${{ matrix.py }}
+
+      - name: uv sync
+        run: uv sync --no-editable
+
+      - name: install deps
+        run: uv pip install --exact --group type numpy==${{ matrix.np }}.* .
+
+      - name: ty
+        run: ty check
+
+      - name: pyrefly
+        run: pyrefly check
+
+      - name: basedpyright
+        run: basedpyright
+
+      # NOTE: mypy ignores `uv run --with=...` (and `--isolated` does not help)
+      - name: mypy
+        run: mypy --no-incremental --cache-dir=/dev/null .
+
+  test:
+    timeout-minutes: 10
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu, windows]
+        py: ["3.11", "3.13", "3.14"]
+        np: ["1.26", "2.0", "2.3", "2.4"]
+        exclude:
+          - py: "3.13"
+            np: "1.26"
+          - py: "3.13"
+            np: "2.0"
+          - py: "3.14"
+            np: "1.26"
+          - py: "3.14"
+            np: "2.0"
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: astral-sh/setup-uv@v7.6.0
+        with:
+          python-version: ${{ matrix.py }}
+          activate-environment: true
+
+      - name: install dependencies
+        run: uv pip install --exact --group test numpy==${{ matrix.np }}.* .
+
+      - name: pytest
+        run: pytest

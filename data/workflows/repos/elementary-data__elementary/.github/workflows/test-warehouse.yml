@@ -1,0 +1,432 @@
+name: Test warehouse platform
+on:
+  workflow_dispatch:
+    inputs:
+      warehouse-type:
+        type: choice
+        required: true
+        description: Type of warehouse platform
+        options:
+          - postgres
+          - snowflake
+          - bigquery
+          - redshift
+          - databricks_catalog
+          - spark
+          - athena
+          - clickhouse
+          - duckdb
+          - trino
+          - dremio
+          - fabric
+          - sqlserver
+          - vertica
+      elementary-ref:
+        type: string
+        required: false
+        description: Branch or tag to checkout for 'elementary' repository
+      dbt-data-reliability-ref:
+        type: string
+        required: false
+        description: Branch or tag to checkout for 'dbt-data-reliability' repository
+      dbt-version:
+        type: string
+        required: false
+        description: dbt's version to test with
+      generate-data:
+        type: boolean
+        required: false
+        default: false
+        description: Whether to generate new data
+
+  workflow_call:
+    inputs:
+      warehouse-type:
+        type: string
+        required: true
+      elementary-ref:
+        type: string
+        required: false
+      dbt-data-reliability-ref:
+        type: string
+        required: false
+      dbt-version:
+        type: string
+        required: false
+      generate-data:
+        type: boolean
+        required: false
+        default: false
+
+env:
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  ELEMENTARY_DBT_PACKAGE_PATH: ${{ github.workspace }}/dbt-data-reliability
+  CLI_INTERNAL_DBT_PKG_DIR: ${{ github.workspace }}/elementary/elementary/monitor/dbt_project
+  E2E_DBT_PROJECT_DIR: ${{ github.workspace }}/elementary/tests/e2e_dbt_project
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: elementary
+    concurrency:
+      # Serialises runs for the same warehouse × dbt-version × branch.
+      # The schema name is derived from a hash of this group (see "Write dbt profiles").
+      group: tests_${{ inputs.warehouse-type }}_dbt_${{ inputs.dbt-version }}_${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout Elementary
+        uses: actions/checkout@v6
+        with:
+          path: elementary
+          ref: ${{ inputs.elementary-ref }}
+
+      - name: Checkout dbt package
+        uses: actions/checkout@v6
+        with:
+          repository: elementary-data/dbt-data-reliability
+          path: dbt-data-reliability
+          ref: ${{ inputs.dbt-data-reliability-ref }}
+
+      # ── Seed cache: compute key & restore volumes BEFORE starting services ──
+      # This ensures Docker volumes are populated before containers initialize.
+      - name: Compute seed cache key
+        id: seed-cache-key
+        if: inputs.warehouse-type == 'postgres' || inputs.warehouse-type == 'clickhouse' || inputs.warehouse-type == 'duckdb'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: |
+          # Cache key is a hash of seed-related files so that cache busts when
+          # the data generation script, dbt project config, or seed schemas change.
+          SEED_HASH=$(
+            {
+              cat generate_data.py \
+                  dbt_project.yml \
+                  docker-compose.yml \
+                  ${{ github.workspace }}/elementary/tests/profiles/profiles.yml.j2
+              echo "dbt_version=${{ inputs.dbt-version || '' }}"
+            } | sha256sum | head -c 16
+          )
+          echo "seed-hash=$SEED_HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Restore seed cache
+        id: seed-cache
+        if: steps.seed-cache-key.outputs.seed-hash
+        uses: actions/cache@v5
+        with:
+          path: /tmp/seed-cache-${{ inputs.warehouse-type }}
+          key: seed-${{ inputs.warehouse-type }}-${{ steps.seed-cache-key.outputs.seed-hash }}
+
+      - name: Restore cached seed data into Docker volumes
+        if: steps.seed-cache.outputs.cache-hit == 'true' && inputs.warehouse-type != 'duckdb'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: bash ci/restore_seed_cache.sh "${{ inputs.warehouse-type }}"
+
+      - name: Restore cached DuckDB seed
+        if: steps.seed-cache.outputs.cache-hit == 'true' && inputs.warehouse-type == 'duckdb'
+        run: |
+          cp /tmp/seed-cache-duckdb/elementary_test.duckdb /tmp/elementary_test.duckdb
+          echo "DuckDB seed cache restored."
+
+      # ── Start warehouse services ──────────────────────────────────────────
+      - name: Start Postgres
+        if: inputs.warehouse-type == 'postgres'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: docker compose up -d postgres
+
+      - name: Start Clickhouse
+        if: inputs.warehouse-type == 'clickhouse'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: docker compose up -d clickhouse
+
+      - name: Start Trino
+        if: inputs.warehouse-type == 'trino'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: |
+          docker compose up -d --wait trino
+
+      - name: Start Dremio
+        if: inputs.warehouse-type == 'dremio'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: |
+          # Start Dremio services in detached mode with healthchecks, then
+          # run the setup container separately.  Using --exit-code-from would
+          # imply --abort-on-container-exit, killing all services when the
+          # setup container finishes.
+          docker compose up -d --wait dremio dremio-minio nessie
+          docker compose run --rm dremio-setup
+
+      - name: Start Spark
+        if: inputs.warehouse-type == 'spark'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: |
+          docker compose up -d --build --wait spark-thrift
+
+      - name: Start SQL Server
+        if: inputs.warehouse-type == 'sqlserver'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: |
+          docker compose up -d --wait sqlserver
+
+      - name: Start Vertica
+        if: inputs.warehouse-type == 'vertica'
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: |
+          docker compose up -d --wait vertica
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install Spark requirements
+        if: inputs.warehouse-type == 'spark'
+        run: sudo apt-get install -y python3-dev libsasl2-dev gcc
+
+      - name: Install ODBC driver for SQL Server
+        if: inputs.warehouse-type == 'fabric' || inputs.warehouse-type == 'sqlserver'
+        run: |
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc > /dev/null
+          curl -fsSL https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+
+      - name: Install dbt
+        if: inputs.warehouse-type != 'vertica'
+        run: >
+          pip install
+          "dbt-core${{ inputs.dbt-version && format('=={0}', inputs.dbt-version) }}"
+          "dbt-${{ (inputs.warehouse-type == 'databricks_catalog' && 'databricks') || (inputs.warehouse-type == 'athena' && 'athena-community') || (inputs.warehouse-type == 'dremio' && 'dremio') || inputs.warehouse-type }}${{ (inputs.warehouse-type == 'spark' && '[PyHive]') || '' }}${{ inputs.dbt-version && format('~={0}', inputs.dbt-version) }}"
+
+      # dbt-vertica pins dbt-core~=1.8 which lacks the 'arguments' attribute
+      # used by newer dbt-core.  Install dbt-vertica without deps first, then
+      # install the latest compatible dbt-core separately.  We also install
+      # vertica-python (dbt-vertica's runtime dep) explicitly.
+      - name: Install dbt (Vertica)
+        if: inputs.warehouse-type == 'vertica'
+        run: |
+          pip install --no-deps dbt-vertica
+          pip install vertica-python
+          pip install "dbt-core${{ inputs.dbt-version && format('=={0}', inputs.dbt-version) }}"
+
+      - name: Install Elementary
+        run: |
+          pip install -r dev-requirements.txt
+          # For Vertica, dbt-vertica is already installed with --no-deps above;
+          # using ".[vertica]" would re-resolve dbt-vertica's deps and downgrade
+          # dbt-core to ~=1.8.  Install elementary without the adapter extra.
+          if [ "${{ inputs.warehouse-type }}" = "vertica" ]; then
+            pip install "."
+          else
+            pip install ".[${{ (inputs.warehouse-type == 'databricks_catalog' && 'databricks') || inputs.warehouse-type }}]"
+          fi
+
+      - name: Write dbt profiles
+        env:
+          CI_WAREHOUSE_SECRETS: ${{ secrets.CI_WAREHOUSE_SECRETS || '' }}
+        run: |
+          # Docker-based adapters use ephemeral containers, so a fixed schema
+          # name is safe (the concurrency group prevents parallel collisions).
+          # This enables caching the seeded database state between runs.
+          IS_DOCKER=false
+          case "${{ inputs.warehouse-type }}" in
+            postgres|clickhouse|trino|dremio|duckdb|spark|sqlserver|vertica) IS_DOCKER=true ;;
+          esac
+
+          if [ "$IS_DOCKER" = "true" ]; then
+            SCHEMA_NAME="elementary_tests"
+            echo "Schema name: $SCHEMA_NAME (fixed for Docker adapter '${{ inputs.warehouse-type }}')"
+          else
+            # Cloud adapters: unique schema per run to avoid collisions.
+            # Schema name = py_<YYMMDD_HHMMSS>_<branch≤19>_<8-char hash>
+            CONCURRENCY_GROUP="tests_${{ inputs.warehouse-type }}_dbt_${{ inputs.dbt-version }}_${BRANCH_NAME}"
+            SHORT_HASH=$(echo -n "$CONCURRENCY_GROUP" | sha256sum | head -c 8)
+            SAFE_BRANCH=$(echo "${BRANCH_NAME}" | awk '{print tolower($0)}' | sed "s/[^a-z0-9]/_/g; s/__*/_/g" | head -c 19)
+            DATE_STAMP=$(date -u +%y%m%d_%H%M%S)
+            SCHEMA_NAME="py_${DATE_STAMP}_${SAFE_BRANCH}_${SHORT_HASH}"
+            echo "Schema name: $SCHEMA_NAME (branch='${BRANCH_NAME}', timestamp=${DATE_STAMP}, hash of concurrency group)"
+          fi
+
+          echo "SCHEMA_NAME=$SCHEMA_NAME" >> "$GITHUB_ENV"
+
+          python "${{ github.workspace }}/elementary/tests/profiles/generate_profiles.py" \
+            --template "${{ github.workspace }}/elementary/tests/profiles/profiles.yml.j2" \
+            --output ~/.dbt/profiles.yml \
+            --schema-name "$SCHEMA_NAME"
+
+      - name: Run Python package unit tests
+        run: pytest -vv tests/unit --warehouse-type ${{ inputs.warehouse-type }}
+
+      - name: Run Python package integration tests
+        run: pytest -vv tests/integration --warehouse-type ${{ inputs.warehouse-type }}
+
+      - name: Install dbt package
+        run: |
+          ELEMENTARY_PKG_LOCATION=$(pip show elementary-data | grep -i location | awk '{print $2}')
+          DBT_PROJECT_PATH="$ELEMENTARY_PKG_LOCATION/elementary/monitor/dbt_project"
+          DBT_PKGS_PATH="$DBT_PROJECT_PATH/dbt_packages"
+          dbt deps --project-dir "$DBT_PROJECT_PATH"
+          rm -rf "$DBT_PKGS_PATH/elementary"
+          ln -vs "$GITHUB_WORKSPACE/dbt-data-reliability" "$DBT_PKGS_PATH/elementary"
+
+      - name: Run deps for E2E dbt project
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        env:
+          ELEMENTARY_DBT_PACKAGE_PATH: ${{ env.ELEMENTARY_DBT_PACKAGE_PATH }}
+        run: |
+          dbt deps
+
+      - name: Generate seed data
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        if: steps.seed-cache.outputs.cache-hit != 'true'
+        run: python generate_data.py
+
+      - name: Seed e2e dbt project (external)
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        if: steps.seed-cache.outputs.cache-hit != 'true' && (inputs.warehouse-type == 'dremio' || inputs.warehouse-type == 'spark')
+        run: python load_seeds_external.py "${{ inputs.warehouse-type }}" "$SCHEMA_NAME" data
+
+      - name: Seed e2e dbt project
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        if: steps.seed-cache.outputs.cache-hit != 'true' && inputs.warehouse-type != 'dremio' && inputs.warehouse-type != 'spark'
+        run: dbt seed -f --target "${{ inputs.warehouse-type }}"
+
+      - name: Save seed cache from Docker volumes
+        if: steps.seed-cache.outputs.cache-hit != 'true' && (inputs.warehouse-type == 'postgres' || inputs.warehouse-type == 'clickhouse')
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: bash ci/save_seed_cache.sh "${{ inputs.warehouse-type }}"
+
+      - name: Save DuckDB seed cache
+        if: steps.seed-cache.outputs.cache-hit != 'true' && inputs.warehouse-type == 'duckdb'
+        run: |
+          mkdir -p /tmp/seed-cache-duckdb
+          cp /tmp/elementary_test.duckdb /tmp/seed-cache-duckdb/elementary_test.duckdb
+          echo "DuckDB seed cache saved."
+
+      - name: Run e2e dbt project
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        run: |
+          # Dremio needs single-threaded execution to avoid Nessie catalog race conditions
+          EXTRA_ARGS=()
+          if [ "${{ inputs.warehouse-type }}" = "dremio" ]; then
+            EXTRA_ARGS+=(--threads 1)
+          fi
+          dbt run --target "${{ inputs.warehouse-type }}" "${EXTRA_ARGS[@]}" || true
+
+          # Validate run_results.json: only error_model should be non-success
+          jq -e '
+            [.results[] | select(.status != "success") | .unique_id]
+            | length == 1 and .[0] == "model.elementary_integration_tests.error_model"
+          ' target/run_results.json > /dev/null
+          jq_exit=$?
+
+          if [ $jq_exit -eq 0 ]; then
+            echo "✅ Validation passed: only error_model failed."
+          else
+            echo "❌ Validation failed. Unexpected failures:"
+            jq '[.results[] | select(.status != "success") | .unique_id] | join(", ")' target/run_results.json
+          fi
+
+          exit $jq_exit
+
+      - name: Test e2e dbt project
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        continue-on-error: true
+        run: |
+          # Dremio needs single-threaded execution to avoid Nessie catalog race conditions
+          EXTRA_ARGS=()
+          if [ "${{ inputs.warehouse-type }}" = "dremio" ]; then
+            EXTRA_ARGS+=(--threads 1 --exclude tag:ephemeral_model)
+          fi
+          dbt test --target "${{ inputs.warehouse-type }}" "${EXTRA_ARGS[@]}"
+
+      - name: Run help
+        run: edr --help
+
+      - name: Run monitor
+        env:
+          SLACK_WEBHOOK: ${{ secrets.CI_SLACK_WEBHOOK }}
+        run: >
+          edr monitor
+          -t "${{ inputs.warehouse-type }}"
+          --group-by table
+          --project-dir "${{ env.E2E_DBT_PROJECT_DIR }}"
+          --project-profile-target "${{ inputs.warehouse-type }}"
+          --slack-webhook "$SLACK_WEBHOOK"
+
+      - name: Validate alerts statuses were updated
+        working-directory: ${{ env.CLI_INTERNAL_DBT_PKG_DIR }}
+        run: |
+          dbt deps
+          dbt run-operation validate_alert_statuses_are_updated -t "${{ inputs.warehouse-type }}"
+
+      - name: Run report
+        run: >
+          edr monitor report
+          -t "${{ inputs.warehouse-type }}"
+          --project-dir "${{ env.E2E_DBT_PROJECT_DIR }}"
+          --project-profile-target "${{ inputs.warehouse-type }}"
+
+      - name: Set report artifact name
+        id: set_report_artifact_name
+        run: |
+          ARTIFACT_NAME=$(echo "report_${{ inputs.warehouse-type }}_${BRANCH_NAME}_dbt_${{ inputs.dbt-version || '' }}.html" | awk '{print tolower($0)}' | sed 's#[":/\\<>|*?-]#_#g')
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.set_report_artifact_name.outputs.artifact_name }}
+          path: elementary/edr_target/elementary_report.html
+
+      - name: Write GCS keyfile
+        env:
+          GCS_KEYFILE: ${{ secrets.GCS_KEYFILE }}
+        run: echo "$GCS_KEYFILE" | base64 -d > /tmp/gcs_keyfile.json
+
+      - name: Run send report
+        env:
+          SLACK_TOKEN: ${{ secrets.CI_SLACK_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AZURE_CONNECTION_STRING: ${{ secrets.AZURE_CONNECTION_STRING }}
+        run: >
+          edr monitor send-report
+          -t "${{ inputs.warehouse-type }}"
+          --project-dir "${{ env.E2E_DBT_PROJECT_DIR }}"
+          --project-profile-target "${{ inputs.warehouse-type }}"
+          --slack-file-name "report_${{ inputs.warehouse-type }}_${{ env.BRANCH_NAME }}.html"
+          --slack-token "$SLACK_TOKEN"
+          --slack-channel-name data-ops
+          --bucket-file-path "ci_reports/report_${{ inputs.warehouse-type }}_${{ env.BRANCH_NAME }}.html"
+          --aws-access-key-id "$AWS_ACCESS_KEY_ID"
+          --aws-secret-access-key "$AWS_SECRET_ACCESS_KEY"
+          --s3-bucket-name elementary-ci-artifacts
+          # --google-service-account-path /tmp/gcs_keyfile.json
+          # --gcs-bucket-name elementary_ci_artifacts
+          --azure-connection-string "$AZURE_CONNECTION_STRING"
+          --azure-container-name reports
+          --update-bucket-website true
+
+      - name: Set artifact name
+        id: set_artifact_name
+        run: |
+          ARTIFACT_NAME=$(echo "edr_${{ inputs.warehouse-type }}_${BRANCH_NAME}_dbt_${{ inputs.dbt-version || '' }}.log" | awk '{print tolower($0)}' | sed 's#[":/\\<>|*?-]#_#g')
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload edr log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.set_artifact_name.outputs.artifact_name }}
+          path: elementary/edr_target/edr.log
+
+      - name: Run Python package e2e tests
+        run: pytest -vv tests/e2e --warehouse-type ${{ inputs.warehouse-type }}
+
+      - name: Drop test schemas
+        if: always()
+        working-directory: ${{ env.E2E_DBT_PROJECT_DIR }}
+        continue-on-error: true
+        run: |
+          dbt run-operation elementary_integration_tests.drop_test_schemas --target "${{ inputs.warehouse-type }}"

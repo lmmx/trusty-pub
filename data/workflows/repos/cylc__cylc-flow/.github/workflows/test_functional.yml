@@ -1,0 +1,354 @@
+name: functional tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths-ignore:
+      - '.github/workflows/*.ya?ml'
+      - '!.github/workflows/test_functional.yml'
+      - 'cylc/flow/etc/syntax/**'
+      - 'etc/syntax/**'
+      - 'tests/conftest.py'
+      - 'tests/unit/**'
+      - 'tests/integration/**'
+      - '**.md'
+      - '**/README*/**'
+  push:
+    branches:
+      - master
+      - '8.*.x'
+    paths-ignore:
+      - '.github/workflows/*.ya?ml'
+      - '!.github/workflows/test_functional.yml'
+      - 'cylc/flow/etc/syntax/**'
+      - 'etc/syntax/**'
+      - 'tests/conftest.py'
+      - 'tests/unit/**'
+      - 'tests/integration/**'
+      - '**.md'
+      - '**/README*/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -c "exec $CONDA_PREFIX/bin/bash -elo pipefail {0}"
+
+env:
+  FORCE_COLOR: 2
+  PIP_PROGRESS_BAR: off
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name || matrix.chunk }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['ubuntu-22.04']
+        python-version: ['3.12'] # oldest version we support
+        test-base: ['tests/f']
+        chunk: ['1/4', '2/4', '3/4', '4/4']
+        platform: ['_local_background* _local_at*']
+        # NOTE: includes must define ALL of the matrix values
+        include:
+          # latest python
+          - name: 'py-3-latest'
+            os: 'ubuntu-latest'
+            python-version: '3'
+            test-base: 'tests/f'
+            chunk: '1/4'
+            platform: '_local_background*'
+          # tests/k
+          - name: 'flaky'
+            os: 'ubuntu-latest'
+            python-version: '3.12'
+            test-base: 'tests/k'
+            chunk: '1/1'
+            platform: '_local_background* _local_at*'
+          # remote platforms
+          - name: '_remote_background_indep_poll'
+            os: 'ubuntu-latest'
+            python-version: '3.12'
+            test-base: 'tests/f tests/k'
+            chunk: '1/1'
+            platform: '_remote_background_indep_poll _remote_at_indep_poll'
+          - name: '_remote_background_indep_tcp'
+            os: 'ubuntu-latest'
+            test-base: 'tests/f tests/k'
+            python-version: '3.12'
+            chunk: '1/1'
+            platform: '_remote_background_indep_tcp _remote_at_indep_tcp'
+          # macos
+          - name: 'macos 1/5'
+            os: 'macos-latest'
+            python-version: '3.12'  # oldest version we support
+            test-base: 'tests/f'
+            chunk: '1/5'
+            platform: '_local_background*'
+          - name: 'macos 2/5'
+            os: 'macos-latest'
+            python-version: '3'  # newest available
+            test-base: 'tests/f'
+            chunk: '2/5'
+            platform: '_local_background*'
+
+    env:
+      # Use non-UTC time zone
+      TZ: XXX-05:30
+      # these vars are used by etc/bin/run-functional-tests
+      CYLC_TEST_PLATFORMS: ${{ matrix.platform }}
+      CYLC_COVERAGE: 1
+      REMOTE_PLATFORM: ${{ contains(matrix.platform, '_remote') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure Python
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          cache-environment: true
+          post-cleanup: 'all'
+          environment-name: cylc-functional-test
+          create-args: >-
+            python=${{ matrix.python-version }}
+            pip
+            bash
+            coreutils
+            grep
+            sed
+            sqlite
+            subversion
+            tree
+
+      - name: Create global config
+        run: |
+          CONF_PATH="$HOME/.cylc/flow/8"
+          mkdir -p "$CONF_PATH"
+          touch "$CONF_PATH/global.cylc"
+          ln -s "$CONF_PATH/global.cylc" "$CONF_PATH/global-tests.cylc"
+          echo "GLOBAL_CFG_PATH=${CONF_PATH}/global.cylc" >> "$GITHUB_ENV"
+
+      - name: Patch DNS
+        uses: cylc/release-actions/patch-dns@v1
+
+      - name: Add localhost entries to global config
+        if: startsWith(runner.os, 'macos')
+        run: |
+          cat >> "$GLOBAL_CFG_PATH" <<__HERE__
+          [platforms]
+            [[localhost, $(hostname -f), $(hostname -s)]]
+              hosts = localhost
+              install target = localhost
+              ssh command = ssh -oBatchMode=yes -oConnectTimeout=8 -oStrictHostKeyChecking=no
+          __HERE__
+          cat "$GLOBAL_CFG_PATH"
+
+      - name: Add .github/bin/ to PATH
+        # Sets up mocked mail command & any other custom executables
+        # Adding to $GITHUB_PATH does not work when using setup-micromamba and/or login shell
+        run: |
+          echo "export PATH=\"${{ github.workspace }}/.github/bin:$PATH\"" >> ~/.bash_profile
+
+      - name: Install
+        run: |
+          pip install -e ."[all]"
+          mkdir "$HOME/cylc-run"
+
+      - name: Configure Atrun
+        if: contains(matrix.platform, '_local_at')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y at
+          cat >> "$GLOBAL_CFG_PATH" << __HERE__
+            [platforms]
+                [[_local_at_indep_tcp]]
+                    hosts = localhost
+                    install target = localhost
+                    job runner = at
+          __HERE__
+
+      - name: Swarm Configure
+        run: |
+          etc/bin/swarm --yes --debug configure
+
+      - name: Swarm Build
+        if: env.REMOTE_PLATFORM == 'true'
+        run: |
+          # `swarm configure` seems to get ignored so override the user config
+          cp etc/conf/ssh_config $HOME/.ssh/config
+          # build and run the swarm
+          etc/bin/swarm --yes --debug build
+          etc/bin/swarm --yes --debug run
+          # test that it's up and running before proceeding
+          sleep 1
+          ssh -vv _remote_background_indep_poll hostname
+
+      - name: Configure git  # Needed by the odd test
+        uses: cylc/release-actions/configure-git@v1
+
+      # Useful debug info:
+      - name: Pip list
+        run: pip list
+      - name: Inspect versions
+        run: |
+          python --version
+          echo
+          rsync --version
+
+      - name: Filter Tests
+        env:
+          # NOTE: we only want the CHUNK set in this step else we will
+          # re-chunk tests later when they run
+          CHUNK: ${{ matrix.chunk }}
+        run: |
+          etc/bin/run-functional-tests \
+            --dry \
+            ${{ matrix.test-base }} \
+            > test-file
+          if [[ $REMOTE_PLATFORM == 'true' ]]; then
+            # skip tests that don't configure platform requirements
+            grep -l --color=never REQUIRE_PLATFORM $(cat test-file) > test-file
+          fi
+          echo "----- Filtered Tests -----"
+          sort test-file
+
+      - name: Test
+        id: test
+        timeout-minutes: 35
+        continue-on-error: true
+        run: |
+          echo "finished=false" >> $GITHUB_OUTPUT
+          if [[ '${{ matrix.test-base }}' == 'tests/k' ]]; then
+              NPROC=4
+          else
+              NPROC=8
+          fi
+          # NOTE: test base is purposefully un-quoted
+          etc/bin/run-functional-tests \
+              -j "${NPROC}" \
+              --state=save \
+              $(cat test-file) \
+              || (echo "finished=true" >> $GITHUB_OUTPUT && false)
+
+      - name: Time Out
+        if: steps.test.outcome == 'failure' && steps.test.outputs.finished != 'true'
+        run: |
+          echo '::error:: tests timed-out'
+          # help to identify the tests that were running at the time
+          cylc scan --state=all --format=rich --color-blind
+          # fail the workflow
+          false
+
+      - name: Re-run failed tests
+        timeout-minutes: 10
+        if: steps.test.outcome == 'failure' && steps.test.outputs.finished == 'true'
+        run: |
+          # re-run failed tests providing that they didn't time out first time
+          # TODO: make the tests deterministic so we don't need to do this
+          etc/bin/run-functional-tests \
+              -j 1 \
+              -v \
+              --state=save,failed $(cat test-file)
+
+      - name: Copy cylc-run out of container
+        if: failure() && steps.test.outcome == 'failure' && env.REMOTE_PLATFORM == 'true'
+        run: |
+          # pick the first host in the list
+          host="$(cut -d ' ' -f 1 <<< "${{ matrix.platform }}")"
+          # copy back the remote cylc-run dir
+          rsync -av \
+            "${host}:/root/cylc-run/" \
+            "${HOME}/cylc-run/${host}/"
+
+      - name: Debug
+        if: failure() && steps.test.outcome == 'failure'
+        timeout-minutes: 1
+        run: |
+          find "$HOME/cylc-run" -name '*.err' -type f \
+            -exec echo \; -exec echo '====== {} ======' \; -exec cat '{}' \;
+          find "$HOME/cylc-run" -name '*.log' -type f \
+            -exec echo \; -exec echo '====== {} ======' \; -exec cat '{}' \;
+          find "${TMPDIR:-/tmp}/${USER}/cylctb-"* -type f \
+            -exec echo \; -exec echo '====== {} ======' \; -exec cat '{}' \;
+
+      - name: Set artifact upload name
+        if: always()
+        id: uploadname
+        run: |
+          # artifact name cannot contain '/' characters
+          CID="$(sed 's|/|-|g' <<< "${{ matrix.name || matrix.chunk }}")"
+          echo "uploadname=$CID" >> $GITHUB_OUTPUT
+
+      - name: Upload failed tests artifact
+        if: failure() && steps.test.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: cylc-run (${{ steps.uploadname.outputs.uploadname }})
+          path: ~/cylc-run/
+          include-hidden-files: true
+
+      - name: Fetch Remote Coverage
+        if: env.REMOTE_PLATFORM == 'true'
+        run: |
+          # pick the first host in the list
+          host="$(cut -d ' ' -f 1 <<< "${{ matrix.platform }}")"
+          # copy back the remote coverage files
+          rsync -av \
+            "${host}:/cylc/" \
+            '.' \
+            --include='.coverage*' \
+            --exclude='*' \
+            >rsyncout
+          cat rsyncout
+          # fiddle the python source location to match the local system
+          for db in $(grep --color=never '.coverage\.' rsyncout); do
+            sqlite3 "$db" "
+              UPDATE file
+              SET path = REPLACE(path, '/cylc/cylc/', '$PWD/cylc/')
+            "
+          done
+
+      - name: Shutdown
+        if: always()
+        run: |
+          etc/bin/swarm kill
+
+      - name: Combine coverage & report
+        run: |
+          coverage combine -a
+          coverage xml
+          coverage report
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage_${{ steps.uploadname.outputs.uploadname }}
+          path: coverage.xml
+          retention-days: 7
+
+  codecov:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v8
+
+      - name: Codecov upload
+        uses: codecov/codecov-action@v5
+        with:
+          name: ${{ github.workflow }}
+          flags: functional-tests
+          fail_ci_if_error: true
+          verbose: true
+          # Token not required for public repos, but avoids upload failure due
+          # to rate-limiting (but not for PRs opened from forks)
+          token: ${{ secrets.CODECOV_TOKEN }}

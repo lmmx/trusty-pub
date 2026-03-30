@@ -1,0 +1,78 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '42 4 5,20 * *'
+env:
+  CACHE_NUMBER: 0  # increase to reset cache manually
+jobs:
+  run-tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    strategy:
+      matrix:
+        python-version: ['3.9.1', '3.11']
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v2
+      - uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+      - name: Set cache date
+        run: echo "DATE=$(date +'%Y%m')" >> $GITHUB_ENV
+      - name: Conda download cache
+        id: myconda-download-cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/share/miniconda/pkgs/
+          key: ${{ matrix.python-version }}-conda-${{ env.DATE }}-${{ env.CACHE_NUMBER }}
+      - name: Install imagemagick
+        run: |
+          sudo sudo apt-get update && sudo apt-get -y --no-install-recommends install -y imagemagick libstdc++6 || true
+      # conda does not support environment markers
+      - name: fix libstdc++ for scipy install
+        run: ln -sf /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /usr/share/miniconda/envs/test/lib/libstdc++.so.6
+      - name: Install testing dependencies
+        run: |
+          conda install -c conda-forge --file requirements-conda.txt --file requirements-linting-old.txt six packaging pytest coveralls coverage libstdcxx-ng toml
+      - name: Conda info
+        run: |
+          conda info
+          conda list
+      - name: Lint with flake8
+        # stop the build if there are Python syntax errors or undefined names
+        run: flake8 imagehash/ --show-source
+      - name: Check typing with mypy
+        run: mypy imagehash tests/*.py --follow-imports=silent --ignore-missing-imports || true
+      - name: Test install from setup.py
+        run: pip install .
+      - run: coverage run -m pytest .
+      - name: Convert coverage output to lcov for coveralls
+        run: |
+          coverage lcov -o lcov.info
+          # make paths relative
+          sed -i s,$PWD/,,g lcov.info
+      - name: prepare coveralls partial upload
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.github_token }}
+          path-to-lcov: lcov.info
+          flag-name: run-${{ matrix.python-version }}
+          parallel: true
+        
+
+  finish:
+    needs: run-tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Coveralls Finished
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.github_token }}
+        parallel-finished: true

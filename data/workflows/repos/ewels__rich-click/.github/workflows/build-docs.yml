@@ -1,0 +1,46 @@
+name: Build docs
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+# Cancel if a newer run is started
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+   contents: write
+
+jobs:
+  build_docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: 3
+          activate-environment: true
+
+      - name: Install dependencies
+        run: uv pip install ".[docs]"
+
+      - name: Generate terminal images with rich-codex
+        if: github.repository_owner == 'ewels' || github.event_name == 'workflow_dispatch'
+        uses: ewels/rich-codex@v1
+        with:
+          skip_python_setup: "true"
+          commit_changes: "true"
+#          clean_img_paths: docs/images/*.svg
+          terminal_width: 80
+          skip_git_checks: "true"
+          working_dir: "."
+
+      - name: Build and deploy docs
+        run: uv run --with . docs/_deploy.py
+        env:
+          PACKAGE_NAME: rich-click

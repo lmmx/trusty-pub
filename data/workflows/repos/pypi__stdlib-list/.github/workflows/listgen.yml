@@ -1,0 +1,61 @@
+name: Generate stdlib lists
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Don't create any PRs for this run"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 0 * * 2"
+
+permissions: {}
+
+jobs:
+  expand-list:
+    strategy:
+      matrix:
+        python:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+
+      - name: walk modules
+        env:
+          LISTGEN_PYTHON_VERSION: ${{ matrix.python }}
+        run: python ./support/walk-modules.py ./stdlib_list/lists/"${LISTGEN_PYTHON_VERSION}.txt"
+
+      - name: show diff
+        if: ${{ inputs.dry-run }}
+        run: git diff
+
+      - name: create PR
+        if: ${{ !inputs.dry-run }}
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        with:
+          commit-message: "[BOT] update list for ${{ matrix.python }}"
+          branch: update-stdlib-list-${{ matrix.python }}
+          base: main
+          branch-suffix: timestamp
+          title: "[BOT] update list for ${{ matrix.python }}"
+          body: |
+            This is an automated pull request, updating `${{ matrix.python }}.txt` after a detected change.
+
+            Please review manually before merging.
+          assignees: "woodruffw"
+          reviewers: "woodruffw"

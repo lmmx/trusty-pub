@@ -1,0 +1,23 @@
+name: Release
+on:
+  push:
+    tags:
+      - v*
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  Release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: Build artifacts
+        run: |
+          uvx --from build python -m build --installer uv
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

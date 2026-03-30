@@ -1,0 +1,27 @@
+name: Tests
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [311, 312]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: ci/environment-py${{matrix.python-version}}.yml
+      - name: Install kerchunk
+        shell: bash -l {0}
+        run: |
+          pip install -e . --no-deps
+          pip list
+      - name: Test with pytest
+        shell: bash -l {0}
+        run: |
+          pytest -v --timeout 60 --cov

@@ -1,0 +1,59 @@
+name: Python tests
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '**.py'
+      - '.github/workflows/python-tests.yml'
+      - '.coveragerc'
+
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '**.py'
+      - '.github/workflows/python-tests.yml'
+      - '.coveragerc'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "pypy3.10"]
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install poetry
+      run: pipx install poetry
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: "poetry"
+        cache-dependency-path: poetry.lock
+
+    - name: Install dependencies
+      run: poetry install
+
+    - name: Lint with ruff
+      run: poetry run ruff check . --statistics
+
+    - name: Test with pytest
+      run: poetry run pytest --cov=./
+
+    - name: Upload coverage data to coveralls.io
+      run: |
+        pip install coveralls
+        coveralls --service=github
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

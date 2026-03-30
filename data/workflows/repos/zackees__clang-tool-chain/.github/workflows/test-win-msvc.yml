@@ -1,0 +1,262 @@
+name: win-msvc
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-windows-msvc:
+    name: Windows x64 MSVC ABI
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    # Visual Studio is pre-installed on windows-latest runners
+    # We need to set up the MSVC environment using vcvarsall.bat
+    - name: Set up MSVC environment
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Verify MSVC SDK environment
+      run: |
+        echo "Checking MSVC SDK environment variables..."
+        echo "WindowsSdkDir: $env:WindowsSdkDir"
+        echo "WindowsSDKVersion: $env:WindowsSDKVersion"
+        echo "VCToolsInstallDir: $env:VCToolsInstallDir"
+        echo "VSINSTALLDIR: $env:VSINSTALLDIR"
+        if (-not $env:WindowsSdkDir -and -not $env:VCToolsInstallDir) {
+          Write-Error "MSVC SDK environment not properly set up"
+          exit 1
+        }
+        echo "MSVC SDK environment OK"
+      shell: pwsh
+
+    - name: Install uv
+      run: |
+        irm https://astral.sh/uv/install.ps1 | iex
+        echo "$env:USERPROFILE\.cargo\bin" >> $env:GITHUB_PATH
+      shell: pwsh
+
+    - name: Install package
+      run: |
+        uv venv
+        uv pip install -e ".[dev]"
+      shell: pwsh
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Windows x64 with MSVC SDK"
+        python --version
+        python -c "import platform; print(f'System: {platform.system()}'); print(f'Machine: {platform.machine()}')"
+        echo ""
+        echo "MSVC Environment:"
+        echo "  WindowsSdkDir: $env:WindowsSdkDir"
+        echo "  VCToolsInstallDir: $env:VCToolsInstallDir"
+      shell: pwsh
+
+    - name: Download and install toolchain
+      run: |
+        uv run clang-tool-chain-cpp-msvc --version
+      shell: pwsh
+      timeout-minutes: 20
+
+    - name: Verify MSVC variant installation
+      run: |
+        uv run clang-tool-chain info
+        uv run clang-tool-chain list-tools
+        echo ""
+        echo "Testing MSVC variant commands:"
+        uv run clang-tool-chain-c-msvc --version
+        uv run clang-tool-chain-cpp-msvc --version
+      shell: pwsh
+
+    - name: Test MSVC C compilation
+      run: |
+        @"
+        #include <stdio.h>
+        int main() {
+            printf("Hello from Windows MSVC ABI (C)!\n");
+            return 0;
+        }
+        "@ | Out-File -Encoding ASCII test_msvc.c
+        uv run clang-tool-chain-c-msvc test_msvc.c -o test_msvc.exe
+        .\test_msvc.exe
+        echo "MSVC C compilation successful!"
+      shell: pwsh
+
+    - name: Test MSVC C++ compilation
+      run: |
+        @"
+        #include <iostream>
+        #include <vector>
+        #include <string>
+        int main() {
+            std::vector<std::string> msgs = {"Hello", "from", "MSVC", "C++!"};
+            for (const auto& msg : msgs) {
+                std::cout << msg << " ";
+            }
+            std::cout << std::endl;
+            return 0;
+        }
+        "@ | Out-File -Encoding ASCII test_msvc.cpp
+        uv run clang-tool-chain-cpp-msvc test_msvc.cpp -o test_msvc_cpp.exe
+        .\test_msvc_cpp.exe
+        echo "MSVC C++ compilation successful!"
+      shell: pwsh
+
+    - name: Test MSVC with Windows API
+      run: |
+        @"
+        #include <windows.h>
+        #include <iostream>
+        int main() {
+            DWORD version = GetVersion();
+            DWORD major = (DWORD)(LOBYTE(LOWORD(version)));
+            DWORD minor = (DWORD)(HIBYTE(LOWORD(version)));
+            std::cout << "Windows API test successful!" << std::endl;
+            std::cout << "Windows version: " << major << "." << minor << std::endl;
+            return 0;
+        }
+        "@ | Out-File -Encoding ASCII test_winapi.cpp
+        uv run clang-tool-chain-cpp-msvc test_winapi.cpp -o test_winapi.exe
+        .\test_winapi.exe
+        echo "Windows API compilation successful!"
+      shell: pwsh
+
+    - name: Test target triple injection
+      run: |
+        @"
+        int main() { return 0; }
+        "@ | Out-File -Encoding ASCII test_target.c
+        echo "Checking MSVC target triple injection..."
+        $output = uv run clang-tool-chain-c-msvc -v -c test_target.c 2>&1 | Out-String
+        echo $output
+        if ($output -match "x86_64-pc-windows-msvc") {
+            echo "✓ MSVC target triple correctly injected"
+        } else {
+            Write-Error "✗ MSVC target triple not found in verbose output"
+            exit 1
+        }
+      shell: pwsh
+
+    - name: Run MSVC comprehensive test suite
+      run: |
+        uv run pytest tests/test_msvc_compile.py -v --tb=short
+      shell: pwsh
+      timeout-minutes: 15
+
+    - name: Run existing MSVC tests from test_gnu_abi.py
+      run: |
+        uv run pytest tests/test_gnu_abi.py::TestMSVCABI -v --tb=short
+      shell: pwsh
+      timeout-minutes: 10
+
+    - name: Test multi-file compilation
+      run: |
+        # Create header
+        @"
+        #ifndef MATH_H
+        #define MATH_H
+        int add(int a, int b);
+        int multiply(int a, int b);
+        #endif
+        "@ | Out-File -Encoding ASCII math.h
+
+        # Create implementation
+        @"
+        #include `"math.h`"
+        int add(int a, int b) { return a + b; }
+        int multiply(int a, int b) { return a * b; }
+        "@ | Out-File -Encoding ASCII math.cpp
+
+        # Create main
+        @"
+        #include <iostream>
+        #include `"math.h`"
+        int main() {
+            std::cout << "10 + 20 = " << add(10, 20) << std::endl;
+            std::cout << "5 * 6 = " << multiply(5, 6) << std::endl;
+            return 0;
+        }
+        "@ | Out-File -Encoding ASCII main.cpp
+
+        uv run clang-tool-chain-cpp-msvc main.cpp math.cpp -o multi.exe
+        .\multi.exe
+        echo "Multi-file MSVC compilation successful!"
+      shell: pwsh
+
+    - name: Test optimization levels
+      run: |
+        @"
+        #include <iostream>
+        int fibonacci(int n) {
+            if (n <= 1) return n;
+            return fibonacci(n-1) + fibonacci(n-2);
+        }
+        int main() {
+            std::cout << "fib(10) = " << fibonacci(10) << std::endl;
+            return 0;
+        }
+        "@ | Out-File -Encoding ASCII fib.cpp
+
+        echo "Testing optimization levels..."
+        uv run clang-tool-chain-cpp-msvc -O0 fib.cpp -o fib_O0.exe
+        uv run clang-tool-chain-cpp-msvc -O2 fib.cpp -o fib_O2.exe
+        uv run clang-tool-chain-cpp-msvc -O3 fib.cpp -o fib_O3.exe
+
+        echo "Running optimized executables..."
+        .\fib_O0.exe
+        .\fib_O2.exe
+        .\fib_O3.exe
+        echo "All optimization levels work!"
+      shell: pwsh
+
+    - name: Test debug symbols
+      run: |
+        @"
+        #include <iostream>
+        void debug_function() {
+            std::cout << "Debug build test" << std::endl;
+        }
+        int main() {
+            debug_function();
+            return 0;
+        }
+        "@ | Out-File -Encoding ASCII debug.cpp
+
+        uv run clang-tool-chain-cpp-msvc -g debug.cpp -o debug.exe
+        .\debug.exe
+        echo "Debug symbols compilation successful!"
+      shell: pwsh
+
+    - name: Summary
+      if: always()
+      run: |
+        echo "================================================"
+        echo "Windows MSVC ABI Test Summary"
+        echo "================================================"
+        echo "All MSVC compilation tests completed!"
+        echo ""
+        echo "Tested features:"
+        echo "  ✓ MSVC variant commands (clang-tool-chain-c-msvc, clang-tool-chain-cpp-msvc)"
+        echo "  ✓ Target triple injection (x86_64-pc-windows-msvc)"
+        echo "  ✓ Basic C/C++ compilation"
+        echo "  ✓ Windows API headers"
+        echo "  ✓ Multi-file compilation"
+        echo "  ✓ Optimization levels (-O0, -O2, -O3)"
+        echo "  ✓ Debug symbols (-g)"
+        echo "  ✓ C++ standard library (STL)"
+        echo "  ✓ Comprehensive test suite (test_msvc_compile.py)"
+        echo "================================================"
+      shell: pwsh

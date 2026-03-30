@@ -1,0 +1,19 @@
+name: Run the actionlint
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.yaml'
+      - '**.yml'
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  run_actionlint_with_reviewdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run the actionlint
+        uses: reviewdog/action-actionlint@v1.57.0

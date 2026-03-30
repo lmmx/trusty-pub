@@ -1,0 +1,20 @@
+name: Upload PR Documentation
+
+on:
+  workflow_run:
+    workflows: ["Build PR Documentation"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: write # Allows posting comments on pull requests
+
+jobs:
+  build:
+    uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@main
+    with:
+      package_name: bitsandbytes
+    secrets:
+      hf_token: ${{ secrets.HUGGINGFACE_PUSH }}
+      comment_bot_token: ${{ secrets.GITHUB_TOKEN }}

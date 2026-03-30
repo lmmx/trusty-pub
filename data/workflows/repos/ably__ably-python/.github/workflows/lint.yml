@@ -1,0 +1,37 @@
+name: Linting check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version: '3.9'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - uses: actions/cache@v4
+        name: Define a cache for the virtual environment based on the dependencies lock file
+        id: cache
+        with:
+          path: ./.venv
+          key: venv-${{ runner.os }}-3.9-${{ hashFiles('uv.lock') }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Lint with ruff
+        run: uv run ruff check

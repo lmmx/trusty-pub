@@ -1,0 +1,92 @@
+name: Cleanup
+
+on:
+  schedule:
+    # Run on the 1st of every month at 00:00 UTC
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (show what would be deleted without deleting)'
+        required: false
+        default: true
+        type: boolean
+      keep_recent:
+        description: 'Number of recent dev releases to keep'
+        required: false
+        default: '5'
+        type: string
+
+jobs:
+  cleanup-releases:
+    name: Cleanup Dev Releases
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup GitHub CLI
+        run: gh auth status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Cleanup prerelease releases and tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run }}
+          KEEP_RECENT: ${{ inputs.keep_recent || '5' }}
+        run: |
+          set -e
+          
+          echo "=== Cleanup Configuration ==="
+          echo "Dry run: $DRY_RUN"
+          echo "Keep recent: $KEEP_RECENT dev releases"
+          echo ""
+          
+          # Get all prerelease releases, sorted by creation date (oldest first)
+          # Skip the most recent N prereleases
+          echo "=== Fetching prerelease releases ==="
+          PRERELEASES=$(gh release list --limit 1000 --json tagName,isPrerelease,createdAt \
+            --jq "[.[] | select(.isPrerelease == true)] | sort_by(.createdAt) | reverse | .[$KEEP_RECENT:] | .[].tagName" \
+            2>/dev/null || echo "")
+          
+          if [ -z "$PRERELEASES" ]; then
+            echo "No prerelease releases to clean up (keeping $KEEP_RECENT most recent)"
+            exit 0
+          fi
+          
+          echo "Found prereleases to delete:"
+          echo "$PRERELEASES" | head -20
+          TOTAL=$(echo "$PRERELEASES" | wc -l)
+          echo "... ($TOTAL total)"
+          echo ""
+          
+          # Delete each prerelease and its tag
+          echo "=== Deleting releases and tags ==="
+          for TAG in $PRERELEASES; do
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "[DRY RUN] Would delete release and tag: $TAG"
+            else
+              echo "Deleting release: $TAG"
+              gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || echo "  Warning: Failed to delete $TAG"
+            fi
+          done
+          
+          echo ""
+          echo "=== Cleanup complete ==="
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "This was a dry run. No releases were deleted."
+            echo "Run with dry_run=false to actually delete."
+          else
+            echo "Deleted $TOTAL prerelease releases and their tags."
+          fi
+
+  # Note: PyPI does not allow deletion of packages via API for security reasons.
+  # Old dev versions will remain on PyPI but won't be installed by default
+  # (users need --pre flag to install dev versions).
+  # 
+  # If you need to remove packages from PyPI, you must:
+  # 1. Go to https://pypi.org/manage/project/simple-rdp/releases/
+  # 2. Manually delete specific versions (only within 24 hours of upload)
+  # 3. Or use "yank" to hide versions from pip install (they remain downloadable by exact version)

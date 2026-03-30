@@ -1,0 +1,58 @@
+name: Build Binder Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'binder/**'
+      - '.github/workflows/build-binder.yml'
+
+# When a PR is updated, cancel the jobs from the previous version. Merges
+# do not define head_ref, so use run_id to never cancel those jobs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  repo2docker:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+    - name: Build Binder Image
+      uses: jupyterhub/repo2docker-action@69702685940e406c5bc32bc26395bbacda7ec9d3 # 0.21
+      id: dkr
+      with:
+        IMAGE_NAME: kirillodc/odc-stac-binder
+        DOCKER_USERNAME: kirillodc
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Print Notice
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      env:
+        DKR: ${{ steps.dkr.outputs.IMAGE_SHA_NAME }}
+      with:
+        script: |
+          const {DKR} = process.env
+          core.notice(`Built Docker Image: '${DKR}'`)
+
+    - name: Dump conda environment
+      run: |
+        echo "# ${DKR}" > /tmp/environment.yaml
+        docker run --rm \
+          --entrypoint /srv/conda/envs/notebook/bin/mamba \
+          ${DKR} \
+          env export | tee --append /tmp/environment.yaml
+      env:
+          DKR: ${{ steps.dkr.outputs.IMAGE_SHA_NAME }}
+
+    - name: Publish environment.yaml artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: environment
+        path: /tmp/environment.yaml
+        if-no-files-found: error

@@ -1,0 +1,48 @@
+name: Test huggingface_hub xet tests
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hub-python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      # checkout out xet-core
+      - uses: actions/checkout@v6
+      # checkout out huggingface_hub
+      - uses: actions/checkout@v6
+        with:
+          repository: huggingface/huggingface_hub
+          path: huggingface_hub
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - name: Create venv
+        run: python3 -m venv .venv
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: develop
+          sccache: 'true'
+          working-directory: hf_xet
+      - name: Install huggingface_hub dependencies
+        run: |
+          source .venv/bin/activate
+          python3 -m pip install -e 'huggingface_hub[testing]'
+      - name: Run huggingface_hub xet tests
+        run: |
+          source .venv/bin/activate
+          pytest huggingface_hub/tests/test_xet_*.py
+      - name: Check Cargo.lock has no uncommitted changes
+        run: |
+          # the Build wheel step would update hf_xet/Cargo.lock if it is out of date
+          test -z "$(git status --porcelain hf_xet/Cargo.lock)" || (echo "hf_xet/Cargo.lock has uncommitted changes!" && exit 1)

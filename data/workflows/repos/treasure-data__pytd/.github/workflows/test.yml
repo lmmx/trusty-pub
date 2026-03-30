@@ -1,0 +1,87 @@
+name: Build
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  create:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: "3.13"
+    - name: Run linting
+      run: uvx nox --session lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: "3.13"
+    - name: Run type checking
+      run: uvx nox --session typecheck
+
+  build:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      max-parallel: 4
+      matrix:
+        include:
+          # Core combinations - test key Python versions with supported pandas
+          - os: ubuntu-latest
+            python-version: "3.11"
+            pandas-version: "2.3.3"
+          - os: ubuntu-latest
+            python-version: "3.13"
+            pandas-version: "2.3.3"
+          - os: ubuntu-latest
+            python-version: "3.14"
+            pandas-version: "2.3.3"
+
+          # Windows compatibility check - minimal but important
+          - os: windows-latest
+            python-version: "3.11"
+            pandas-version: "2.3.3"
+          - os: windows-latest
+            python-version: "3.14"
+            pandas-version: "2.3.3"
+
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Run unit tests
+      run: |
+        uvx nox --session "tests(python='${{ matrix.python-version }}', pandas='${{ matrix.pandas-version }}')"
+      env:
+        TD_API_KEY: 1/XXX
+        TD_API_SERVER: https://api.treasure-data.com/
+
+  dist-dry-run:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: '3.14'
+    - name: Build and check dist for PyPI (a.k.a dry run)
+      run: |
+        uv build
+        uvx twine check dist/*

@@ -1,0 +1,78 @@
+name: clang-sccache-linux-x86
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-clang-sccache-linux-x86:
+    name: Clang + sccache (Linux x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install package with sccache support
+      run: |
+        uv venv
+        uv pip install -e ".[dev,sccache]"
+
+    - name: Display platform information
+      run: |
+        echo "Platform: Linux x86_64 with sccache"
+        uname -a
+        python --version
+
+    - name: Download and install toolchain
+      run: |
+        uv run clang-tool-chain-c --version
+      timeout-minutes: 20
+
+    - name: Verify sccache installation
+      run: |
+        uv run clang-tool-chain-sccache --version
+        uv run clang-tool-chain-sccache --show-stats
+
+    - name: Test C compilation with sccache
+      run: |
+        cat > test_sccache.c << 'EOF'
+        #include <stdio.h>
+        int main() {
+            printf("Hello from Linux x86_64 with sccache!\n");
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-sccache-c test_sccache.c -o test_sccache
+        ./test_sccache
+
+    - name: Test C++ compilation with sccache
+      run: |
+        cat > test_sccache.cpp << 'EOF'
+        #include <iostream>
+        int main() {
+            std::cout << "Hello C++ from Linux x86_64 with sccache!" << std::endl;
+            return 0;
+        }
+        EOF
+        uv run clang-tool-chain-sccache-cpp test_sccache.cpp -o test_sccache_cpp
+        ./test_sccache_cpp
+
+    - name: Check sccache statistics
+      run: |
+        uv run clang-tool-chain-sccache --show-stats
+
+    - name: Run integration tests
+      run: |
+        uv run pytest tests/test_integration.py -v

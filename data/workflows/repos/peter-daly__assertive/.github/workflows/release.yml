@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+    
+
+permissions:
+  # Required for tagging
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v2.4.0
+
+      - name: Verify main branch
+        run: |
+          if [[ "$(git branch --show-current)" != "main" ]]; then
+            echo "This workflow is only allowed on the main branch.";
+            exit 1;
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v4.6.0
+        with:
+          python-version: "3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Extract version from pyproject.toml
+        id: get_version
+        run: |
+          echo "PACKAGE_VERSION=$(uv version --short)" >> $GITHUB_ENV
+
+      - name: Publish package on PyPI
+        run: |
+          uv build
+          uv publish --token ${{ secrets.PYPI_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+      - name: Create Git tag
+        run: git tag v${{ env.PACKAGE_VERSION }}
+
+      - name: Push tag
+        run: git push origin v${{ env.PACKAGE_VERSION }}

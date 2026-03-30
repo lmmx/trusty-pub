@@ -1,0 +1,92 @@
+name: Build wheels
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - v*
+
+  pull_request:
+    branches: [ main ]
+    # only run on pull requests that change a C file or build system
+    paths:
+    - '**.c'
+    - setup.py
+    - setup.cfg
+    - pyproject.toml
+    - .github/workflows/wheels.yml
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.archs }} for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-24.04-arm]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: ${{ matrix.archs == 'aarch64' }}
+        uses: docker/setup-qemu-action@v3
+
+      - uses: actions/setup-python@v5
+        name: Install Python
+        with:
+          python-version: '3.8'
+
+      - name: Build wheels
+        uses: joerick/cibuildwheel@v3.3.1
+        env:
+          CIBW_SKIP: pp*
+          CIBW_ARCHS_MACOS: auto universal2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        name: Install Python
+        with:
+          python-version: '3.8'
+
+      - name: Check manifest
+        run: pipx run check-manifest
+
+      - name: Build sdist
+        run: python setup.py sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  upload_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    # upload to PyPI on every tag starting with 'v'
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pyinstrument
+    permissions:
+      id-token: write
+      attestations: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          # unpacks all CIBW artifacts into dist/
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

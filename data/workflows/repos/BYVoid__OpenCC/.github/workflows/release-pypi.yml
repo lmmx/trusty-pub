@@ -1,0 +1,54 @@
+name: Build and upload python package to PyPI
+
+on:
+  workflow_dispatch
+
+jobs:
+  release-pypi:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Compute version
+      id: version
+      shell: bash
+      run: |
+        VERSION=$(bash scripts/compute-version.sh)
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Computed version: $VERSION"
+
+    - name: Build package and upload from docker (Linux)
+      if: runner.os == 'Linux'
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        docker run --rm -v "${PWD}:/opt/OpenCC" \
+          -e TWINE_USERNAME \
+          -e TWINE_PASSWORD \
+          -e VERSION=${VERSION} \
+          ubuntu:22.04 /bin/bash /opt/OpenCC/release-pypi-linux.sh
+
+    - name: Build package and upload (macOS)
+      if: runner.os == 'macOS'
+      run: bash release-pypi-macos.sh
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+    - name: Build package and upload (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        C:\Miniconda/condabin/conda.bat init powershell
+        ./release-pypi-windows.cmd
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}

@@ -1,0 +1,76 @@
+name: CI
+
+# This action runs through ImageIO's continous integration pipeline. It
+# performs the following checks:
+# 
+# - Linting/Style (Black)
+# - Invokes the unit tests in no-internet mode on python 3.12
+# - runs unit test on cypthon in matrix mode (python 3.X) x (3 major OS)
+# - runs unit tests on pypy in matrix mode (pypy 3.X) x (3 major OS)
+
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-GH:
+    name: Build Docs
+    uses: ./.github/workflows/build_docs.yml
+
+  style:
+    name: "Linting"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+      - uses: psf/black@26.3.0
+        with:
+          args: ". --check"
+      - name: Install Dependencies
+        shell: bash
+        run: |
+            pip install .[linting]
+      - name: Flake8
+        uses: liskin/gh-problem-matcher-wrap@v2
+        with:
+          linters: flake8
+          run: flake8 .
+
+  no-internet:
+    name: "No-Internet Install"
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Dependencies
+        run: |
+            # Build to force downloading images (but this step needs numpy and pillow)
+            pip install -q --upgrade numpy pillow build
+            python -m build
+            pip install .[test,all-plugins]
+            # Delete the local copy, so we're actually using the installed version
+            rm -rf ./imageio ./build ./egg-info
+      - name: Unit tests
+        run: |
+            pytest -v -m "not needs_internet"
+        env:
+          IMAGEIO_NO_INTERNET: 1
+
+  cpython:
+    name: CPython Test Suite
+    uses: ./.github/workflows/cpython_tests.yml
+
+  pypy:
+    name: PyPy Test Suite
+    uses: ./.github/workflows/pypy_tests.yml

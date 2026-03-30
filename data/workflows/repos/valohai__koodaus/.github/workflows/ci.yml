@@ -1,0 +1,34 @@
+name: CI
+"on":
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+jobs:
+  Test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.7"
+          - "3.10"
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "${{ matrix.python-version }}"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e .[test]
+      - run: py.test -vvv --cov .
+      - uses: codecov/codecov-action@v3
+  Lint:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - uses: actions/checkout@v3
+      - uses: pre-commit/action@v3.0.0

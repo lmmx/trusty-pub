@@ -1,0 +1,30 @@
+name: Lint and docs
+
+on: [push, pull_request]
+
+jobs:
+  lint_and_docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -qy libdw-dev libelf-dev
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install -r requirements-extra.txt
+      - name: Install Package
+        run: |
+          python3 -m pip install -e .
+      - name: Lint sources
+        run: |
+          make lint PYTHON=python3
+          python3 -m pre_commit run --all-files --hook-stage pre-push
+      - name: Build docs
+        run: |
+          towncrier build --version 99.99 --name pystack --keep
+          make docs

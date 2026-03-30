@@ -1,0 +1,28 @@
+---
+name: test-wf
+on:
+  pull_request:
+  push:
+    tags-ignore:
+      - v*
+jobs:
+  test-all:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install logistro
+        run:  uv sync --dev
+
+      - name: Test
+        if: ${{ ! runner.debug }}
+        run: uv run poe test
+        timeout-minutes: 7
+
+      - name: Test (Debug)
+        if: runner.debug
+        run: uv run poe debug-test

@@ -1,0 +1,73 @@
+---
+name: pyudev CI
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+
+jobs:
+  python-checks:
+    strategy:
+      matrix:
+        include:
+          # MANDATORY CHECKS USING CURRENT DEVELOPMENT INTERPRETER
+          - python-version: "3.12"
+            dependencies: pytest hypothesis
+            task: PYTHONPATH=./src make -f Makefile test-travis
+          # MANDATORY CHECKS USING LOWEST SUPPORTED INTERPRETER
+          - python-version: "3.10"
+            dependencies: pytest hypothesis
+            task: PYTHONPATH=./src make -f Makefile test-travis
+          # MANDATORY CHECKS USING PYPY INTERPRETER
+          - python-version: pypy-3.9
+            dependencies: pytest hypothesis
+            task: PYTHONPATH=./src make -f Makefile test-travis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get -q update
+          sudo apt-get -y install libudev-dev
+      - name: Install dependencies
+        run: pip3 install ${{ matrix.dependencies }}
+      - name: Run test
+        run: ${{ matrix.task }}
+
+  development_environment_checks:
+    strategy:
+      matrix:
+        include:
+          - dependencies: black python3-isort
+            task: fmt-travis
+          - dependencies: yamllint
+            task: yamllint
+          - dependencies: python python3-build twine
+            task: package
+          - dependencies: pylint python3-setuptools
+            task: lint
+    runs-on: ubuntu-latest
+    container: fedora:42  # CURRENT DEVELOPMENT ENVIRONMENT
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        run: >
+          dnf install -y
+          make
+          ${{ matrix.dependencies }}
+      - name: Run test
+        run: make -f Makefile ${{ matrix.task }}

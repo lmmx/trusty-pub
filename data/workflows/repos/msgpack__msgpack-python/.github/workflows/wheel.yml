@@ -1,0 +1,105 @@
+name: Build sdist and Wheels
+on:
+  push:
+    branches: [main]
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    strategy:
+      matrix:
+        # macos-13 is for intel
+        include:
+        - os: ubuntu-24.04
+        - os: ubuntu-24.04-arm
+        - os: windows-latest
+        - os: windows-11-arm
+        - os: macos-13
+        - os: macos-latest
+        - os: ubuntu-24.04
+          cibw_archs: riscv64
+          name_suffix: "-riscv64"
+
+    runs-on: ${{ matrix.os }}
+    name: Build wheels on ${{ matrix.os }}${{ matrix.name_suffix || '' }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+          cache: "pip"
+      - name: Cythonize
+        shell: bash
+        run: |
+          pip install -r requirements.txt
+          make cython
+
+      - name: Set up QEMU for emulation
+        if: matrix.cibw_archs == 'riscv64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.cibw_archs }}
+
+      - name: Build
+        uses: pypa/cibuildwheel@v3.3.0
+        env:
+          CIBW_TEST_REQUIRES: "pytest"
+          CIBW_TEST_COMMAND: "pytest {package}/test"
+          CIBW_SKIP: "pp* cp38-* cp39-* cp310-win_arm64"
+          CIBW_ARCHS: ${{ matrix.cibw_archs || 'auto' }}
+
+      - name: Build sdist
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        run: |
+          pip install build
+          python -m build -s -o wheelhouse
+
+      - name: Upload Wheels to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}${{ matrix.name_suffix || '' }}
+          path: wheelhouse
+
+  # combine all wheels into one artifact
+  combine_wheels:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          # unpacks all CIBW artifacts into dist/
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Upload Wheels to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-all
+          path: dist
+
+  # https://github.com/pypa/cibuildwheel/blob/main/examples/github-deploy.yml
+  upload_pypi:
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    if: github.event_name == 'release' && github.event.action == 'published'
+    # or, alternatively, upload to PyPI on every tag starting with 'v' (remove on: release above to use this)
+    # if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          # unpacks all CIBW artifacts into dist/
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        #with:
+        # To test: repository-url: https://test.pypi.org/legacy/

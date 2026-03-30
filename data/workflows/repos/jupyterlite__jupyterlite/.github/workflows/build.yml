@@ -1,0 +1,214 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+
+      - name: Install build dependencies
+        run: python -m pip install --group build
+
+      - name: Install JS dependencies
+        run: jlpm install
+
+      - name: Build
+        run: jlpm build:prod
+
+      - name: Pack app
+        run: jlpm pack:app
+
+      - name: Build wheel
+        run: jlpm build:py
+
+      - name: Upload (dist)
+        uses: actions/upload-artifact@v7
+        with:
+          name: jupyterlite dist ${{ github.run_number }}
+          path: ./dist
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+
+      - name: Install Python dependencies
+        run: python -m pip install --group lint --group dev
+
+      - name: Install JS dependencies
+        run: jlpm
+
+      - name: Lint
+        run: jlpm lint:check
+
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      - name: Install dependencies
+        run: python -m pip install --group build
+      - name: Install dependencies
+        run: jlpm
+      - name: Check yarn.lock deduplication
+        shell: bash -el {0}
+        run: |
+          jlpm deduplicate
+          git diff --exit-code yarn.lock
+      - name: Check app resolutions
+        run: jlpm integrity:check
+
+  typedoc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      - name: Install Python dependencies
+        run: python -m pip install --group dev
+      - name: Install JS dependencies
+        run: jlpm
+      - name: Build lib
+        run: jlpm build:lib
+      - name: Docs (typedoc)
+        run: jlpm docs
+      - name: Upload (typedoc)
+        uses: actions/upload-artifact@v7
+        with:
+          name: jupyterlite typedoc ${{ github.run_number }}
+          path: ./docs/reference/api/ts
+
+  test:
+    needs: [build]
+    runs-on: ${{ matrix.os }}-latest
+    defaults:
+      run:
+        shell: bash -eux {0}
+    env:
+      PYTHONUTF8: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu, windows, macos]
+        python-version: ['3.10', '3.14', 'pypy-3.11']
+        exclude:
+          - os: windows
+            python-version: pypy-3.11
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+        with:
+          python_version: ${{ matrix.python-version }}
+      - name: Download (dist)
+        uses: actions/download-artifact@v8
+        with:
+          name: jupyterlite dist ${{ github.run_number }}
+          path: ./dist
+      - name: Install (py)
+        run: |
+          python -m pip install ./dist/jupyterlite*.whl
+          python -m pip check
+      - name: Prepare smoke test folder
+        run: mkdir -p build/smoke-test
+      - name: Get SOURCE_DATE_EPOCH
+        id: source-date
+        run: echo "epoch=$(git log -1 --format=%ct)" >> $GITHUB_OUTPUT
+      - name: Test (CLI)
+        run: |
+          cd build/smoke-test
+          jupyter lite --version || exit 1
+          jupyter lite --help || exit 1
+          jupyter lite list || exit 1
+          jupyter lite status || exit 1
+          jupyter lite build || exit 1
+          jupyter lite check || exit 1
+          jupyter lite archive --source-date-epoch ${{ steps.source-date.outputs.epoch }} || exit 1
+          jupyter lite list || exit 1
+          jupyter lite status --debug || exit 1
+      - name: Install test dependencies
+        run: python -m pip install --group test
+      - name: Pin pytest for pypy
+        if: ${{ matrix.python-version == 'pypy-3.11' }}
+        run: |
+          python -m pip install "pytest<8" --prefer-binary
+          echo 'See https://github.com/jupyterlite/jupyterlite/issues/1308' >> $GITHUB_STEP_SUMMARY
+      - name: Test (py)
+        run: |
+          python -m pytest --pyargs jupyterlite_core -v --script-launch-mode=subprocess --cov=jupyterlite_core --cov-report=html:build/htmlcov --cov-report=term-missing --cov-fail-under=82
+      - name: Upload (reports)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: |
+            jupyterlite reports ${{ github.run_number }} ${{ matrix.os }} ${{ matrix.python-version }}
+          path: |
+            build/htmlcov
+            build/pytest
+
+  docs:
+    needs: [build, typedoc]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -eux {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Download (dist)
+        uses: actions/download-artifact@v8
+        with:
+          name: jupyterlite dist ${{ github.run_number }}
+          path: ./dist
+      - name: Download (typedoc)
+        uses: actions/download-artifact@v8
+        with:
+          name: jupyterlite typedoc ${{ github.run_number }}
+          path: ./docs/reference/api/ts
+      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      - name: Install (py)
+        run: python -m pip install ./dist/jupyterlite*.whl
+      - name: Install Python dependencies
+        run:
+          python -m pip install --group docs --group dev --group test -r
+          examples/requirements-demo.txt
+      - name: Install JS dependencies
+        run: jlpm
+      - name: Docs (app)
+        run: jupyter lite build --contents examples --output-dir build/docs-app
+      - name: Upload (docs app)
+        uses: actions/upload-artifact@v7
+        with:
+          name: jupyterlite docs app ${{ github.run_number }}
+          path: build/docs-app
+      - name: Docs (sphinx)
+        run: jlpm docs:build
+      - name: Check Built Artifacts
+        run:
+          python -m pytest --check-links docs/_build/html --check-links-ignore
+          "https://github.com/.*" --check-links-ignore "https://pypi.org/.*"
+          --check-links-ignore "https://www.sphinx-doc.org/.*" --check-links-ignore
+          "https://jupyterlite.readthedocs.io/.*" -q
+      - name: Upload (sphinx logs)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jupyterlite sphinx logs ${{ github.run_number }}
+          if-no-files-found: ignore
+          path: /tmp/sphinx-*.log

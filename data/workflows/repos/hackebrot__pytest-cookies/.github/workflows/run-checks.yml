@@ -1,0 +1,48 @@
+name: Run checks
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  tox:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
+        environment: ["py37", "py38", "py39", "py310", "py311", "flake8"]
+
+        include:
+          - environment: "py37"
+            python: "3.7"
+          - environment: "py38"
+            python: "3.8"
+          - environment: "py39"
+            python: "3.9"
+          - environment: "py310"
+            python: "3.10"
+          - environment: "py311"
+            python: "3.11"
+          - environment: "flake8"
+            python: "3.7"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install tox
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox
+    - name: Run tox
+      run: |
+        tox -e ${{ matrix.environment }}

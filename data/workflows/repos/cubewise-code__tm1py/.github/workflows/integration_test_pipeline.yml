@@ -1,0 +1,86 @@
+name: TM1Py Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      code_reference:
+        description: 'PR number (e.g., #612) or branch name (e.g., master or bugfix_123 ) to test'
+        required: true
+        default: 'master'
+      environments:
+        description: 'JSON array of environments to test (e.g., ["tm1-11-cloud", "tm1-11-cloud"])'
+        required: true
+        default: '["tm1-12-cloud","tm1-11-cloud"]'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: ${{ fromJson(inputs.environments) }}
+    environment: ${{ matrix.environment }}
+    steps:
+      - name: Determine ref and PR number
+        id: determine-ref
+        shell: bash
+        run: |
+          code_ref='${{ inputs.code_reference }}'
+          if [[ "$code_ref" == \#* ]]; then
+            pr_number="${code_ref#\#}"
+            echo "Detected PR number: $pr_number"
+            echo "ref=refs/pull/$pr_number/merge" >> $GITHUB_OUTPUT
+            echo "pr_number=$pr_number" >> $GITHUB_OUTPUT
+          else
+            echo "Detected branch name: $code_ref"
+            echo "ref=$code_ref" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ steps.determine-ref.outputs.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .[pandas,dev]
+
+      - name: Retrieve TM1 Connection Details
+        run: echo "Retrieving TM1 connection details"
+        env:
+          TM1_CONNECTION: ${{ vars.TM1_CONNECTION }}
+          TM1_CONNECTION_SECRET: ${{ secrets.TM1_CONNECTION_SECRET }}
+
+      - name: Generate config.ini
+        run: |
+          python Tests/resources/generate_config.py
+        env:
+          TM1_CONNECTION: ${{ vars.TM1_CONNECTION }}
+          TM1_CONNECTION_SECRET: ${{ secrets.TM1_CONNECTION_SECRET }}
+
+      - name: Run tests
+        run: pytest Tests/
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.environment }}
+          path: Tests/test-reports/
+
+      - name: Post comment to PR
+        if: ${{ always() && steps.determine-ref.outputs.pr_number }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.determine-ref.outputs.pr_number }},
+              body: 'Tests completed for environment: ${{ matrix.environment }}. Check artifacts for details.'
+            })

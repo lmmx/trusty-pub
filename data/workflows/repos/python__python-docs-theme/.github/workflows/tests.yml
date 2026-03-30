@@ -1,0 +1,95 @@
+name: Tests
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions: {}
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  build_doc:
+    name: Build CPython docs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.15", "3.14", "3.13", "3.12"]
+        include:
+          - python-version: "3.15"
+            branch: "main"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+          cache: pip
+      - name: Clone docsbuild scripts
+        run: |
+          git clone https://github.com/python/docsbuild-scripts/
+      - name: Set up requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r docsbuild-scripts/requirements.txt
+      - name: Build documentation
+        run: >
+          python ./docsbuild-scripts/build_docs.py
+          --quick
+          --build-root ./build_root
+          --www-root ./www
+          --log-directory ./logs
+          --group "$(id -g)"
+          --skip-cache-invalidation
+          --theme "$(pwd)"
+          --languages en
+          --branches ${{ matrix.branch || matrix.python-version }}
+          ${{ matrix.branch == 'main' && '--select-output no-html' || '' }}
+      - name: Show logs
+        if: failure()
+        run: |
+          cat ./logs/docsbuild.log
+      - name: Upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: doc-html-${{ matrix.python-version }}
+          path: www/
+
+  translations:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "windows-latest"]
+        # Test minimum supported and latest stable from 3.x series
+        python-version: ["3.12", "3"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Remove locale file for testing
+        shell: bash
+        run: rm -rf python_docs_theme/locale/pt_BR/
+      - run: python babel_runner.py extract
+      - run: python babel_runner.py init -l pt_BR
+      - run: python babel_runner.py update
+      - run: python babel_runner.py update -l pt_BR
+      - run: python babel_runner.py compile
+      - run: python babel_runner.py compile -l pt_BR
+      - name: Print .pot file
+        shell: bash
+        run: cat python_docs_theme/locale/python-docs-theme.pot
+      - name: Print .po file
+        shell: bash
+        run: cat python_docs_theme/locale/pt_BR/LC_MESSAGES/python-docs-theme.po

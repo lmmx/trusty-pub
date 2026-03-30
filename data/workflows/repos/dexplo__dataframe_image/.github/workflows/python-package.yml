@@ -1,0 +1,170 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Python package
+
+on:
+  push:
+    branches: [ master ]
+    tags:
+      - v*
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.8", "3.12"]
+        include:
+        - os: ubuntu-latest
+          pippath: ~/.cache/pip
+        - os: macos-latest
+          pippath: ~/Library/Caches/pip
+        - os: windows-latest
+          pippath: ~\AppData\Local\pip\Cache
+#         include:
+#           - os: macos-latest
+#             python-version: "3.10"
+    steps:
+    - uses: actions/checkout@v4
+         
+#     - name: Get MacTeX Version
+#       if: ${{ startsWith(matrix.os, 'macos') }}
+#       run: echo "TEX_VER=$(brew info mactex | grep -E -o '\d+\.\d+')" >> $GITHUB_ENV
+    
+#     - name: MacTeX Cache
+#       if: ${{ startsWith(matrix.os, 'macos') }}
+#       uses: actions/cache@v3.0.8
+#       env:
+#         cache-name: cache-brew
+#       with:
+#         # A list of files, directories, and wildcard patterns to cache and restore
+#         path: |
+#           ~/Library/Caches/Homebrew
+#           ~/Library/Caches/Homebrew/Casks
+#         # An explicit key for restoring and saving the cache
+#         key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ env.TEX_VER }}
+# #         # An ordered list of keys to use for restoring stale cache if no cache hit occurred for key. Note `cache-hit` returns false in this case.
+# #         restore-keys: # optional
+        
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - uses: actions/cache@v3
+      with:
+        path: ${{ matrix.pippath }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('setup.py') }}
+        restore-keys: |
+         ${{ runner.os }}-pip-${{ matrix.python-version }}
+
+    - name: Set up Homebrew
+      if: ${{ startsWith(matrix.os, 'macos') }}
+      id: set-up-homebrew
+      uses: Homebrew/actions/setup-homebrew@master
+
+    - name: Setup TeX Live
+      uses: TeX-Live/setup-texlive-action@v3
+      with:
+        cache: true
+        packages: >-
+          scheme-basic
+          collection-xetex
+          collection-fontsrecommended
+          collection-mathscience
+          collection-pictures
+          collection-latexextra
+        repository: https://mirrors.tuna.tsinghua.edu.cn/tex-historic-archive/systems/texlive/2023/tlnet-final/
+        version: 2023
+
+            
+    - name: windows denpendencies
+      if: ${{ startsWith(matrix.os, 'windows') }}
+      run: |
+        choco install pandoc --version 3.1 --no-progress
+        Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
+        refreshenv
+    - name: ubuntu dependencies
+      if: startsWith(matrix.os, 'ubuntu')
+      run: |
+        sudo apt-get install -y xvfb libgtk2.0-0 libnotify-dev libnss3 libxss1 curl
+        sudo apt-get install -y pandoc
+    - name: mac dependencies
+      if: ${{ startsWith(matrix.os, 'macos') }}
+      # fix pandoc version to 3.1.6 until https://github.com/jupyter/nbconvert/issues/2164 fixed
+      run: |
+        brew update
+        brew install pandoc
+
+    - name: Pin numpy for Python 3.8
+      if: ${{ matrix.python-version == '3.8' }}
+      run: |
+        python -m pip install "numpy<2"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip wheel
+        pip install "pytest<9" pytest-asyncio matplotlib jupyter pandoc playwright selenium html2image 
+        pip install .[all] --upgrade
+        pip install chromedriver-autoinstaller
+        python -c 'import chromedriver_autoinstaller; chromedriver_autoinstaller.install()'
+    - name: mac nbconvert patch fix # this is a tmp fix, related to https://github.com/jupyter/nbconvert/issues/1773
+      if: ${{ startsWith(matrix.os, 'macos') }}
+      run: |
+        mkdir -p ~/Library/Jupyter
+        ln -s /opt/homebrew/share/jupyter/nbconvert ~/Library/Jupyter
+    - name: playwright install # install chromium
+      run: |
+        playwright install chromium --with-deps
+    - name: Test with pytest
+      env:
+        DEBUG: "1"
+      run: |
+        # sed 's/:/\n/g' <<< "$PATH"    # show path
+        pytest
+        
+    # upload tmp.zip if fails
+    - name: upload failed notebook.tex
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: failed_notebook_${{ matrix.os }}_${{ matrix.python-version }}
+        path: notebook.tex
+        
+    - name: Upload pdf
+      uses: actions/upload-artifact@v4
+      with:
+        name: test_output_${{ matrix.os }}_${{ matrix.python-version }}
+        path: tests/test_output
+        
+  publish:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    
+    - name: build
+      run: |
+        pip install -U pip wheel build setuptools
+        python3 -m build --wheel
+        
+    - name: Publish package
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        
+    # - name: publish-to-conda
+    #   if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    #   uses: maxibor/conda-package-publish-action@v1.1
+    #   with:
+    #     subDir: 'conda'
+    #     AnacondaToken: ${{ secrets.ANACONDA_TOKEN }}

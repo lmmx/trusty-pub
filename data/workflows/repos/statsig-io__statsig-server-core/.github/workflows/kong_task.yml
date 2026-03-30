@@ -1,0 +1,127 @@
+name: Kong (Task)
+
+on:
+  workflow_call:
+    inputs:
+      sdk:
+        type: string
+        description: The SDK to build
+        required: true
+
+env:
+  REPO_PAT: ${{ secrets.KONG_FINE_GRAINED_REPO_PAT }}
+  FORCE_COLOR: true
+  test_api_key: ${{ secrets.KONG_SERVER_SDK_KEY }}
+  test_client_key: ${{ secrets.KONG_CLIENT_SDK_KEY }}
+  KONG_OPS_SDK_KEY: ${{ secrets.BENCH_CLUSTER_SDK_KEY }}
+
+jobs:
+  build:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    outputs:
+      hash: ${{ steps.gen_hash.outputs.hash }}
+    steps:
+      - name: Clone Kong Repo
+        run: git clone https://oauth2:$REPO_PAT@github.com/statsig-io/kong.git .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup SDK Bridge
+        id: gen_hash
+        run: |
+          npm ci
+          npm run kong -- setup ${{ inputs.sdk }} -v
+          npm run kong -- bridge_hash ${{ inputs.sdk }} -v
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Check if Docker Image Exists
+        id: check_image
+        run: |
+          IMAGE="statsig/sdk-bridge:${{ steps.gen_hash.outputs.hash }}"
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "Image $IMAGE exists."
+            echo "needs_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "Image $IMAGE does not exist."
+            echo "needs_build=true" >> $GITHUB_OUTPUT
+          fi
+
+      # ------------------------------------------------------------ [ Rebuild ]
+
+      - name: "[Rebuild] Cache Docker Layers"
+        if: steps.check_image.outputs.needs_build == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/.buildx-cache
+          key: ${{ inputs.sdk }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ inputs.sdk }}-buildx-
+
+      - name: "[Rebuild] Build and Push Docker Image"
+        if: steps.check_image.outputs.needs_build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: bridges/${{ inputs.sdk }}-bridge
+          push: true
+          tags: statsig/sdk-bridge:${{ steps.gen_hash.outputs.hash }}
+          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
+          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
+
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: "[Rebuild] Move Docker Layers Cache"
+        if: steps.check_image.outputs.needs_build == 'true'
+        run: |
+          rm -rf ${{ runner.temp }}/.buildx-cache
+          mv ${{ runner.temp }}/.buildx-cache-new ${{ runner.temp }}/.buildx-cache
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        filter: [common, common-rulesets-based, server, server-core]
+
+    steps:
+      - name: Clone Kong Repo
+        run: git clone https://oauth2:$REPO_PAT@github.com/statsig-io/kong.git .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Load Docker Image
+        run: |
+          docker pull statsig/sdk-bridge:${{ needs.build.outputs.hash }}
+          docker tag statsig/sdk-bridge:${{ needs.build.outputs.hash }} ${{ inputs.sdk }}-bridge
+
+      - name: Load Scrapi Responses from Github Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/kong/cache
+          key: scrapi-cache-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Test Bridge
+        run: |
+          npm ci
+          npm run kong -- cache -v
+          npm run kong -- test ${{ inputs.sdk }} -r -f __tests__/${{ matrix.filter }}/

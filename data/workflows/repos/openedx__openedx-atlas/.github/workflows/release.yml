@@ -1,0 +1,95 @@
+name: Release CI
+on:
+  push:
+    branches:
+    - main
+
+permissions:
+  id-token: write  # Required for OIDC
+  contents: write  # For Semantic Release tagging
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: '.nvmrc'
+    - name: Determine next tag version
+      env:
+        GITHUB_TOKEN: ${{ secrets.OPENEDX_SEMANTIC_RELEASE_GITHUB_TOKEN }}
+      run: |
+        # Run in dry-run mode to determine the next tag version and store it in semantic-release-dry-run.txt
+        FORCE_COLOR=0 npx semantic-release@25 --dry-run | tee semantic-release-dry-run.txt
+
+        if grep -q 'no new version is released' semantic-release-dry-run.txt; then
+          RELEASE_NEEDED=no
+        else
+          RELEASE_NEEDED=yes
+        fi
+
+        echo "RELEASE_NEEDED=$RELEASE_NEEDED" >> $GITHUB_ENV
+
+        NEXT_VERSION=$(
+          cat semantic-release-dry-run.txt | \
+            grep -o 'Skip v.* tag creation in dry-run mode' \
+            | sed -e 's/^Skip //' | sed -e 's/ tag creation in dry-run mode$//'
+        )
+        echo "NEXT_VERSION=$NEXT_VERSION" >> $GITHUB_ENV
+
+        echo "DEBUG: RELEASE_NEEDED = '$RELEASE_NEEDED' "
+        echo "DEBUG: Next version is '$NEXT_VERSION'"  # Debug version number
+
+    - name: Fail if release is needed but version number is not set
+      if: env.RELEASE_NEEDED == 'yes' && env.NEXT_VERSION == ''
+      run: |
+        echo "ERROR: Could not determine next version from semantic-release dry-run output."
+        exit 1
+
+    - name: Release to both GitHub and npm
+      if: env.NEXT_VERSION
+      env:
+        GITHUB_TOKEN: ${{ secrets.OPENEDX_SEMANTIC_RELEASE_GITHUB_TOKEN }}
+      run: |
+        # Hardcode the next tag version in the atlas script
+        sed -i -e "s/_ATLAS_VERSION=.*/_ATLAS_VERSION=\"$NEXT_VERSION\"  # Tagged by release.yml/" atlas
+
+        echo "DEBUG: 'atlas --version' output is '$(./atlas --version)'"  # Debug version number
+
+        # Actually create the tag and upload the atlas script
+        npx semantic-release@25
+
+    # Release to PyPi
+    - name: Install dependencies
+      run: pip install pip
+
+    - name: Install Dependencies
+      run: pip install setuptools wheel
+
+    - name: Update the tag version in setup.py
+      if: env.NEXT_VERSION
+      run: |
+        NEXT_VERSION_PYPI=${NEXT_VERSION:1}  # Remove the leading 'v' to match PyPi's versioning scheme
+        sed -i -e "s/version=.*,/version='$NEXT_VERSION_PYPI',  # tagged by release.yml/" setup.py
+        cat setup.py  # Debug setup.py output
+
+    - name: Build package
+      run: python setup.py sdist bdist_wheel
+
+    - name: Print built package version
+      run: |
+        echo "DEBUG: checking the version within the pip wheel .whl file"
+        less dist/*.whl | head -n 20
+
+    - name: Publish to PyPi
+      if: env.NEXT_VERSION
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_UPLOAD_TOKEN }}

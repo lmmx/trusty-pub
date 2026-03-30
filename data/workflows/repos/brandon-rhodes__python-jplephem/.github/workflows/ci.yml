@@ -1,0 +1,44 @@
+
+name: ci
+
+on:
+  push:
+    branches:
+      - turned-off-for-now-because-it-broke-again-and-I-havent-the-time
+
+  pull_request:
+    branches:
+      - turned-off-for-now-because-it-broke-again-and-I-havent-the-time
+
+jobs:
+  test-big-endian:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # python-version: [2.7, 3.7]
+        python-version: [3.7, 3.8, 3.9, "3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install
+      run: pip install .
+
+    - name: Test
+      run: ./test.sh
+
+  test-little-endian:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: uraimo/run-on-arch-action@v2
+      with:
+        arch: s390x
+        distro: ubuntu20.04
+        run: |
+           apt update && apt install -y -y python3 python3-numpy && python3 -c 'import sys, platform; print(sys.platform, sys.byteorder, platform.processor())' && PYTHON=python3 ./test.sh -v

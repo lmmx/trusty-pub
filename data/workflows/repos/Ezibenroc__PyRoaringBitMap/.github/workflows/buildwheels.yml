@@ -1,0 +1,93 @@
+# This is based on the cibuildwheel example at
+# https://github.com/pypa/cibuildwheel/blob/main/examples/github-deploy.yml
+#
+# This workflow builds and tests wheels across multiple platforms using
+# cibuildwheel and creates the release sdist. Config not specified here can
+# be found in pyproject.toml
+
+name: Build and upload wheels
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+  release:
+    types:
+      - released
+      - prereleased
+
+jobs:
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/*.tar.gz
+          name: cibw-sdist
+
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-13 is an intel runner, macos-14 is apple silicon
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, macos-15-intel]
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up QEMU
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        env:
+          CIBW_TEST_REQUIRES: hypothesis pytest
+          CIBW_TEST_COMMAND: "python {project}/cydoctest.py -v"  # full test command: py.test {project}/test.py -v
+          CIBW_SKIP: "cp38-*"
+          CIBW_ARCHS_LINUX: ${{ runner.arch == 'X64' && 'auto' || 'auto armv7l' }}
+          CIBW_ARCHS_MACOS: ${{ runner.arch == 'X64' && 'auto' || 'auto universal2' }}
+          CIBW_ARCHS_WINDOWS: "auto ARM64"
+          CIBW_TEST_SKIP: "*-win_arm64"
+          CIBW_BUILD_FRONTEND: "build"
+          MACOSX_DEPLOYMENT_TARGET: "14.0"  # fix build for macos-15-intel
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ./wheelhouse/*.whl
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+
+  upload_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@v1.13.0
+        # Deploy releases to pypi.
+        if: github.event_name == 'release' && github.event.action == 'released'
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - uses: pypa/gh-action-pypi-publish@v1.13.0
+        # Deploy pre-releases to test pypi.
+        if: github.event_name == 'release' && github.event.action == 'prereleased'
+        with:
+          user: __token__
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository_url: https://test.pypi.org/legacy/

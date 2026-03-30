@@ -1,0 +1,49 @@
+# This workflow runs a small set of indexed_gzip unit
+# tests on a range of different versions of Python.
+# It is run on pull requests.
+
+on: pull_request
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:             ["ubuntu-latest", "macos-latest", "windows-latest"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        extra-args:     ["", "--concat"]
+
+    env:
+      PLATFORM:       ${{ matrix.os }}
+      PYTHON_VERSION: ${{ matrix.python-version }}
+      TEST_SUITE:     "not slow_test"
+      EXTRA_ARGS:     ${{ matrix.extra-args }}
+      ENV_DIR:        ./test.env
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Create test environment
+        run:  bash ./.ci/create_test_env.sh "$ENV_DIR"
+      - name: Log test environment
+        run: |
+          source ./.ci/activate_env.sh "$ENV_DIR"
+          python -V
+          pip freeze
+      - name: Download zlib
+        if:   ${{ matrix.os == 'windows-latest' }}
+        run:  bash ./.ci/download_zlib.sh
+      - name: Build indexed_gzip
+        run:  bash ./.ci/build_dev_indexed_gzip.sh "$ENV_DIR"
+      - name: Run tests
+        if:   ${{ !(matrix.os             == 'windows-latest' &&
+                   (matrix.python-version == '3.12' ||
+                    matrix.python-version == '3.13')) }}
+        run:  bash  ./.ci/run_tests.sh "$ENV_DIR"

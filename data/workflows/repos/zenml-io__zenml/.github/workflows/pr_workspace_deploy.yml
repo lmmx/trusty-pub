@@ -1,0 +1,220 @@
+---
+name: PR Workspace Deploy
+on:
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to checkout and deploy
+        required: true
+        type: string
+concurrency:
+  # New commit on branch cancels running workflows of the same branch
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  ZENML_ANALYTICS_OPT_IN: false
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  check-staging-label:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft ==
+      false
+    outputs:
+      should_deploy: ${{ steps.check-label.outputs.has_label }}
+    steps:
+      # using this instead of contains(github.event.pull_request.labels.*.name, 'staging-workspace')
+      # to make it dynamic, otherwise github context is fixed at the moment of trigger event.
+      # With dynamic approach dev can set label and rerun this flow to make it running.
+      - name: Get PR labels
+        id: pr-labels
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            const prNumber = ${{ github.event.pull_request.number }};
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+            });
+            const labelNames = labels.map(label => label.name);
+            core.setOutput('all-labels', labelNames.join(','));
+      - name: Check if staging-workspace label is set
+        id: check-label
+        run: |
+          if [[ "${{ contains(steps.pr-labels.outputs.all-labels, 'staging-workspace') }}" == "true" ]]; then
+            echo "Label 'staging-workspace' found, will deploy workspace"
+            echo "has_label=true" >> $GITHUB_OUTPUT
+          else
+            echo "Label 'staging-workspace' not found, skipping workspace deployment"
+            echo "has_label=false" >> $GITHUB_OUTPUT
+          fi
+  set-branch-info:
+    needs: check-staging-label
+    if: github.event_name == 'workflow_dispatch' || needs.check-staging-label.outputs.should_deploy
+      == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      branch_name: ${{ steps.slugify-branch.outputs.branch_slug }}  # Docker-compatible tag
+      workspace_name: ${{ steps.slugify-branch.outputs.workspace_name }}  # Workspace name (max 50 chars)
+      original_branch: ${{ steps.determine-branch.outputs.branch }}  # Original branch name
+      zenml_version: ${{ steps.get-version.outputs.zenml_version }}  # ZenML version
+    steps:
+      - name: Determine branch to use
+        id: determine-branch
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # For PR use the head ref (PR branch)
+            echo "branch=${GITHUB_HEAD_REF}" >> $GITHUB_OUTPUT
+          else
+            # For manual trigger, use the provided branch
+            echo "branch=${GITHUB_EVENT_INPUTS_BRANCH}" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_EVENT_INPUTS_BRANCH: ${{ github.event.inputs.branch }}
+      - name: Checkout repository with correct branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ steps.determine-branch.outputs.branch }}
+          fetch-depth: 0
+      - name: Slugify branch name
+        id: slugify-branch
+        run: |
+          # Create a Docker-compatible tag from branch name
+          BRANCH_NAME="${STEPS_DETERMINE_BRANCH_OUTPUTS_BRANCH}"
+
+          # 1. Convert to lowercase
+          # 2. Replace invalid chars with dashes
+          # 3. Remove leading non-alphanumeric chars (Docker tags must start with a letter or number)
+          # 4. Replace multiple consecutive dashes with a single dash
+          # 5. Remove trailing dashes (Docker tags can't end with a dash)
+          # 6. Limit to 128 chars max (Docker's limit)
+          BRANCH_SLUG=$(echo "$BRANCH_NAME" | \
+            tr '[:upper:]' '[:lower:]' | \
+            tr -c 'a-z0-9_.-' '-' | \
+            sed -E 's/^[^a-z0-9]*//' | \
+            sed -E 's/-+/-/g' | \
+            sed -E 's/-$//' | \
+            cut -c 1-128)
+
+          # If we end up with an empty string (unlikely but possible), use "dev" as fallback
+          if [ -z "$BRANCH_SLUG" ]; then
+            BRANCH_SLUG="dev"
+          fi
+          echo "Created Docker-compatible tag: $BRANCH_SLUG"
+          echo "branch_slug=${BRANCH_SLUG}" >> $GITHUB_OUTPUT
+
+          # Create workspace name (max 50 chars for API limit)
+          # If the slug is <= 50 chars, use it directly
+          # Otherwise, truncate to 41 chars and append 8-char hash for uniqueness
+          if [ ${#BRANCH_SLUG} -le 50 ]; then
+            WORKSPACE_NAME="${BRANCH_SLUG}"
+          else
+            # Generate a short hash from the original branch name for uniqueness
+            HASH=$(echo -n "$BRANCH_NAME" | sha256sum | cut -c 1-8)
+            # Truncate to 41 chars to leave room for the hash (8 chars) and separator (1 dash) = 50 total
+            TRUNCATED=$(echo "$BRANCH_SLUG" | cut -c 1-41 | sed 's/-$//')
+            WORKSPACE_NAME="${TRUNCATED}-${HASH}"
+          fi
+          echo "Created workspace name: $WORKSPACE_NAME"
+          echo "workspace_name=${WORKSPACE_NAME}" >> $GITHUB_OUTPUT
+        env:
+          STEPS_DETERMINE_BRANCH_OUTPUTS_BRANCH: ${{ steps.determine-branch.outputs.branch }}
+      - name: Get ZenML version
+        id: get-version
+        run: |
+          # Get ZenML version from src/zenml/VERSION file
+          if [ -f "src/zenml/VERSION" ]; then
+            # Read the version but remove any whitespace
+            ZENML_VERSION=$(cat src/zenml/VERSION | tr -d '[:space:]')
+            echo "Version detected: ${ZENML_VERSION}"
+            echo "zenml_version=${ZENML_VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "ERROR: VERSION file not found at src/zenml/VERSION"
+            echo "This is required for deployment. Please ensure you're using a valid branch."
+            exit 1
+          fi
+  build-images:
+    needs: [set-branch-info, check-staging-label]
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.check-staging-label.outputs.should_deploy
+      == 'true') && needs.set-branch-info.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ needs.set-branch-info.outputs.original_branch }}
+
+      # Sign in to Google
+      - uses: google-github-actions/setup-gcloud@20c93dacc1d70ddbce76c63ab32c35595345bdd1  # v0
+        with:
+          service_account_email: ${{ secrets.GCP_CLOUDBUILD_EMAIL }}
+          service_account_key: ${{ secrets.GCP_CLOUDBUILD_KEY }}
+          project_id: ${{ secrets.GCP_CLOUDBUILD_PROJECT }}
+
+      # Submit the Cloudbuild job
+      - name: Build docker images
+        run: |
+          gcloud builds submit \
+            --quiet \
+            --config=pull_request_cloudbuild.yaml \
+            --substitutions=_ZENML_BRANCH_NAME=${NEEDS_SET_BRANCH_INFO_OUTPUTS_BRANCH_NAME}
+        env:
+          NEEDS_SET_BRANCH_INFO_OUTPUTS_BRANCH_NAME: ${{ needs.set-branch-info.outputs.branch_name }}
+  manage-tenant:
+    needs: [build-images, set-branch-info]
+    if: always() && needs.build-images.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      ZENML_VERSION: ${{ needs.set-branch-info.outputs.zenml_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ needs.set-branch-info.outputs.original_branch }}
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+      - name: Manage workspace
+        env:
+          CLOUD_STAGING_CLIENT_ID: ${{ secrets.CLOUD_STAGING_CLIENT_ID }}
+          CLOUD_STAGING_CLIENT_SECRET: ${{ secrets.CLOUD_STAGING_CLIENT_SECRET }}
+          CLOUD_STAGING_GH_ACTIONS_ORGANIZATION_ID: ${{ secrets.CLOUD_STAGING_GH_ACTIONS_ORGANIZATION_ID }}
+          WORKSPACE_NAME_OR_ID: ${{ needs.set-branch-info.outputs.workspace_name }}
+          DOCKER_IMAGE: zenmldocker/zenml-server-dev:${{ needs.set-branch-info.outputs.branch_name }}
+          ZENML_VERSION: ${{ env.ZENML_VERSION }}
+        run: python scripts/manage_workspace.py
+      - name: Set tenant URL
+        run: echo "TENANT_URL=https://staging.cloud.zenml.io/workspaces/${NEEDS_SET_BRANCH_INFO_OUTPUTS_WORKSPACE_NAME}/projects"
+          >> $GITHUB_ENV
+        env:
+          NEEDS_SET_BRANCH_INFO_OUTPUTS_WORKSPACE_NAME: ${{ needs.set-branch-info.outputs.workspace_name }}
+      - name: Check if deployment comment exists
+        id: check-comment
+        if: github.event_name == 'pull_request'
+        run: |
+          # Search for comments containing the workspace URL
+          COMMENT_COUNT=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq '.comments[].body | select(contains("Branch tenant has been deployed"))' | wc -l)
+          if [ "$COMMENT_COUNT" -gt 0 ]; then
+            echo "has_comment=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_comment=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Add comment with tenant URL (PR)
+        if: github.event_name == 'pull_request' && steps.check-comment.outputs.has_comment
+          == 'false'
+        run: |-
+          gh pr comment ${{ github.event.pull_request.number }} --body "✅ Branch tenant has been deployed! Access it at: ${TENANT_URL}"
+      - name: Output tenant URL (Manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: |-
+          echo "✅ Branch tenant has been deployed! Access it at: ${TENANT_URL}"

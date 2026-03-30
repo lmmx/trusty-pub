@@ -1,0 +1,78 @@
+name: valgrind check
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+  schedule:
+    # 03:00 every Monday morning
+    - cron: '0 3 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      tket: ${{ steps.filter.outputs.tket }}
+    steps:
+    - uses: actions/checkout@v6
+    - uses: dorny/paths-filter@v4.0.1
+      id: filter
+      with:
+        base: ${{ github.ref }}
+        filters: |
+          tket:
+            - 'tket/**'
+            - '.github/workflows/valgrind.yml'
+  check:
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.tket == 'true'
+    steps:
+    - uses: actions/checkout@v6
+    - name: apt update
+      run: sudo apt update
+    - name: Select Python 3.12
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install conan
+      uses: turtlebrowser/get-conan@v1.2
+    - name: Set up conan
+      run: |
+        conan profile detect
+        DEFAULT_PROFILE_PATH=`conan profile path default`
+        PROFILE_PATH=./conan-profiles/ubuntu-24.04
+        diff ${DEFAULT_PROFILE_PATH} ${PROFILE_PATH} || true
+        cp ${PROFILE_PATH} ${DEFAULT_PROFILE_PATH}
+        conan remote add tket-libs https://quantinuumsw.jfrog.io/artifactory/api/conan/tket1-libs --index 0
+    - name: install valgrind
+      run: sudo apt install valgrind
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: tket-valgrind-build
+    - name: further ccache config
+      run: |
+        ccache --set-config base_dir=${HOME}
+        ccache --set-config compiler_check=content
+        ccache -p
+    - name: build tket
+      run: conan create tket --user=tket --channel=stable -o boost/*:header_only=True -o with_test=True --format json > tket.json
+    - name: Run tests under valgrind (long)
+      if: github.event_name == 'schedule'
+      run: |
+        sudo apt install texlive texlive-latex-extra latexmk
+        mkdir -p ~/texmf/tex/latex
+        wget http://mirrors.ctan.org/graphics/pgf/contrib/quantikz/tikzlibraryquantikz.code.tex -P ~/texmf/tex/latex
+        PKGPATH=`./rootpath tket.json tket`
+        cd ${PKGPATH}/bin && valgrind --error-exitcode=1 --show-realloc-size-zero=no ./test-tket [long],~[long]
+    - name: Run tests under valgrind (basic)
+      if: github.event_name != 'schedule'
+      run: |
+        PKGPATH=`./rootpath tket.json tket`
+        cd ${PKGPATH}/bin && valgrind --error-exitcode=1 --show-realloc-size-zero=no ./test-tket
+

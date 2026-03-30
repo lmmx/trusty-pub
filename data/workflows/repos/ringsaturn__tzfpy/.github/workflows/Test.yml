@@ -1,0 +1,94 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "pyproject.toml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
+  UV_PYTHON_PREFERENCE: only-system
+  CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG: true
+
+jobs:
+  Testing:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install tzfpy and test
+        shell: bash
+        run: |
+          make lint
+          make test | tee benchmark_result.txt
+
+      - name: Build examples
+        if: matrix.python-version != 3.10 && matrix.python-version != '3.14' && matrix.python-version != '3.14t'
+        run: |
+          make examples
+
+      - name: Setup benchmark file name
+        id: gen-benchmark-file-name
+        shell: bash
+        run: |
+          echo "filename=tzfpy_benchmark_py_${{ matrix.python-version }}_${{ matrix.os }}.md" >> $GITHUB_OUTPUT
+
+      - name: Report
+        shell: bash
+        run: |
+          set +e
+          echo "## Python ${{ matrix.python-version }} with ${{ matrix.os }}" >> ${{ steps.gen-benchmark-file-name.outputs.filename }}
+          echo '```' >> ${{ steps.gen-benchmark-file-name.outputs.filename }}
+          cat benchmark_result.txt >> ${{ steps.gen-benchmark-file-name.outputs.filename }}
+          echo '```' >> ${{ steps.gen-benchmark-file-name.outputs.filename }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: "benchmark_result_as_md_${{ matrix.python-version }}_${{ matrix.os }}"
+          path: ${{ steps.gen-benchmark-file-name.outputs.filename }}
+
+      - name: Minimize uv cache
+        run: uv cache prune --ci
+
+  Report:
+    needs: [Testing]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download a Build Artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "benchmark_result_as_md*"
+
+      - run: find . -name "*.md" -exec cat {} \; > $GITHUB_STEP_SUMMARY

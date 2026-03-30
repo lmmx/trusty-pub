@@ -1,0 +1,54 @@
+# CI - DB Integration - Local is designed to run integration testing against to databases hosted by docker containers
+# Target database: PostgreSQL, MySQL, MariaDB, SQLite, DuckDB, MSSQL, Oracle Database
+# Sqlalchemy version: 2+
+name: CI - DB Integration - Local
+on:
+  workflow_call:
+
+jobs:
+  database-integration-test:
+    strategy:
+      matrix:
+        python-version: ['3.11']
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    env:
+      PLOOMBER_VERSION_CHECK_DISABLED: true
+      PYTHON_VERSION: ${{ matrix.python-version }}
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          # Install MSSQL ODBC 18
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          sudo curl -o /etc/apt/sources.list.d/mssql-release.list https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list 
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18
+          echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> ~/.bashrc
+          source ~/.bashrc
+
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade nox
+          nox --session test_integration --install-only
+
+      - name: Integration Test
+        run: |
+          nox --session test_integration --no-install --reuse-existing-virtualenvs
+
+      - name: Upload failed images artifacts
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: failed-image-artifacts-integration ${{ matrix.os }} ${{ matrix.python-version }}
+          path: result_images/

@@ -1,0 +1,50 @@
+name: Docs CI
+
+on:
+  push:
+    branches:
+      - main
+      - '[0-9].[0-9]'
+  pull_request:
+    branches:
+      - main
+      - '[0-9].[0-9]'
+  schedule:
+    - cron: '0 1 * * *' # nightly build
+
+concurrency:
+  group: ${{ github.event.pull_request.number || github.ref }}-docs
+  cancel-in-progress: true
+
+permissions:
+  contents: read  #  to fetch code (actions/checkout)
+
+jobs:
+
+   build-docs:
+     name: Build docs
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v6
+       - uses: actions/setup-python@v6
+         with:
+           # Set the python version to 3.12 to keep imghdr for sphinx.
+           # TODO: update sphinx to remove imghdr dependency
+           python-version: 3.12
+           cache: 'pip'
+       - name: install deps
+         run: |
+           sudo apt-get update -yqq
+           sudo apt-get install -yqq pandoc make
+       - name: run code linters
+         run: |
+           pip install --group dev --group docs
+           pip install .
+           make build-docs
+
+       - name: upload docs
+         uses: actions/upload-artifact@v7
+         with:
+           name: valkey-py-docs
+           path: |
+             docs/_build/html

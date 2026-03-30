@@ -1,0 +1,57 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} - AioBotocore ${{ matrix.aiobotocore-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+        aiobotocore-version: [">=2.19.0,<2.20.0", "<3.0.0", "<4.0.0"]
+
+    env:
+      BOTO_CONFIG: /dev/null
+      AWS_ACCESS_KEY_ID: foobar_key
+      AWS_SECRET_ACCESS_KEY: foobar_secret
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: ci/env.yaml
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        shell: bash -l {0}
+        run: |
+          pip install git+https://github.com/fsspec/filesystem_spec
+          pip install --upgrade "aiobotocore${{ matrix.aiobotocore-version }}"
+          pip install . --no-deps
+          pip list
+
+      - name: Run Tests
+        shell: bash -l {0}
+        run: pytest -vv -s s3fs
+
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: pre-commit/action@v3.0.1

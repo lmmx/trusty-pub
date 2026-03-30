@@ -1,0 +1,35 @@
+name: Build & test docs
+on: [workflow_dispatch, workflow_call]
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Install libs
+        run: |
+          sudo apt update
+          sudo apt install latexmk texlive-xetex
+      - name: Install dependencies
+        run: |
+          pip install --upgrade setuptools pip
+          pip install --upgrade .[docs]
+      - name: Building docs
+        run: |
+          alias sphinx-build='sphinx-build --color -W --keep-going'
+          sphinx-build -b html docs build/sphinx/html
+          sphinx-build -b latex docs build/sphinx/latex
+          make -C build/sphinx/latex all-pdf
+        env:
+          NO_COLOR: 1  # workaround for sphinx-contrib/autoprogram#76
+          COLUMNS: 80  # also enable line wrapping for argparse
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docs
+          path: |
+            build/sphinx/html/
+            build/sphinx/latex/mpmath.pdf

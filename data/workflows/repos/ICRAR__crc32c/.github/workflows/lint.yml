@@ -1,0 +1,24 @@
+name: Lint
+
+on:
+  push:
+  pull_request:
+  schedule:
+  # 00:00 UTC every Saturday, don't bother anyone
+  - cron: '0 0 * * 6'
+
+jobs:
+  Linting:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          architecture: x64
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install tox-uv
+        run: pip install tox-uv
+      - name: Run linting steps
+        run: tox -e lint

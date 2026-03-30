@@ -1,0 +1,139 @@
+# Workflow for building the site and (optionally) publishing it to GitHub Pages.
+name: Deploy to GitHub Pages
+on:
+  workflow_call:
+    inputs:
+      settings:
+        required: true
+        description: "The path to your Pelican settings file (`pelican`'s `--settings` option), for example: 'publishconf.py'"
+        type: string
+      requirements:
+        required: false
+        default: "pelican"
+        description: "The Python requirements to install, for example to enable markdown and typogrify use: 'pelican[markdown] typogrify' or if you have a requirements file use: '-r requirements.txt'"
+        type: string
+      output-path:
+        required: false
+        default: "output/"
+        description: "Where to output the generated files (`pelican`'s `--output` option)"
+        type: string
+      theme:
+        required: false
+        default: ""
+        description: "The GitHub repo URL of a custom theme to use, for example: 'https://github.com/seanh/sidecar.git'"
+        type: string
+      theme-checkout:
+        required: false
+        default: ""
+        description: "Git ref (branch, tag or commit) of the theme repo to checkout. This can be used to pin the version of your theme. If not specified defaults to the theme repo's default branch."
+        type: string
+      python:
+        required: false
+        default: "3.14"
+        description: "The version of Python to use, for example: '3.14' (to use the most recent version of Python 3.14, this is faster) or '3.14.0' (to use an exact version, slower)"
+        type: string
+      siteurl:
+        required: false
+        default: ""
+        description: "The base URL of your web site (Pelican's SITEURL setting). If not passed this will default to the URL of your GitHub Pages site, which is correct in most cases."
+        type: string
+      feed_domain:
+        required: false
+        default: ""
+        description: "The domain to be prepended to feed URLs (Pelican's FEED_DOMAIN setting). If not passed this will default to the URL of your GitHub Pages site, which is correct in most cases."
+        type: string
+      deploy:
+        required: false
+        default: true
+        description: "Whether to deploy the site. If true then build the site and deploy it. If false then just test that the site builds successfully but don't deploy anything."
+        type: boolean
+      stork:
+        required: false
+        default: false
+        description: "Whether to add Stork search tool. If true, it will be installed on runner."
+        type: boolean
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python }}
+      - name: Clone theme
+        if: ${{ inputs.theme }}
+        run: git clone '${{ inputs.theme }}' .theme
+      - name: Checkout theme ref
+        if: ${{ inputs.theme && inputs.theme-checkout }}
+        run: git -C .theme checkout '${{ inputs.theme-checkout }}'
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Install Stork
+        if: ${{ inputs.stork }}
+        run: cargo install stork-search --locked
+      - name: Install requirements
+        run: pip install ${{ inputs.requirements }}
+      - name: Build Pelican site
+        shell: python
+        run: |
+          import subprocess
+
+          cmd = "pelican"
+          cmd += " --settings ${{ inputs.settings }}"
+          cmd += " --extra-settings"
+          cmd += """ SITEURL='"${{ inputs.siteurl || steps.pages.outputs.base_url }}"'"""
+          cmd += """ FEED_DOMAIN='"${{ inputs.feed_domain || steps.pages.outputs.base_url }}"'"""
+          cmd += " --output ${{ inputs.output-path }}"
+
+          if "${{ inputs.theme }}":
+              cmd += " --theme-path .theme"
+
+          subprocess.run(cmd, shell=True, check=True)
+      - name: Fix permissions
+        run: |
+          chmod -c -R +rX "${{ inputs.output-path }}" | while read -r line; do
+            echo "::warning title=Invalid file permissions automatically fixed::$line"
+          done
+      - name: Archive artifact
+        shell: sh
+        run: |
+          echo "::group::Archive artifact"
+          tar \
+            --dereference \
+            --hard-dereference \
+            --directory "$OUTPUT_PATH" \
+            -cvf "$RUNNER_TEMP/artifact.tar" \
+            --exclude=.git \
+            --exclude=.github \
+            .
+          echo "::endgroup::"
+        env:
+          OUTPUT_PATH: ${{ inputs.output-path }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
+  deploy:
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    if: ${{ inputs.deploy }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

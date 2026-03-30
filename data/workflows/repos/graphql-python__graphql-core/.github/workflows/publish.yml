@@ -1,0 +1,37 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: 🏗️ Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout project
+      id: checkout
+      uses: actions/checkout@v6
+
+    - name: Set up Python 3.14
+      id: setup-python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.14"
+
+    - name: Install uv
+      id: setup-uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Build wheel and source tarball with uv
+      id: build
+      run: uv build
+
+    - name: Publish a Python distribution to PyPI
+      id: publish
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_TOKEN }}

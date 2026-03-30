@@ -1,0 +1,63 @@
+name: Tests
+on:
+  push:
+    branches:
+      - main
+      - 'v*'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches:
+      - main
+      - 'v*'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+jobs:
+  tests:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: '3.14 on Linux', python: '3.14', os: ubuntu-latest, tox: py314}
+          - {name: '3.14 on Windows', python: '3.14', os: windows-latest, tox: py314}
+          - {name: '3.14 on Mac', python: '3.14', os: macos-latest, tox: py314}
+          - {name: '3.13', python: '3.13', os: ubuntu-latest, tox: py313}
+          - {name: '3.12', python: '3.12', os: ubuntu-latest, tox: py312}
+          - {name: '3.11', python: '3.11', os: ubuntu-latest, tox: py311}
+          - {name: '3.10', python: '3.10', os: ubuntu-latest, tox: py310}
+          - {name: '3.9', python: '3.9', os: ubuntu-latest, tox: py39}
+          - {name: 'PyPy', python: 'pypy-3.11', os: ubuntu-latest, tox: pypy311}
+          - {name: 'Minimum Versions', python: '3.10', os: ubuntu-latest, tox: 'min-versions'}
+          - {name: Style, python: '3.10', os: ubuntu-latest, tox: style}
+          - {name: Docs, python: '3.10', os: ubuntu-latest, tox: docs}
+          - {name: Typing, python: '3.10', os: ubuntu-latest, tox: typing}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: 'pip'
+          cache-dependency-path: 'requirements/*.txt'
+      - name: update pip
+        run: |
+          pip install -U wheel
+          pip install -U setuptools
+          python -m pip install -U pip
+      - name: cache mypy
+        uses: actions/cache@v4.2.4
+        with:
+          path: ./.mypy_cache
+          key: mypy|${{ matrix.python }}|${{ hashFiles('setup.cfg') }}
+        if: matrix.tox == 'typing'
+      - run: pip install tox
+      - run: tox -e ${{ matrix.tox }}
+      - uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: false
+          name: codecov-umbrella
+          token: ${{ secrets.CODECOV_TOKEN }}
+        if: matrix.name == 'Linux'

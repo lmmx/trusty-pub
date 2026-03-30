@@ -1,0 +1,36 @@
+on: 
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  workflow_dispatch:
+
+name: Publish
+
+jobs:
+  publish:
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.8'
+
+    - name: Install pypa/build
+      run: python -m pip install build
+
+    - name: Build the package
+      run: |
+        python -m build --sdist --wheel \
+        --outdir dist/ .
+
+    - name: Publish
+      if: github.event.action == 'published'
+      uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,56 @@
+name: Generate & Deploy Docs
+
+on:
+  push:
+    tags:
+    branches:
+      - 3.x
+      - 2.x
+      - 1.x
+      - 0.x
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    if: github.repository == 'pyinfra-dev/pyinfra'
+    steps:
+      - name: Clone Source Repository
+        uses: actions/checkout@v5
+
+      - name: Fetch git tags
+        run: git fetch --tags origin
+
+      - name: Clone Generated Repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.ACCESS_TOKEN }}
+          repository: pyinfra-dev/docs.pyinfra.com
+          path: docs/public/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: |
+          uv sync --group docs --no-default-groups
+          uv pip install 'jinja2<3.1'
+
+      - name: Generate documentation
+        run: scripts/build-public-docs.sh
+        env:
+          PYTHONPATH: '.'
+
+      - name: Push & Update
+        run: |
+          cd docs/public/
+
+          if [[ `git status --porcelain` ]]; then
+            git config user.name github-actions
+            git config user.email github-actions@github.com
+            git add .
+            git commit -m "Docs build $(date -I)"
+            git push origin HEAD:main
+          fi

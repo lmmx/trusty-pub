@@ -1,0 +1,74 @@
+name: Python package
+
+on:
+  push:
+    branches: "*"
+    tags: "*.*.*"
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tox
+        run: pip install tox
+      - name: Lint with tox
+        run: tox run -e lint
+
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13-dev", "pypy3.9", "pypy3.10"]
+        os: ["ubuntu-latest", "windows-latest"]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        pip install tox
+    - name: Test with tox
+      run: tox run -e py,report_ci
+    - uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: pip install --upgrade build
+      - name: Build distributions
+        run: python -m build
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    needs: [tests, package]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    environment:
+      name: release
+      url: https://pypi.org/project/pytest-console-scripts/${{ github.ref_name }}/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

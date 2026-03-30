@@ -1,0 +1,320 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    name: Check version and create release
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.check.outputs.version_changed }}
+      new_version: ${{ steps.check.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for version change
+        id: check
+        run: |
+          # Get the current version from Cargo.toml
+          CURRENT_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+
+          # Get the previous version from the last commit
+          git checkout HEAD~1 -- Cargo.toml 2>/dev/null || true
+          if [ -f Cargo.toml ]; then
+            PREVIOUS_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+            git checkout HEAD -- Cargo.toml
+          else
+            PREVIOUS_VERSION=""
+          fi
+
+          echo "Current version: $CURRENT_VERSION"
+          echo "Previous version: $PREVIOUS_VERSION"
+
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ] && [ -n "$CURRENT_VERSION" ]; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "new_version=v$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            echo "No version change detected"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.version_changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${{ steps.check.outputs.new_version }}
+          echo "Creating release for $VERSION"
+          gh release create "$VERSION" \
+            --title "Release $VERSION" \
+            --generate-notes \
+            || echo "Release already exists"
+
+  build_linux:
+    needs: check
+    if: needs.check.outputs.version_changed == 'true'
+    name: build ${{ matrix.target }}
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - name: Setup Cross
+        shell: bash
+        run: |
+          curl -sSfLo /tmp/cross.tar.gz https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf /tmp/cross.tar.gz -C /tmp
+          sudo mv /tmp/cross /usr/local/bin/cross
+      - name: Build
+        shell: bash
+        run: |
+          cross build --release --target=${{ matrix.target }} --bin=bendsql
+      - name: Publish Binary
+        uses: ./.github/actions/publish_binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+        with:
+          os: linux
+          target: ${{ matrix.target }}
+          version: ${{ needs.check.outputs.new_version }}
+
+  build_other:
+    needs: check
+    if: needs.check.outputs.version_changed == 'true'
+    name: build ${{ matrix.target }}
+    strategy:
+      matrix:
+        include:
+          - os: macos
+            target: aarch64-apple-darwin
+          - os: macos
+            target: x86_64-apple-darwin
+          # FIXME: Windows build is broken
+          # - os: windows
+          #   target: aarch64-pc-windows-msvc
+          # - os: windows
+          #   target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - name: Build
+        shell: bash
+        run: |
+          cargo build --release --target=${{ matrix.target }} --bin=bendsql
+      - name: Publish Binary
+        uses: ./.github/actions/publish_binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+        with:
+          os: ${{ matrix.os }}
+          target: ${{ matrix.target }}
+          version: ${{ needs.check.outputs.new_version }}
+
+  update_repo:
+    needs: [check, build_linux, build_other]
+    if: needs.check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Release and Tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          gh api '/repos/databendlabs/bendsql/tags' > tags.json
+          aws s3 cp tags.json s3://repo/bendsql/tags.json --checksum-algorithm=CRC32
+          gh api '/repos/databendlabs/bendsql/releases' > releases.json
+          aws s3 cp releases.json s3://repo/bendsql/releases.json --checksum-algorithm=CRC32
+
+  crates:
+    needs: [check, build_linux]
+    if: needs.check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: crates.io
+      url: https://crates.io/crates/databend-driver
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup
+        with:
+          cache-key: publish
+      - name: Setup Cargo workspaces
+        run: |
+          cargo install cargo-quickinstall
+          cargo quickinstall cargo-workspaces
+      - name: Release to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo workspaces publish --all --publish-as-is --yes
+
+  distribution:
+    needs: [check, build_linux]
+    if: needs.check.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - packager: apk
+            arch: amd64
+            target: x86_64-unknown-linux-musl
+          - packager: apk
+            arch: arm64
+            target: aarch64-unknown-linux-musl
+          - packager: deb
+            arch: amd64
+            target: x86_64-unknown-linux-musl
+          - packager: deb
+            arch: arm64
+            target: aarch64-unknown-linux-musl
+          - packager: rpm
+            arch: amd64
+            target: x86_64-unknown-linux-musl
+          - packager: rpm
+            arch: arm64
+            target: aarch64-unknown-linux-musl
+          - packager: archlinux
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+          - packager: archlinux
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup nfpm
+        shell: bash
+        run: |
+          curl -sSfLo /tmp/nfpm.tar.gz https://github.com/goreleaser/nfpm/releases/download/v2.28.0/nfpm_2.28.0_Linux_x86_64.tar.gz
+          tar -xzf /tmp/nfpm.tar.gz -C /tmp
+          sudo mv /tmp/nfpm /usr/local/bin/nfpm
+      - name: Setup yq
+        shell: bash
+        run: |
+          curl -sSfLo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+      - name: Download
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/pkg
+          gh release download ${{ needs.check.outputs.new_version }} --pattern "bendsql-${{ matrix.target }}.tar.gz" --dir dist/
+          tar -xzf dist/bendsql-${{ matrix.target }}.tar.gz -C dist/
+      - name: Package
+        shell: bash
+        run: |
+          yq -i '.arch = "${{ matrix.arch }}"' nfpm.yaml
+          yq -i '.version = "${{ needs.check.outputs.new_version }}"' nfpm.yaml
+          nfpm package --packager ${{ matrix.packager }} --target dist/pkg/
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ needs.check.outputs.new_version }} dist/pkg/* --clobber
+
+  bindings_python:
+    needs: [check, build_linux]
+    if: needs.check.outputs.version_changed == 'true'
+    uses: ./.github/workflows/bindings.python.yml
+    secrets: inherit
+
+  bindings_python_publish:
+    needs: bindings_python
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment:
+      name: pypi.org
+      url: https://pypi.org/p/databend-driver/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: bindings/python/artifacts
+          pattern: bindings-python-*
+          merge-multiple: true
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@unstable/v1
+        with:
+          skip-existing: true
+          packages-dir: bindings/python/artifacts
+
+  bindings_nodejs:
+    needs: [check, build_linux]
+    if: needs.check.outputs.version_changed == 'true'
+    uses: ./.github/workflows/bindings.nodejs.yml
+    secrets: inherit
+
+  bindings_nodejs_publish:
+    needs: bindings_nodejs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: npmjs.com
+      url: https://www.npmjs.com/package/databend-driver
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Corepack
+        working-directory: bindings/nodejs
+        run: npm i -g --force corepack && corepack enable
+      - name: Install dependencies
+        working-directory: bindings/nodejs
+        run: pnpm install
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: bindings/nodejs/artifacts
+          pattern: bindings-nodejs-*
+          merge-multiple: true
+      - name: Move artifacts
+        shell: bash
+        working-directory: bindings/nodejs
+        run: |
+          ls -lRh artifacts
+          pnpm napi artifacts
+          ls -lRh npm
+      - name: Add LICENSE
+        run: cp LICENSE ./bindings/nodejs
+      - name: Publish
+        working-directory: bindings/nodejs
+        run: npm publish --access public --provenance

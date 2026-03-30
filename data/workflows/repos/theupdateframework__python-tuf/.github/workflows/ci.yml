@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
+  test-with-sslib-main:
+    uses: ./.github/workflows/_test_sslib_main.yml

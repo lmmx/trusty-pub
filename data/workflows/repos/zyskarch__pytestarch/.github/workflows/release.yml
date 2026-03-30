@@ -1,0 +1,33 @@
+name: Release
+on:
+  release:
+    types:
+      - created
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12']
+        poetry-version: [2.2.1]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pytestarch
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run image
+        uses: abatilo/actions-poetry@v3.0.0
+        with:
+          poetry-version: ${{ matrix.poetry-version }}
+      - name: Build
+        run: poetry build
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

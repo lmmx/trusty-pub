@@ -1,0 +1,38 @@
+name: dotenv
+
+on:
+  pull_request:
+    branches:
+    - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+      pull-requests: write
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - name: Lint single file
+      uses: wemake-services/dotenv-linter@master
+      with:
+        reporter: 'github-pr-review'
+        options: 'tests/fixtures/.env.correct'
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+    - name: Lint multiple files
+      uses: wemake-services/dotenv-linter@master
+      with:
+        reporter: 'github-pr-review'
+        options: 'tests/fixtures/.env.correct tests/fixtures/.env.duplicate'
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}

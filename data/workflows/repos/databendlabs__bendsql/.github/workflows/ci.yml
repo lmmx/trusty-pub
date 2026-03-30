@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: check
+      - uses: ./.github/actions/check
+
+  build:
+    needs: check
+    runs-on: ${{ matrix.os }}-latest
+    name: build-${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu, arch: x86_64, target: x86_64-unknown-linux-gnu }
+          - { os: macos, arch: aarch64, target: aarch64-apple-darwin }
+          # FIXME: Windows build is broken
+          # - { os: windows, arch: x86_64, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: build
+          target: ${{ matrix.target }}
+      - run: cargo build --target=${{ matrix.target }}
+
+  build_cross:
+    name: build-cross-${{ matrix.target }}
+    strategy:
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - name: Setup Cross
+        shell: bash
+        run: |
+          curl -sSfLo /tmp/cross.tar.gz https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf /tmp/cross.tar.gz -C /tmp
+          sudo mv /tmp/cross /usr/local/bin/cross
+      - name: Build
+        shell: bash
+        run: |
+          cross build --target=${{ matrix.target }} --bin=bendsql
+
+  unit:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: unit
+      - run: cargo test --all-features --lib -- --show-output
+
+  integration:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: integration
+      # - name: Get License from Variable
+      #   run: |
+      #     echo "::add-mask::${{ vars.DATABEND_LICENSE_TRIAL }}"
+      #     echo "QUERY_DATABEND_ENTERPRISE_LICENSE=${{ vars.DATABEND_LICENSE_TRIAL }}" >> $GITHUB_ENV
+      - run: make -C tests test-core
+      - run: make -C tests test-driver
+      - run: make -C tests test-bendsql
+
+  bindings_python:
+    needs: check
+    uses: ./.github/workflows/bindings.python.yml
+    secrets: inherit
+
+  bindings_nodejs:
+    needs: check
+    uses: ./.github/workflows/bindings.nodejs.yml
+    secrets: inherit

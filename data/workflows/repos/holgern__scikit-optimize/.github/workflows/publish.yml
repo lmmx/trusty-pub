@@ -1,0 +1,31 @@
+name: Upload Python Package
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    uses: ./.github/workflows/ci.yml
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - name: Setup Python
+      uses: actions/setup-python@master
+      with:
+        python-version: 3.11
+
+    - name: Install packages
+      run: |
+        pip install -U pip wheel
+        pip install .
+        pip install .[dev,plots]
+        pip install --upgrade build
+        python -m build --sdist --wheel --outdir dist/
+
+    - name: Publish 📦 on PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}

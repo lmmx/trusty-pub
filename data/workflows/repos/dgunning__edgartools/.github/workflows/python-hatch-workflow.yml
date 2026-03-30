@@ -1,0 +1,161 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Build and Test Edgartools
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-fast:
+    # Fast tests run on all Python versions to verify compatibility
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -e ".[ai]"
+        python -m pip install pytest pytest-cov pytest-env pytest-xdist pytest-asyncio pytest-retry pytest-mock pytest-vcr vcrpy freezegun==1.5.1 filelock tqdm responses
+
+    - name: Run fast tests
+      run: |
+        # Parallelize fast tests - safe, no SEC API calls
+        pytest -n auto --cov --cov-report=xml -m 'fast and not regression'
+
+    - name: Upload coverage data
+      uses: actions/upload-artifact@v4
+      if: matrix.python-version == '3.13'
+      with:
+        name: coverage-fast
+        path: |
+          .coverage
+          coverage.xml
+        include-hidden-files: true
+        retention-days: 1
+
+  test-network:
+    # Network and slow tests only on Python 3.12 — SEC API behavior
+    # doesn't vary by Python version, so one version suffices
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.12"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -e ".[ai]"
+        python -m pip install pytest pytest-cov pytest-env pytest-xdist pytest-asyncio pytest-retry pytest-mock pytest-vcr vcrpy freezegun==1.5.1 filelock tqdm responses
+
+    - name: Run network tests
+      run: |
+        # Sequential - respects SEC rate limits (10 req/sec)
+        pytest --cov --cov-report=xml -m 'network and not slow and not regression'
+
+    - name: Upload coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-network
+        path: |
+          .coverage
+          coverage.xml
+        include-hidden-files: true
+        retention-days: 1
+
+  test-slow:
+    # Slow tests only on Python 3.12
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.12"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -e ".[ai]"
+        python -m pip install pytest pytest-cov pytest-env pytest-xdist pytest-asyncio pytest-retry pytest-mock pytest-vcr vcrpy freezegun==1.5.1 filelock tqdm responses
+
+    - name: Run slow tests
+      run: |
+        # Sequential - often network-heavy
+        pytest --cov --cov-report=xml -m 'slow and not regression'
+
+    - name: Upload coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-slow
+        path: |
+          .coverage
+          coverage.xml
+        include-hidden-files: true
+        retention-days: 1
+
+  coverage:
+    name: Combine Coverage
+    needs: [test-fast, test-network, test-slow]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.11"
+    - name: Install coverage
+      run: pip install coverage[toml]
+
+    - name: Download coverage data (fast)
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-fast
+        path: coverage-fast/
+
+    - name: Download coverage data (network)
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-network
+        path: coverage-network/
+
+    - name: Download coverage data (slow)
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-slow
+        path: coverage-slow/
+
+    - name: Combine coverage
+      run: |
+        # Move .coverage files with unique names
+        mv coverage-fast/.coverage .coverage.fast
+        mv coverage-network/.coverage .coverage.network
+        mv coverage-slow/.coverage .coverage.slow
+
+        # Combine all coverage data
+        coverage combine
+
+        # Generate report and check threshold
+        coverage report --fail-under=65
+        coverage xml -o combined-coverage.xml
+
+    - name: Upload combined coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: combined-coverage.xml
+        fail_ci_if_error: false

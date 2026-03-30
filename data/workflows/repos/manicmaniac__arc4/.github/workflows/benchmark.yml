@@ -1,0 +1,29 @@
+---
+name: Benchmark
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        type: boolean
+        description: Do not deploy image to Gist
+        default: true
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+    - run: pip install . matplotlib pycryptodome rc4
+    - run: nice -19 python benchmark.py -o benchmark.svg
+    - uses: actions/upload-artifact@v7
+      with:
+        name: benchmark
+        path: benchmark.svg
+    - uses: exuanbo/actions-deploy-gist@v1
+      if: github.event.inputs.dry-run != 'true'
+      with:
+        token: ${{ secrets.GIST_TOKEN }}
+        gist_id: '991d0c197e1cb62eec81edec65363187'
+        file_path: benchmark.svg

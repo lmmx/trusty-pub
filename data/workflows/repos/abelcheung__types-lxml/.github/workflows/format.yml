@@ -1,0 +1,40 @@
+name: Formatting
+
+on:
+  schedule:
+    - cron: '43 6 23 * *'
+  workflow_dispatch:
+
+jobs:
+  formatting:
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Linting and import sort
+        uses: chartboost/ruff-action@v1
+        with:
+          args: 'check --fix'
+          src: '.'
+
+      - name: Code formatting
+        uses: chartboost/ruff-action@v1
+        with:
+          args: 'format'
+          src: '.'
+
+      - uses: peter-evans/create-pull-request@v8
+        with:
+          branch: create-pull-request/formatting
+          delete-branch: true
+          title: 'Automatic formatting changes'
+          commit-message: 'style: automated formatting'
+          labels: bot
+          sign-commits: true
+          body: >
+            Automated formatting by
+            [ruff-action](https://github.com/ChartBoost/ruff-action) and
+            [create-pull-request](https://github.com/peter-evans/create-pull-request)

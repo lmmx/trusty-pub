@@ -1,0 +1,117 @@
+name: Tests
+
+on:
+  push:
+    branches-ignore:
+      - 'dependabot/**'
+      - 'pre-commit-ci-update-config'
+  pull_request:
+
+jobs:
+  run_test_site:
+    name: ${{ matrix.os }}-${{ matrix.os_version }}-py${{ matrix.PYTHON_VERSION }}${{ matrix.LABEL }}
+    runs-on: ${{ matrix.os }}-${{ matrix.os_version }}
+    timeout-minutes: 30
+    env:
+      MPLBACKEND: agg
+      PIP_ARGS: --upgrade --prefer-binary -e
+      PYTEST_ARGS: --pyargs hyperspy --reruns 3 --instafail
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu, windows, macos]
+        os_version: [latest]
+        PYTHON_VERSION: ['3.11', '3.13']
+        PIP_SELECTOR: ['[all, tests, coverage]']
+        include:
+          # test oldest supported version of main dependencies on python 3.8
+          - os: ubuntu
+            os_version: latest
+            PYTHON_VERSION: '3.10'
+            PIP_SELECTOR: '[all, tests, coverage]'
+            OLDEST_SUPPORTED_VERSION: true
+            DEPENDENCIES: dask[array]==2023.2.1 matplotlib==3.6.0 numba==0.56.0 numpy==1.22.0 scipy==1.8.0 sympy==1.10 scikit-image==0.19.0 scikit-learn==1.6.0 numexpr==2.8.0
+            LABEL: -oldest
+          # test minimum requirement
+          - os: ubuntu
+            os_version: latest
+            PYTHON_VERSION: '3.14'
+            PIP_SELECTOR: '[tests, coverage]'
+            LABEL: -minimum
+          - os: ubuntu
+            os_version: latest
+            PYTHON_VERSION: '3.10'
+            PIP_SELECTOR: '[all, tests, coverage]'
+          - os: ubuntu
+            os_version: latest
+            PYTHON_VERSION: '3.12'
+            PIP_SELECTOR: '[all, tests, coverage]'
+          - os: macos
+            os_version: '15-intel'
+            PYTHON_VERSION: '3.12'
+            PIP_SELECTOR: '[all, tests, coverage]'
+
+    steps:
+      - uses: actions/checkout@v6
+        with: 
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch tags upstream
+        if: ${{ github.repository_owner != 'hyperspy' }}
+        # Needs to fetch the tags from upstream to get the
+        # correct version with setuptools_scm
+        run: |
+          git remote add upstream https://github.com/hyperspy/hyperspy.git
+          git fetch upstream --tags
+
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: ${{ matrix.PYTHON_VERSION }}
+
+      - name: Get the number of CPUs
+        id: cpus
+        run: |
+          import os, platform
+          num_cpus = os.cpu_count()
+          print(f"Number of CPU: {num_cpus}")
+          print(f"Architecture: {platform.machine()}")
+          output_file = os.environ["GITHUB_OUTPUT"]
+          with open(output_file, "a", encoding="utf-8") as output_stream:
+              output_stream.write(f"count={num_cpus}\n")
+        shell: python
+
+      - name: Display version
+        run: |
+          python --version
+          pip --version
+
+      - name: Install
+        shell: bash
+        run: |
+          pip install ${{ env.PIP_ARGS }} .'${{ matrix.PIP_SELECTOR }}'
+
+      - name: Install oldest supported version
+        if: ${{ matrix.OLDEST_SUPPORTED_VERSION }}
+        run: |
+          pip install ${{ matrix.DEPENDENCIES }} -v
+
+      - name: Pip list
+        run: |
+          pip list
+
+      - name: Run test suite
+        run: |
+          pytest ${{ env.PYTEST_ARGS }} -n ${{ steps.cpus.outputs.count }} --cov=. --cov-report=xml
+
+      - name: Run doctest (Docstring)
+        if: ${{ matrix.OLDEST_SUPPORTED_VERSION == 'false'}}
+        run: |
+          pytest ${{ env.PYTEST_ARGS }} --doctest-modules --ignore=hyperspy/tests
+
+      - name: Upload coverage to Codecov
+        if: ${{ github.repository_owner == 'hyperspy' }}
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

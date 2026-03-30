@@ -1,0 +1,113 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 6 * * 1'  # At 06:00 on Monday
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: ./.github/actions/env-install
+    - uses: pre-commit/action@v3.0.1
+
+  license-header-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - run: ./scripts/license_headers_check.sh
+
+  pip-installable:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: ./.github/actions/env-install
+    - run: pip install -e .
+
+  pip-licenses:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: ./.github/actions/env-install
+    - run: pip install -e .
+    - run: pip install pip-licenses
+    - run: pip-licenses
+
+  operator-image-buildable:
+    env:
+      USE_ELASTIC_REGISTRY: ${{ github.event_name != 'pull_request' || ( github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false && github.actor != 'dependabot[bot]' ) }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: ./.github/actions/env-install
+    - run: pip install build
+    - run: python -m build
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+    - name: Log in to the Elastic Container registry
+      uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+      with:
+        registry: ${{ secrets.ELASTIC_DOCKER_REGISTRY }}
+        username: ${{ secrets.ELASTIC_DOCKER_USERNAME }}
+        password: ${{ secrets.ELASTIC_DOCKER_PASSWORD }}
+      if: ${{ env.USE_ELASTIC_REGISTRY == 'true' }}
+    - run: docker build -f operator/Dockerfile --build-arg DISTRO_DIR=./dist .
+      if: ${{ env.USE_ELASTIC_REGISTRY == 'true' }}
+    - run: docker build -f operator/Dockerfile --build-arg PYTHON_GLIBC_IMAGE=cgr.dev/chainguard/python --build-arg PYTHON_GLIBC_IMAGE_VERSION=latest-dev --build-arg DISTRO_DIR=./dist --build-arg IMAGE=cgr.dev/chainguard/bash --build-arg IMAGE_VERSION=latest .
+      if: ${{ env.USE_ELASTIC_REGISTRY != 'true'}}
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      py39: "3.9"
+      py310: "3.10"
+      py311: "3.11"
+      py312: "3.12"
+      py313: "3.13"
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [py39, py310, py311, py312, py313]
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python ${{ env[matrix.python-version] }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env[matrix.python-version] }}
+        architecture: "x64"
+    - run: pip install nox
+    - run: nox -- --with-integration-tests
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/env-install
+      - run: pip install -r dev-requirements.txt
+      - run: pip install pyright
+      - run: pyright
+
+  notify:
+    runs-on: ubuntu-slim
+    if: ${{ always() && github.ref_name == 'main' }}
+    needs: [pre-commit, license-header-check, pip-installable, pip-licenses, operator-image-buildable, test, typecheck]
+    steps:
+      - id: check
+        uses: elastic/oblt-actions/check-dependent-jobs@v1
+        with:
+          jobs: ${{ toJSON(needs) }}
+      - if: ${{ steps.check.outputs.isSuccess == 'false' }}
+        uses: elastic/oblt-actions/slack/send@v1
+        with:
+          bot-token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel-id: "#apm-agent-python"
+          message: |-
+            :fire: Something went wrong with `${{ github.repository }}@${{ github.ref_name }}`. Please look what's going on <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|here>

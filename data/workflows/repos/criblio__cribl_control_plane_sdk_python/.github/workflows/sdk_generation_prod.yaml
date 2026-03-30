@@ -1,0 +1,187 @@
+name: Generate Prod SDK
+permissions:
+  checks: write
+  contents: write
+  pull-requests: write
+  statuses: write
+  actions: write
+"on":
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Force generation of SDKs
+        type: boolean
+        default: false
+      set_version:
+        description: optionally set a specific SDK version
+        type: string
+  schedule:
+    - cron: 0 0 * * *
+  pull_request:
+    types:
+      - labeled
+      - unlabeled
+jobs:
+  check-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure workflow is run from main branch
+        run: |
+          if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
+            echo "This workflow can only be run from the main branch."
+            exit 1
+          fi
+
+  version-check:
+    needs: check-branch
+    runs-on: ubuntu-latest
+    outputs:
+      up_to_date: ${{ steps.compare.outputs.up_to_date }}
+      local_version: ${{ steps.compare.outputs.local_version }}
+      remote_version: ${{ steps.compare.outputs.remote_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+
+      - name: Compare OpenAPI versions
+        id: compare
+        uses: ./.github/actions/version-check
+        with:
+          force: ${{ github.event.inputs.force || false }}
+
+  generate:
+    needs: [check-branch, version-check]
+    if: needs.version-check.outputs.up_to_date != 'true'
+    uses: speakeasy-api/sdk-generation-action/.github/workflows/workflow-executor.yaml@b823adc6be7d30b25198529f99f46303bc083534
+    with:
+      force: ${{ github.event.inputs.force }}
+      mode: pr
+      set_version: ${{ github.event.inputs.set_version }}
+    secrets:
+      github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      pypi_token: ${{ secrets.PYPI_TOKEN }}
+      speakeasy_api_key: ${{ secrets.SPEAKEASY_API_KEY }}
+
+  skipped-summary:
+    needs: [check-branch, version-check, generate]
+    if: github.event_name == 'schedule' && needs.generate.result == 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          {
+            echo "## ⏭️ SDK Generation Skipped (Cron)"
+            echo ""
+            echo "OpenAPI spec versions match - no generation needed:"
+            echo "- **Local** (out.openapi.yaml): \`${{ needs.version-check.outputs.local_version }}\`"
+            echo "- **Remote** (cribl-openapi-spec): \`${{ needs.version-check.outputs.remote_version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  dispatch-dev-stage:
+    needs: generate
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Dispatch dev and stage SDK generation workflows
+        run: |
+          echo "Dispatching SDK generation for dev and stage branches"
+          
+          echo "Dispatching sdk_generation_dev.yaml on dev branch"
+          gh workflow run "sdk_generation_dev.yaml" \
+            --ref "dev" \
+            --repo "$GITHUB_REPOSITORY"
+          echo "Dispatched sdk_generation_dev.yaml"
+          
+          echo "Dispatching sdk_generation_stage.yaml on stage branch"
+          gh workflow run "sdk_generation_stage.yaml" \
+            --ref "stage" \
+            --repo "$GITHUB_REPOSITORY"
+          echo "Dispatched sdk_generation_stage.yaml"
+          
+          echo "Dev and stage dispatch completed!"
+
+      - name: Summary
+        run: |
+          {
+            echo "## 🚀 Automated SDK Generation Dispatch (Cron)"
+            echo ""
+            echo "After completing scheduled production SDK generation, triggered:"
+            echo "- **sdk_generation_dev** on **dev** branch"
+            echo "- **sdk_generation_stage** on **stage** branch"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify-slack-on-failure:
+    needs: [check-branch, version-check, generate, dispatch-dev-stage]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification on failure
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "❌ Production SDK Generation Failed (Python)",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "❌ Production SDK Generation Failed (Python)"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository:*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n${{ github.ref_name }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Workflow:*\nGenerate Prod SDK (Python)"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Trigger:*\n${{ github.event_name }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n<${{ github.event.head_commit.url }}|${{ github.sha }}>"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Author:*\n${{ github.actor }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Workflow Run"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

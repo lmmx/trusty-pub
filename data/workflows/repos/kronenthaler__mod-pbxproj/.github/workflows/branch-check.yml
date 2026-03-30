@@ -1,0 +1,84 @@
+name: branch-check
+
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.x']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Dependencies
+        run: pip install -r dev-requirements.txt
+
+      - name: Get Version
+        run: echo "VERSION=$(python -m pbxproj --version).${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Test
+        run: make coverage
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@master
+        if: github.event_name == 'pull_request' && matrix.python == '3.x' && github.event.pull_request.head.repo.full_name != github.repository
+        with:
+          args: >
+            -Dsonar.projectVersion=${{ env.VERSION }}
+            -Dsonar.pullrequest.key=${{ github.event.number }}
+            -Dsonar.pullrequest.branch=${{ github.event.pull_request.head.ref }}
+            -Dsonar.pullrequest.base=${{ github.event.pull_request.base.ref  }}
+            -Dsonar.organization=kronenthaler
+            -Dsonar.projectKey=kronenthaler_mod-pbxproj
+            -Dsonar.projectName=mod-pbxproj
+            -Dsonar.python.version=3
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.sources=pbxproj/
+            -Dsonar.tests=tests/
+            -Dsonar.verbose=true
+            -Dsonar.c.file.suffixes=-
+            -Dsonar.cpp.file.suffixes=-
+            -Dsonar.objc.file.suffixes=-
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@master
+        if: github.event_name == 'push' && matrix.python == '3.x' && github.event.pull_request.head.repo.full_name != github.repository
+        with:
+          args: >
+            -Dsonar.projectVersion=${{ env.VERSION }}
+            -Dsonar.branch.name=${{ github.ref_name }}
+            -Dsonar.organization=kronenthaler
+            -Dsonar.projectKey=kronenthaler_mod-pbxproj
+            -Dsonar.projectName=mod-pbxproj
+            -Dsonar.python.version=3
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.sources=pbxproj/
+            -Dsonar.tests=tests/
+            -Dsonar.verbose=true
+            -Dsonar.c.file.suffixes=-
+            -Dsonar.cpp.file.suffixes=-
+            -Dsonar.objc.file.suffixes=-
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

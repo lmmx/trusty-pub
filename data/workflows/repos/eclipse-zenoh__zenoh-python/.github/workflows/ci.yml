@@ -1,0 +1,112 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  schedule:
+    - cron: "0 6 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone this repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Run isort
+        uses: isort/isort-action@v1
+
+      - name: Run black
+        uses: psf/black@stable
+        with:
+          options: "--check --diff -C"
+
+      - name: Update Stable Rust toolchain
+        run: rustup update stable
+
+      - name: Install rust components
+        run: |
+          rustup +stable component add clippy rustfmt
+
+      - name: Run rustfmt
+        run: cargo +stable fmt --check -- --config "unstable_features=true,imports_granularity=Crate,group_imports=StdExternalCrate"
+
+      - name: Clippy no-default-features
+        run: cargo +stable clippy --no-default-features --all-targets -- --deny warnings
+
+      - name: Clippy with all features and without Cargo.lock
+        run: |
+          rm Cargo.lock
+          cargo +stable clippy --all-features --all-targets -- --deny warnings
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13-dev"
+    steps:
+      - name: Clone this repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build zenoh-python
+        uses: messense/maturin-action@v1
+
+      - name: Install zenoh-python
+        run: pip3 install ./target/wheels/*.whl
+
+      - name: Run stubs check
+        run: python3 tests/stubs_check.py
+
+      - name: Install pytest
+        run: pip3 install pytest pytest-xdist fixtures
+
+      - name: Run examples check
+        run: pytest tests/examples_check.py -v --durations=0
+
+      - name: Run pytest
+        run: pytest -n auto --import-mode=append
+
+  markdown_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v18
+        with:
+          config: '.markdownlint.yaml'
+          globs: '**/README.md'
+
+  # NOTE: In GitHub repository settings, the "Require status checks to pass
+  # before merging" branch protection rule ensures that commits are only merged
+  # from branches where specific status checks have passed. These checks are
+  # specified manually as a list of workflow job names. Thus we use this extra
+  # job to signal whether all CI checks have passed.
+  ci:
+    name: CI status checks
+    runs-on: ubuntu-latest
+    needs: [build, markdown_lint]
+    if: always()
+    steps:
+      - name: Check whether all jobs pass
+        run: echo '${{ toJson(needs) }}' | jq -e 'all(.result == "success")'

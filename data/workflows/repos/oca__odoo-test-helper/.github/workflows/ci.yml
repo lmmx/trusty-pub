@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "master"
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+env:
+  ADDONS_DIR: ./test_addons
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    container: ${{ matrix.container }}
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Test only w/ OCB just to reduce exec time.
+          - container: ghcr.io/oca/oca-ci/py3.8-ocb15.0:latest
+            name: test with OCB 15.0
+          - container: ghcr.io/oca/oca-ci/py3.10-ocb16.0:latest
+            name: test with OCB 16.0
+          - container: ghcr.io/oca/oca-ci/py3.10-ocb17.0:latest
+            name: test with OCB 17.0
+          - container: ghcr.io/oca/oca-ci/py3.10-ocb18.0:latest
+            name: test with OCB 18.0
+    services:
+      postgres:
+        image: postgres:12.0
+        env:
+          POSTGRES_USER: odoo
+          POSTGRES_PASSWORD: odoo
+          POSTGRES_DB: odoo
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install odoo-test-helper
+        run: pip install .
+      - name: Install addons and dependencies
+        run: oca_install_addons
+      - name: Initialize test db
+        run: oca_init_test_database
+      - name: Run tests
+        run: oca_run_tests

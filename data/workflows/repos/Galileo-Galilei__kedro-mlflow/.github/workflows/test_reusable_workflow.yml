@@ -1,0 +1,57 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: test
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+      python-version:
+        required: true
+        type: string
+    secrets:
+      CODECOV_TOKEN:
+        required: true
+
+jobs:
+  lint_and_test:
+    runs-on: ${{ inputs.os }}
+    env:
+      OS: ${{ inputs.os }}
+      PYTHON_VERSION: ${{ inputs.python-version }}
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install dependencies
+      run: |
+        uv venv
+        uv pip install .[test]
+    - name: Check code formatting with ruff
+      if: ${{ inputs.os }} == 'ubuntu-latest' && ${{ inputs.python-version }} == '3.11' # linting should occur only once in the loop
+      run: |
+        uv run ruff format . --check
+    - name: Check import order and syntax with ruff
+      if: ${{ inputs.os }} == 'ubuntu-latest' && ${{ inputs.python-version }} == '3.11' # linting should occur only once in the loop
+      run: |
+        uv run ruff check .
+    - name: Test with pytest and generate coverage report
+      run: |
+        uv run pytest -x --cov=./ --cov-report=xml -n auto
+    - name: Upload coverage report to Codecov
+      uses: codecov/codecov-action@v4
+      if: ${{ inputs.os }} == 'ubuntu-latest' && ${{ inputs.python-version }} == '3.11' # upload should occur only once in the loop
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}  # token is not mandatory but make access more stable
+        file: ./coverage.xml
+        env_vars: OS,PYTHON
+        fail_ci_if_error: true

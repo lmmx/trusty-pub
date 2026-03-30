@@ -1,0 +1,27 @@
+name: Remote Data Tests
+
+on:
+  # Allow manual trigger via the "Run Workflow" button in UI
+  workflow_dispatch:
+  # Run automatically every Monday at 6am UTC
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  remote-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install .[tests]
+
+      - name: Run Remote Tests
+        # We explicitly tell pytest to run ONLY the remote_data tests
+        run: pytest --remote-data

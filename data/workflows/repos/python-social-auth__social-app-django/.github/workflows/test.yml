@@ -1,0 +1,72 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  schedule:
+  - cron: 0 0 * * 0
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+        - '3.10'
+        - '3.11'
+        - '3.12'
+        - '3.13'
+        - '3.14'
+
+    env:
+      PYTHON_VERSION: ${{ matrix.python-version }}
+      PYTHONUNBUFFERED: 1
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      with:
+        cache-suffix: ${{ matrix.python-version }}
+
+    - name: Django 5.1.x Test
+      run: |
+        uvx tox -e "py${PYTHON_VERSION/\./}-django51"
+      if: ${{ env.PYTHON_VERSION == '3.10' || env.PYTHON_VERSION == '3.11' || env.PYTHON_VERSION == '3.12' || env.PYTHON_VERSION == '3.13' }}
+
+    - name: Django 5.2.x Test
+      run: |
+        uvx tox -e "py${PYTHON_VERSION/\./}-django52"
+      if: ${{ env.PYTHON_VERSION == '3.10' || env.PYTHON_VERSION == '3.11' || env.PYTHON_VERSION == '3.12' || env.PYTHON_VERSION == '3.13' || env.PYTHON_VERSION == '3.14'}}
+
+    - name: Django main Test
+      run: |
+        uvx tox -e "py${PYTHON_VERSION/\./}-djangomain"
+      if: ${{ env.PYTHON_VERSION == '3.12' || env.PYTHON_VERSION == '3.13' || env.PYTHON_VERSION == '3.14' }}
+
+    - name: social-core master Test
+      run: |
+        uvx tox -e "py${PYTHON_VERSION/\./}-socialmaster"
+      if: ${{ env.PYTHON_VERSION == '3.10' || env.PYTHON_VERSION == '3.11' || env.PYTHON_VERSION == '3.13' || env.PYTHON_VERSION == '3.14' }}
+
+    - name: Coverage
+      run: |
+        uvx coverage combine
+        uvx coverage xml
+
+    - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+      with:
+        flags: unittests
+        name: Python ${{ matrix.python-version }}
+        token: ${{secrets.CODECOV_TOKEN}} # zizmor: ignore[secrets-outside-env]

@@ -1,0 +1,125 @@
+# https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  PYTEST_ADDOPTS: "-v --color=yes"
+  FORCE_COLOR: "1"
+
+jobs:
+  get-environments:
+    runs-on: ubuntu-latest
+    outputs:
+      envs: ${{ steps.get-envs.outputs.envs }}
+      pythons: ${{ steps.get-pythons.outputs.pythons }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0, filter: "blob:none" }
+      - uses: astral-sh/setup-uv@v7
+      - name: Get test environments
+        id: get-envs
+        run: |
+          ENVS_JSON=$(
+            FORCE_COLOR= uvx hatch env show --json |
+            jq -c 'to_entries | map(select(.key | startswith("hatch-test")) | { name: .key, python: .value.python })'
+          )
+          echo "envs=$ENVS_JSON" | tee $GITHUB_OUTPUT
+      - name: Get python versions
+        id: get-pythons
+        env:
+          ENVS_JSON: ${{ steps.get-envs.outputs.envs }}
+        run: |
+          PYTHONS_JSON=$(echo "$ENVS_JSON" | jq -c 'map(.python) | unique')
+          echo "pythons=$PYTHONS_JSON" | tee $GITHUB_OUTPUT
+  test:
+    name: Tests
+    needs: get-environments
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        env: ${{ fromJSON(needs.get-environments.outputs.envs) }}
+        os: [ubuntu-latest]
+        include:
+          - env:
+              name: hatch-test.py3.14-full
+              python: "3.14"
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0, filter: "blob:none" }
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.env.python }}
+      - name: create environment
+        run: uvx hatch env create ${{ matrix.env.name }}
+      - name: run tests with coverage
+        run: |
+          uvx hatch run ${{ matrix.env.name }}:run-cov
+          # https://github.com/codecov/codecov-cli/issues/648
+          uvx hatch run ${{ matrix.env.name }}:coverage xml
+          rm test-data/.coverage
+      - uses: codecov/codecov-action@v5
+        with:
+          name: ${{ matrix.env.name }}
+          fail_ci_if_error: true
+          files: test-data/coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+  bench:
+    name: CPU Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0, filter: "blob:none" }
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v7
+      - run: uv pip install --system --group=test -e .[full]
+      - uses: CodSpeedHQ/action@v3
+        with:
+          run: pytest -m benchmark --codspeed -n auto
+          token: ${{ secrets.CODSPEED_TOKEN }}
+  import:
+    name: Import Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0, filter: "blob:none" }
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v7
+      - run: uv pip install --system -e .
+      - run: python -c 'import fast_array_utils as fau; print(fau.__all__)'
+      - run: uv pip install --system -e .[testing]
+      - run: python -c 'import testing.fast_array_utils as tfau; print(tfau.ArrayType("numpy", "ndarray"))'
+  check:
+    name: Static Checks
+    runs-on: ubuntu-latest
+    env:
+      SKIP: no-commit-to-branch  # this CI runs on the main branch
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0, filter: "blob:none" }
+      - uses: j178/prek-action@v1
+        with:
+          working-directory: ${{ github.workspace }}
+  pass:
+    name: All Checks
+    if: always()
+    needs:
+      - get-environments
+      - test
+      - bench
+      - import
+      - check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

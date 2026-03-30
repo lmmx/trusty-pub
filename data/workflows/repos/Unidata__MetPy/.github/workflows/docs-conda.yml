@@ -1,0 +1,53 @@
+name: Build Docs (Conda)
+
+# We don't want pushes (or PRs) to gh-pages to kick anything off
+on:
+  pull_request:
+    branches:
+      - main
+      - '[0-9]+.[0-9]+.x'
+
+concurrency:
+  group: ${{ github.workflow}}-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  Docs:
+    name: ${{ matrix.os }} ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash -l {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: 3.11
+            os: macOS
+          - python-version: 3.12
+            os: Windows
+          - python-version: 3.13
+            os: macOS
+          - python-version: 3.14
+            os: Windows
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: 150
+        fetch-tags: true
+        persist-credentials: false
+
+    - name: Install from Conda
+      uses: ./.github/actions/install-conda
+      with:
+        type: 'doc'
+        python-version: ${{ matrix.python-version }}
+
+    - name: Build docs
+      uses: ./.github/actions/build-docs
+      with:
+        key: ${{ matrix.os }}-${{ matrix.python-version }}

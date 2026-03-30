@@ -1,0 +1,29 @@
+name: pysen-test
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+jobs:
+  tox_post_310:
+    name: Run pysen-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        lfs: false
+        path: ${{ env.CHECKOUT_PATH }}
+    - name: Run test
+      uses: ./.github/actions/pysen-test/
+  tox_post_313:
+    name: Run pysen-test-post-313
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        lfs: false
+        path: ${{ env.CHECKOUT_PATH }}
+    - name: Run test
+      uses: ./.github/actions/pysen-test-post-313/

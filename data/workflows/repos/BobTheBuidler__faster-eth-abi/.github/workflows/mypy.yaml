@@ -1,0 +1,140 @@
+name: MyPy (Fast Lane)
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - '.github/workflows/mypy.yaml'
+      - '.github/workflows/mypy-assurance.yaml'
+      - "tests/typecheck/**.py"
+      - "faster_eth_abi/**"
+      - "setup.py"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "!eth-abi-stubs/**"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - '.github/workflows/mypy.yaml'
+      - '.github/workflows/mypy-assurance.yaml'
+      - "tests/typecheck/**.py"
+      - "faster_eth_abi/**"
+      - "setup.py"
+      - "pyproject.toml"
+      - "tox.ini"
+      - "!eth-abi-stubs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mypy-typecheck:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+        impl: ["codec", "abi"]
+        suite: ["fixed", "variable"]
+    steps:
+      - name: Checkout minimal code (no test data)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[mypy]
+
+      - name: Restore .mypy_cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .mypy_cache
+          # use an overload-test-specific key so we dont grow the base cache with a bunch of testdata stuff
+          key: test-data-mypy-cache-${{ runner.os }}-x64-${{ matrix.impl }}-${{ matrix.suite }}
+          # if not found, restore from the base .mypy_cache cache
+          restore-keys: |
+            mypy-cache-${{ runner.os }}-x64-${{ hashFiles('**/*.py', 'pyproject.toml') }}
+            mypy-cache-${{ runner.os }}-x64-
+
+      # Generate and check len_1
+      - name: Generate test data for len_1
+        run: python scripts/generate_overload_tests.py --impl ${{ matrix.impl }} --suite ${{ matrix.suite }} --lengths 1
+      - name: Run mypy on all len_1 typecheck files (sequential)
+        run: |
+          set -e
+          set -o pipefail
+          for file in $(find tests/typecheck/${{ matrix.impl }}/decode/${{ matrix.suite }}/len_1/ -name '*.py'); do
+            start=$(date +%s.%N)
+            mypy --config-file=/dev/null --follow-imports=silent "$file" 2>&1 | grep -v "/dev/null: No \[mypy\] section in config file" || true
+            status=$?
+            end=$(date +%s.%N)
+            duration=$(echo "$end - $start" | bc)
+            echo "[MYPY-TIME] $file took ${duration}s"
+            if [ $status -ne 0 ]; then exit $status; fi
+          done
+
+      # Generate and check len_2
+      - name: Generate test data for len_2
+        run: python scripts/generate_overload_tests.py --impl ${{ matrix.impl }} --suite ${{ matrix.suite }} --lengths 2
+      - name: Run mypy on all len_2 typecheck files (sequential)
+        run: |
+          set -e
+          set -o pipefail
+          for file in $(find tests/typecheck/${{ matrix.impl }}/decode/${{ matrix.suite }}/len_2/ -name '*.py'); do
+            start=$(date +%s.%N)
+            mypy --config-file=/dev/null --follow-imports=silent "$file" 2>&1 | grep -v "/dev/null: No \[mypy\] section in config file" || true
+            status=$?
+            end=$(date +%s.%N)
+            duration=$(echo "$end - $start" | bc)
+            echo "[MYPY-TIME] $file took ${duration}s"
+            if [ $status -ne 0 ]; then exit $status; fi
+          done
+
+      # Generate and check 2.5% of len_3 (sample 1/40)
+      - name: Generate test data for len_3 (sample 1/40)
+        run: python scripts/generate_overload_tests.py --impl ${{ matrix.impl }} --suite ${{ matrix.suite }} --lengths 3 --sample-1-of-x 40
+      - name: Run mypy on all len_3 typecheck files (parallel, 2 jobs)
+        run: |
+          set -e
+          set -o pipefail
+          files=$(find tests/typecheck/${{ matrix.impl }}/decode/${{ matrix.suite }}/len_3/ -name '*.py')
+          echo "$files" | parallel -j 2 --eta '
+            start=$(date +%s.%N)
+            mypy --config-file=/dev/null --follow-imports=silent {} 2>&1 | grep -v "/dev/null: No \[mypy\] section in config file" || true
+            status=$?
+            end=$(date +%s.%N)
+            duration=$(echo "$end - $start" | bc)
+            echo "[MYPY-TIME] {} took ${duration}s"
+            exit $status
+          ' > >(grep -v "cannot open /dev/tty")
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then exit $status; fi
+
+      # Generate and check 0.17% of len_4 (sample 1/600)
+      - name: Generate test data for len_4 (sample 1/600)
+        run: python scripts/generate_overload_tests.py --impl ${{ matrix.impl }} --suite ${{ matrix.suite }} --lengths 4 --sample-1-of-x 600
+      - name: Run mypy on all len_4 typecheck files (parallel, 2 jobs)
+        run: |
+          set -e
+          set -o pipefail
+          files=$(find tests/typecheck/${{ matrix.impl }}/decode/${{ matrix.suite }}/len_4/ -name '*.py')
+          echo "$files" | parallel -j 2 --eta '
+            start=$(date +%s.%N)
+            mypy --config-file=/dev/null --follow-imports=silent {} 2>&1 | grep -v "/dev/null: No \[mypy\] section in config file" || true
+            status=$?
+            end=$(date +%s.%N)
+            duration=$(echo "$end - $start" | bc)
+            echo "[MYPY-TIME] {} took ${duration}s"
+            exit $status
+          ' > >(grep -v "cannot open /dev/tty")
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then exit $status; fi

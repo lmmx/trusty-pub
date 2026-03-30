@@ -1,0 +1,68 @@
+name: python-bip32
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  tests:
+    strategy:
+      matrix:
+        python-version: [3.9, '3.10', 3.11, 3.12, 3.13, 3.14]
+        os:
+          - ubuntu-latest
+          - macos-13  # (non-M1)
+          - macos-latest  # (M1)
+          - windows-latest
+
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip
+    - name: Install python-bip32 from source
+      run: pip install .
+    - name: Test with pytest
+      run: |
+        pip install -r tests/requirements.txt
+        pytest -vvv
+
+  linter:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+    - name: Run `black` on the source code
+      run: |
+        python -m pip install --upgrade pip
+        pip install black
+        python -m black --check bip32 tests
+
+  coincurve_versions:
+    strategy:
+      matrix:
+        coincurve-version: [15, 16, 17, 18, '19.0.1', 20]
+
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.12
+    - name: Testing with Coincurve ${{ matrix.coincurve-version }}
+      run: |
+        python -m pip install --upgrade pip
+        pip install setuptools
+        pip install -r tests/requirements.txt
+        pip install -I coincurve==${{ matrix.coincurve-version }}
+        pip install .

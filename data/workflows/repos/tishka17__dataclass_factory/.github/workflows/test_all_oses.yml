@@ -1,0 +1,60 @@
+name: Run tests on all operating systems
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_SYSTEM_PYTHON: 1
+
+jobs:
+  testing:
+    name: Testing (${{ matrix.python_version.tox }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version:
+          - { setup: '3.9',      tox: 'py39'    }
+          - { setup: '3.10',     tox: 'py310'   }
+          - { setup: '3.11',     tox: 'py311'   }
+          - { setup: '3.12',     tox: 'py312'   }
+          - { setup: 'pypy3.8',  tox: 'pypy38'  }
+          - { setup: 'pypy3.9',  tox: 'pypy39'  }
+          - { setup: 'pypy3.10', tox: 'pypy310' }
+
+        os: ['ubuntu-latest', 'windows-latest', 'macos-latest']
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3
+        with:
+          python-version: ${{ matrix.python_version.setup }}
+
+      - name: Install Just
+        uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff
+        with:
+          just-version: 1.14.0
+
+      - name: Setup environment to run tox
+        env:
+          UV_SYSTEM_PYTHON: 1
+        run:
+          just setup-runner
+
+      - name: Run tests
+        run:
+          just inv test-on-ci
+            --py-target ${{ matrix.python_version.tox }}
+            --cov-output .coverage.${{ matrix.python_version.tox }}

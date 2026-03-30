@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0, v0.13.0, etc.
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - name: Install dependencies and build
+        run: |
+          uv venv
+          uv sync
+          uv build
+
+      - name: Verify build succeeded
+        run: |
+          # Verify that build artifacts exist
+          ls -la dist/
+          echo "Build completed successfully"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
+
+  homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    # Only run for stable releases (not dev, beta, or rc versions)
+    if: ${{ !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc') }}
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Update Homebrew formula
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          # Formula name in homebrew-basic-memory repo
+          formula-name: basic-memory
+          # The tap repository
+          homebrew-tap: basicmachines-co/homebrew-basic-memory
+          # Base branch of the tap repository
+          base-branch: main
+          # Download URL will be automatically constructed from the tag
+          download-url: https://github.com/basicmachines-co/basic-memory/archive/refs/tags/${{ github.ref_name }}.tar.gz
+          # Commit message for the formula update
+          commit-message: |
+            {{formulaName}} {{version}}
+
+            Created by https://github.com/basicmachines-co/basic-memory/actions/runs/${{ github.run_id }}
+        env:
+          # Personal Access Token with repo scope for homebrew-basic-memory repo
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+

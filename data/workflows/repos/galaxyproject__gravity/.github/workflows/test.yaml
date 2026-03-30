@@ -1,0 +1,34 @@
+name: Test
+on: [push, pull_request]
+concurrency:
+  group: py-test-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.14']
+        galaxy-branch: ['release_24.0', 'dev']
+        exclude:
+          # either the release existed before the python release or some expensive-to-build wheels (e.g. numpy) don't
+          # exist for the pinned package version / python version combo
+          - python-version: '3.14'
+            galaxy-branch: 'release_24.0'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Precreate virtualenv
+        run: python -m venv tests/galaxy_venv
+      - name: Install tox
+        run: pip install tox
+      - name: Run tests
+        run: tox -e test
+        env:
+          GRAVITY_TEST_GALAXY_BRANCH: ${{ matrix.galaxy-branch }}
+      - name: "Upload coverage to Codecov"
+        uses: codecov/codecov-action@v5

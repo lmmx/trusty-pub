@@ -1,0 +1,48 @@
+name: test-perl
+
+permissions: {}
+
+on:
+  push:
+    branches:
+      - main
+      - renovate/**
+    paths:
+      - perl/**
+      - testdata/**
+      - .github/**
+  pull_request:
+    branches:
+      - main
+      - renovate/**
+    paths:
+      - perl/**
+      - testdata/**
+      - .github/**
+
+jobs:
+  test-perl:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        perl: [ "5.14", "5.20", "5.26", "5.32" ]
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Setup Perl environment
+      uses: shogo82148/actions-setup-perl@22ab01e83d59dc1abe1796fd8f338da7e7f2d033 # v1.38.1
+      with:
+        perl-version: ${{ matrix.perl }}
+        working-directory: perl
+    - name: Run tests
+      working-directory: perl
+      run: make test
+    # Run author tests second so as to not 'contaminate' the environment
+    # with dependencies listed as author deps when they should have been
+    # listed as general deps
+    - name: Run author tests
+      working-directory: perl
+      run: make authortest

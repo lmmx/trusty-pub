@@ -1,0 +1,31 @@
+on:
+  workflow_call:
+
+env:
+  CMAKE_BUILD_TYPE: Debug
+
+jobs:
+  run-checks:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Sync and install with uv
+        run: |
+          uv sync --frozen --all-extras
+          ls -l
+          ls -l docling_parse
+      - name: Run styling check
+        run: |
+          uv run pre-commit run --all-files
+      - name: Testing
+        run: |
+          uv run pytest -v tests
+      - name: Build with uv
+        run: uv build

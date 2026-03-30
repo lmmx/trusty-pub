@@ -1,0 +1,25 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+    types: [assigned, opened, synchronize, reopened]
+
+jobs:
+  test_coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Flit
+        run: pip install flit "django>=5.2"
+      - name: Install Dependencies
+        run: make install
+      - name: Test
+        run: pytest --cov=ninja_extra --cov-report=xml tests
+      - name: Coverage
+        uses: codecov/codecov-action@v5

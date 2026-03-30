@@ -1,0 +1,182 @@
+name: release
+run-name: Release
+
+on:
+  release:
+    types: [released]
+
+  workflow_call:
+    inputs:
+      release_id:
+        type: string
+        description: "The id of the release"
+        required: false
+
+      release_tag:
+        type: string
+        description: "The tag of the release"
+        required: false
+
+      is_draft:
+        type: boolean
+        description: "Is the release a draft"
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  release_id: ${{ inputs.release_id || github.event.release.id }}
+  release_tag: ${{ inputs.release_tag || github.event.release.tag_name }}
+  is_draft: ${{ inputs.is_draft || github.event.release.draft }}
+  is_scheduled: ${{ github.event_name == 'schedule' }}
+
+jobs:
+  validate_tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
+        with:
+          egress-policy: audit
+
+      - name: Harden Runner
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Fail early if tag schema is invalid
+        run: |
+          if [[ ! ${{ env.release_tag }} =~ ^refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+)$ && ${{ env.release_tag }} =~ ^refs/tags/test-.*$ ]]; then
+            echo "Tag ${{ env.release_tag }} is not a valid semver tag"
+            exit 1
+          fi
+
+  run_tests:
+    needs: validate_tag
+    uses: ./.github/workflows/JOB_tests.yml
+
+  run_e2e:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/JOB_e2e.yml
+    secrets:
+      E2E_API_KEY: ${{ secrets.E2E_API_KEY }}
+      E2E_ENVIRONMENT: ${{ secrets.E2E_ENVIRONMENT }}
+      E2E_TEAM: ${{ secrets.E2E_TEAM }}
+      E2E_VIDEO_AWS_ROLE: ${{ secrets.E2E_VIDEO_AWS_ROLE }}
+      E2E_STORAGE_NAME: ${{ secrets.E2E_STORAGE_NAME }}
+      E2E_STORAGE_REGION: ${{ secrets.E2E_STORAGE_REGION }}
+
+  release:
+    needs: [run_tests, run_e2e]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - name: Free Disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android  # will release about 10 GB if you don't need Android
+          sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: "3.9"
+
+      - run: pip install pip --upgrade
+      - name: Setup Poetry
+        uses: abatilo/actions-poetry@0dd19c9498c3dc8728967849d0d2eae428a8a3d8
+        with:
+          poetry-version: "1.3.1"
+
+      - name: Build package
+        run: poetry build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc
+
+  test_release:
+    needs: [run_tests, run_e2e]
+    if: startsWith(github.ref, 'refs/tags/test-')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - name: Free Disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android  # will release about 10 GB if you don't need Android
+          sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
+
+      - name: Harden Runner
+        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481 # v2.11.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+        with:
+          python-version: "3.9"
+      - run: pip install pip --upgrade
+      - name: Setup Poetry
+        uses: abatilo/actions-poetry@0dd19c9498c3dc8728967849d0d2eae428a8a3d8
+        with:
+          poetry-version: "1.3.1"
+      - name: Build package
+        run: |
+          poetry build
+
+      - name: Publish to Test PyPI
+        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  notify_release:
+    needs: [release]
+    if: success()
+    uses: ./.github/workflows/JOB_slack_message.yml
+    secrets: inherit
+    with:
+      icon: ":rocket:"
+      at_team: true
+      message: |
+        :tada: *${{ inputs.release_tag || github.event.release.tag_name }}* has been released!
+        :link:
+          - https://pypi.org/project/darwin-py
+          - ${{ github.event.release.html_url }}
+
+  notify_failed_release:
+    needs: [release]
+    if: failure()
+    uses: ./.github/workflows/JOB_slack_message.yml
+    secrets: inherit
+    with:
+      icon: ":warning:"
+      at_team: true
+      message: |
+        :warning: *${{ inputs.release_tag || github.event.release.tag_name }}* Release has failed to be released!
+
+        *An error occurred performing release, and you may need to release manually.*
+
+        :link:
+          - ${{ github.event.release.html_url }}

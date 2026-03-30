@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+jobs:
+  unit-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      #max-parallel: 3
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        os: [ubuntu-latest]
+        EXTRA: [false]  # used to force includes to get included
+        include:
+          - python-version: '3.12'
+            os: ubuntu-latest
+            EXTRA: true
+            NOTALL: true  # without warcio[all]
+          - python-version: '3.11'
+            os: macos-latest
+            EXTRA: true
+          - python-version: '3.13'
+            os: macos-latest
+            EXTRA: true
+          - python-version: '3.8'
+            os: windows-latest
+            EXTRA: true
+          - python-version: '3.13'
+            os: windows-latest
+            EXTRA: true
+          - python-version: '3.8'
+            os: ubuntu-22.04  # oldest version on github actions
+            EXTRA: true
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install setuptools on python 3.12+
+        if: ${{ matrix.python-version >= '3.12' }}
+        run: |
+          pip install setuptools
+
+      - name: Install warcio ALL
+        if: ${{ ! matrix.NOTALL }}
+        run: pip install .[all,testing]
+      - name: Install warcio NOTALL
+        if: ${{ matrix.NOTALL }}
+        run: pip install .[testing]
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4

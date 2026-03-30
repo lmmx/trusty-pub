@@ -1,0 +1,242 @@
+name: Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  schedule:
+    - cron:  '0 0 * * 0'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_NO_BINARY: rasterio
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  linting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: pre-commit/action@v3.0.1
+
+  docker_tests:
+    needs: linting
+    runs-on: ubuntu-latest
+    name: Docker | GDAL=${{ matrix.gdal-version }} | python=${{ matrix.python-version }} | rasterio${{ matrix.rasterio-version }} | scipy ${{ matrix.run-with-scipy }}
+    container: ghcr.io/osgeo/gdal:ubuntu-full-${{ matrix.gdal-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13', '3.14']
+        rasterio-version: ['']
+        xarray-version: ['']
+        run-with-scipy: ['YES']
+        gdal-version: ['3.12.1']
+        include:
+          - python-version: '3.12'
+            rasterio-version: ''
+            xarray-version: '==2024.7.0'
+            run-with-scipy: 'YES'
+            gdal-version: '3.8.5'
+          - python-version: '3.12'
+            rasterio-version: ''
+            xarray-version: ''
+            run-with-scipy: 'YES'
+            gdal-version: '3.9.3'
+          - python-version: '3.12'
+            rasterio-version: ''
+            xarray-version: ''
+            run-with-scipy: 'YES'
+            gdal-version: '3.10.3'
+          - python-version: '3.12'
+            rasterio-version: ''
+            xarray-version: ''
+            run-with-scipy: 'YES'
+            gdal-version: '3.11.5'
+          - python-version: '3.12'
+            rasterio-version: ''
+            xarray-version: ''
+            run-with-scipy: 'NO'
+            gdal-version: '3.11.5'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Update
+        run: |
+          rm /etc/apt/sources.list.d/apache-arrow.sources
+          apt-get update
+          apt-get -y install software-properties-common
+          add-apt-repository -y ppa:deadsnakes/ppa
+          apt-get update
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: |
+          apt-get install -y --no-install-recommends \
+            python${{ matrix.python-version }} \
+            python${{ matrix.python-version }}-dev \
+            python${{ matrix.python-version }}-venv \
+            python3-pip \
+            g++ \
+            git
+          chown -R $(whoami) /github/home/
+
+      - name: Install dependencies
+        run: |
+          python${{ matrix.python-version }} -m venv testenv
+          . testenv/bin/activate
+          python -m pip install --upgrade pip
+          export INSTALL_DEPS='rasterio${{ matrix.rasterio-version }} xarray${{ matrix.xarray-version }}'
+          [ "${{ matrix.run-with-scipy }}" = "YES" ] && export INSTALL_DEPS="${INSTALL_DEPS} scipy"
+          python -m pip install $INSTALL_DEPS
+          python -m pip install -e . --group test
+
+      - name: Check and Log Environment
+        shell: bash
+        run: |
+          . testenv/bin/activate
+          python -V
+          python -c "import rioxarray; rioxarray.show_versions();"
+
+      - name: run tests
+        run: |
+          . testenv/bin/activate
+          python -m pytest --cov-report term-missing --cov=rioxarray --cov-report xml
+
+      - uses: codecov/codecov-action@v5
+
+
+  conda_test:
+    needs: linting
+    name: ${{ matrix.os }} | ${{ matrix.python-version }} | rasterio-${{ matrix.rasterio-version }} | scipy ${{ matrix.run-with-scipy }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
+        python-version: ['3.12', '3.13', '3.14']
+        gdal-version: ['*']
+        rasterio-version: ['*']
+        xarray-version: ['*']
+        run-with-scipy: ['YES']
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Conda
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          # https://github.com/mamba-org/setup-micromamba/issues/225
+          micromamba-version: 1.5.10-0
+          init-shell: bash
+          environment-name: test
+          create-args: >-
+            python=${{ matrix.python-version }}
+            rasterio=${{ matrix.rasterio-version }}
+            xarray=${{ matrix.xarray-version }}
+            libgdal-core=${{ matrix.gdal-version }}
+            libgdal-netcdf
+            libgdal-hdf4
+            libgdal-hdf5
+            pyproj
+            netcdf4
+            dask
+            pandoc
+
+      - name: Install Env
+        shell: bash
+        run: |
+          [ "${{ matrix.run-with-scipy }}" = "YES" ] && micromamba install -n test scipy
+          micromamba run -n test python -m pip install -e . --group dev
+
+      - name: Check and Log Environment
+        shell: bash
+        run: |
+          micromamba run -n test python -V
+          micromamba run -n test python -c "import rioxarray; rioxarray.show_versions();"
+          micromamba info
+
+      - name: pylint
+        if: matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          micromamba run -n test pylint rioxarray/
+
+      - name: mypy
+        shell: bash
+        if: matrix.python-version == '3.12'
+        run: |
+          micromamba run -n test mypy rioxarray/
+
+      - name: Test
+        shell: bash
+        run: |
+          micromamba run -n test pytest --cov-report term-missing --cov=rioxarray --cov-report xml
+
+      - name: Test Build docs
+        shell: bash
+        if: contains(matrix.os, 'ubuntu')
+        run: |
+          micromamba run -n test sphinx-build -b html docs/ docs/_build/
+
+      - uses: codecov/codecov-action@v5
+
+
+  test_latest:
+    needs: linting
+    name: Test latest dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Conda
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          # https://github.com/mamba-org/setup-micromamba/issues/225
+          micromamba-version: 1.5.10-0
+          init-shell: bash
+          environment-name: test
+          create-args: >-
+            python=3.12
+            proj
+            libgdal-core
+            libgdal-netcdf
+            libgdal-hdf4
+            libgdal-hdf5
+            cython
+            netcdf4
+
+      - name: Install Env
+        shell: bash
+        run: |
+          micromamba run -n test python -m pip install \
+            --index-url https://pypi.anaconda.org/scientific-python-nightly-wheels/simple \
+            --no-deps --pre --upgrade \
+            numpy \
+            pandas \
+            scipy;
+          micromamba run -n test python -m pip install --upgrade \
+            git+https://github.com/dask/dask.git@main \
+            git+https://github.com/dask/distributed.git@main \
+            git+https://github.com/mapbox/rasterio.git@main \
+            git+https://github.com/pyproj4/pyproj.git@main \
+            git+https://github.com/pydata/xarray.git@main;
+          micromamba run -n test python -m pip install -e . --group dev
+
+      - name: Check and Log Environment
+        shell: bash
+        run: |
+          micromamba run -n test python -V
+          micromamba run -n test python -c "import rioxarray; rioxarray.show_versions();"
+          micromamba info
+
+      - name: Test
+        shell: bash
+        run: |
+          micromamba run -n test pytest --cov-report term-missing --cov=rioxarray --cov-report xml

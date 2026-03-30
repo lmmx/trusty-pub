@@ -1,0 +1,776 @@
+name: precommit test
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: '**'
+  workflow_dispatch:
+      inputs:
+        logLevel:
+          default: warning
+          description: "Log level"
+          required: true
+        tags:
+          description: "Test scenario tags"
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Check linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; import os; print(\"\n\".join(os.environ[\"PATH\"].split(os.pathsep))); print(sys.version); print(sys.executable);"
+      - name: Upgrade setuptools and pip
+        run: uv pip install -U setuptools pip --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Run fix_lint
+        run: python -m tox -e fix_lint
+
+  type_checking:
+    name: Type Checking
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; import os; print(\"\n\".join(os.environ[\"PATH\"].split(os.pathsep))); print(sys.version); print(sys.executable);"
+      - name: Upgrade setuptools and pip
+        run: uv pip install -U setuptools pip --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Run pyright on Selected Files
+        run: python -m tox -e pyright
+
+  build:
+    needs: lint
+    name: Build Wheel File
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Upgrade setuptools and pip
+        run: uv pip install -U setuptools pip wheel --system
+      - name: Generate wheel
+        run: python -m pip wheel -v -w dist --no-deps .
+      - name: Show wheels generated
+        run: ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: wheel
+          path: dist/
+
+  test:
+    name: Test py-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cloud-provider }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # matrix is empty for pre-commit, tests are only added
+        # through the include directive
+        include:
+          # only run py3.9 tests on ubuntu+aws to isolate 3.9 failures
+          - python-version: "3.9"
+            os: ubuntu-latest-64-cores
+            cloud-provider: aws
+          # only run gcp tests with latest python and ubuntu
+          - cloud-provider: gcp
+            python-version: "3.12"
+            os: ubuntu-latest-64-cores
+          # only run azure tests with latest python and ubuntu
+          - cloud-provider: azure
+            python-version: "3.12"
+            os: ubuntu-latest-64-cores
+          # run py 3.13 tests on aws/ubuntu
+          - python-version: "3.13"
+            cloud-provider: aws
+            os: ubuntu-latest-64-cores
+          # run py 3.12 doctests on azure/macos
+          - python-version: "3.12"
+            cloud-provider: azure
+            os: macos-latest
+          # run py 3.13 tests on gcp on windows
+          - python-version: "3.13"
+            cloud-provider: gcp
+            os: windows-latest-64-cores
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Decrypt parameters.py
+        shell: bash
+        run: .github/scripts/decrypt_parameters.sh
+        env:
+          PARAMETER_PASSWORD: ${{ secrets.PARAMETER_PASSWORD }}
+          CLOUD_PROVIDER: ${{ matrix.cloud-provider }}
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Add protoc to Windows path
+        if: runner.os == 'Windows'
+        run: |
+          echo "$HOME/local/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Download wheel(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - name: Show wheels downloaded
+        run: ls -lh dist
+        shell: bash
+      - name: Upgrade setuptools, pip and wheel
+        run: uv pip install -U setuptools pip wheel --system
+      - name: Install tox
+        run: uv pip install tox --system
+      # we only run doctest on macos
+      - if: ${{ matrix.os == 'macos-latest' }}
+        name: Run doctests
+        run: python -m tox -e "py${PYTHON_VERSION}-doctest-notudf-ci"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short
+          TOX_PARALLEL_NO_SPINNER: 1
+          # Specify SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1 when adding >= python3.13 with no server-side support
+          # For example, see https://github.com/snowflakedb/snowpark-python/pull/681
+        shell: bash
+      # do not run other tests for macos
+      - if: ${{ matrix.os != 'macos-latest' }}
+        name: Run tests (excluding doctests)
+        run: python -m tox -e "py${PYTHON_VERSION/\./}-notdoctest-ci"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short
+          TOX_PARALLEL_NO_SPINNER: 1
+          SNOWPARK_PYTHON_API_TEST_BUCKET_PATH: ${{ secrets.SNOWPARK_PYTHON_API_TEST_BUCKET_PATH }}
+          SNOWPARK_PYTHON_API_S3_STORAGE_INTEGRATION: ${{ vars.SNOWPARK_PYTHON_API_S3_STORAGE_INTEGRATION }}
+        shell: bash
+      - name: Install MS ODBC Driver (Ubuntu only)
+        if: ${{ contains(matrix.os, 'ubuntu') }}
+        run: |
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+        shell: bash
+      - name: Run data source tests
+        # psycopg2 is not supported on macos 3.9
+        if: ${{ !(matrix.os == 'macos-latest' && matrix.python-version == '3.9') }}
+        run: python -m tox -e datasource
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short
+          TOX_PARALLEL_NO_SPINNER: 1
+        shell: bash
+      - name: Combine coverages
+        run: python -m tox -e coverage --skip-missing-interpreters false
+        shell: bash
+        env:
+          SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: coverage_${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cloud-provider }}
+          path: |
+            .tox/.coverage
+            .tox/coverage.xml
+
+  test-local-testing:
+    name: Test Local Testing Module py-${{ matrix.os }}-${{ matrix.python-version }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.13"]
+        cloud-provider: [azure]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Decrypt parameters.py
+        shell: bash
+        run: .github/scripts/decrypt_parameters.sh
+        env:
+          PARAMETER_PASSWORD: ${{ secrets.PARAMETER_PASSWORD }}
+          CLOUD_PROVIDER: ${{ matrix.cloud-provider }}
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Add protoc to Windows path
+        if: runner.os == 'Windows'
+        run: |
+          echo "$HOME/local/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Download wheel(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - name: Show wheels downloaded
+        run: ls -lh dist
+        shell: bash
+      - name: Upgrade setuptools, pip and wheel
+        run: uv pip install -U setuptools pip wheel --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Run tests
+        run: python -m tox -e "py${PYTHON_VERSION/\./}-local"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short
+          TOX_PARALLEL_NO_SPINNER: 1
+          SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1
+        shell: bash
+      - name: Combine coverages
+        run: python -m tox -e coverage --skip-missing-interpreters false
+        shell: bash
+        env:
+          SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: coverage_${{ matrix.os }}-${{ matrix.python-version }}-local-testing
+          path: |
+            .tox/.coverage
+            .tox/coverage.xml
+
+  test-ast-encoding:
+    name: Test AST Encoding py-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cloud-provider }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        # TODO SNOW-1763185 use py39 by default
+        # Protobuf encoding differs per python version, use 3.8 by default.
+        python-version: [ "3.11" ]
+        cloud-provider: [aws]
+        protobuf-version: ["3.20.1"]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Decrypt parameters.py
+        shell: bash
+        run: .github/scripts/decrypt_parameters.sh
+        env:
+          PARAMETER_PASSWORD: ${{ secrets.PARAMETER_PASSWORD }}
+          CLOUD_PROVIDER: ${{ matrix.cloud-provider }}
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Download wheel(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - name: Show wheels downloaded
+        run: ls -lh dist
+        shell: bash
+      - name: Upgrade setuptools, pip and wheel
+        run: uv pip install -U setuptools pip wheel --system
+      - name: Install protobuf
+        run: uv pip install protobuf==${{ matrix.protobuf-version }} --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Set up Windows environment
+        if: runner.os == 'Windows'
+        # windows timezone management is broken, that's why we need a special fix here
+        run: |
+            "TZ=EST" >> $env:GITHUB_ENV
+            echo "TZ=EST" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "$HOME/local/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Run tests
+        # TODO: SNOW-1763186 use pytest marker to test multiple TZs
+        run: TZ=EST python -m tox -e "py${PYTHON_VERSION/\./}-ast"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short
+          TOX_PARALLEL_NO_SPINNER: 1
+          SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1
+          TZ: EST
+        shell: bash
+      - name: Combine coverages
+        run: python -m tox -e coverage --skip-missing-interpreters false
+        shell: bash
+        env:
+          SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: coverage_${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cloud-provider }}
+          path: |
+            .tox/.coverage
+            .tox/coverage.xml
+
+  doctest-ast-phase0:
+    name: Doctest AST (phase0) py-${{ matrix.os }}-${{ matrix.python-version }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest ]
+        python-version: [ "3.9"]
+        cloud-provider: [ aws ]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Decrypt parameters.py
+        shell: bash
+        run: .github/scripts/decrypt_parameters.sh
+        env:
+          PARAMETER_PASSWORD: ${{ secrets.PARAMETER_PASSWORD }}
+          CLOUD_PROVIDER: ${{ matrix.cloud-provider }}
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Download wheel(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - name: Show wheels downloaded
+        run: ls -lh dist
+        shell: bash
+      - name: Upgrade setuptools, pip and wheel
+        run: uv pip install -U setuptools pip wheel --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Run doctests for AST (I/II)
+        run: python -m tox -e "py${PYTHON_VERSION}-doctest-notudf-ci"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short --enable_ast
+          TOX_PARALLEL_NO_SPINNER: 1
+        shell: bash
+
+  test-ast-phase0:
+    name: Test AST enabled (phase0) py-${{ matrix.os }}-${{ matrix.python-version }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ "3.13" ] # Test latest python
+        cloud-provider: [ gcp ] # Test only one csp
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Decrypt parameters.py
+        shell: bash
+        run: .github/scripts/decrypt_parameters.sh
+        env:
+          PARAMETER_PASSWORD: ${{ secrets.PARAMETER_PASSWORD }}
+          CLOUD_PROVIDER: ${{ matrix.cloud-provider }}
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Download wheel(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - name: Show wheels downloaded
+        run: ls -lh dist
+        shell: bash
+      - name: Upgrade setuptools, pip and wheel
+        run: uv pip install -U setuptools pip wheel --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Run tests for AST (II/II)
+        run: python -m tox -e "py${PYTHON_VERSION/\./}-notudfdoctest-ci"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short --enable_ast
+          TOX_PARALLEL_NO_SPINNER: 1
+          SNOWPARK_PYTHON_API_TEST_BUCKET_PATH: ${{ secrets.SNOWPARK_PYTHON_API_TEST_BUCKET_PATH }}
+          SNOWPARK_PYTHON_API_S3_STORAGE_INTEGRATION: ${{ vars.SNOWPARK_PYTHON_API_S3_STORAGE_INTEGRATION }}
+        shell: bash
+      - name: Combine coverages
+        run: python -m tox -e coverage --skip-missing-interpreters false
+        shell: bash
+        env:
+          SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: coverage_${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cloud-provider }}
+          path: |
+            .tox/.coverage
+            .tox/coverage.xml
+
+  test-snowpark-pandas:
+    name: Test modin-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cloud-provider }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # matrix is empty for pre-commit, tests are only added
+        # through the include directive
+        # We split Python version and OS differences across the different clouds to make sure
+        # the actions runners do not get overwhelmed.
+        # When support for a new Python version is added in the future, avoid adding a new task
+        # --just replace the version on an old one, and let the daily job handle full python
+        # version/cloud/OS permutation coverage.
+        include:
+          # The steps below are configured to run only doctests for macos-3.12-aws
+          - python-version: "3.9"
+            os: macos-latest
+            cloud-provider: aws
+          - cloud-provider: gcp
+            python-version: "3.11"
+            os: windows-latest-64-cores
+          - cloud-provider: azure
+            python-version: "3.10"
+            os: ubuntu-latest-64-cores
+          - python-version: "3.12"
+            cloud-provider: aws
+            os: ubuntu-latest-64-cores
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Decrypt parameters.py
+        shell: bash
+        run: .github/scripts/decrypt_parameters.sh
+        env:
+          PARAMETER_PASSWORD: ${{ secrets.PARAMETER_PASSWORD }}
+          CLOUD_PROVIDER: ${{ matrix.cloud-provider }}
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Add protoc to Windows path
+        if: runner.os == 'Windows'
+        run: |
+          echo "$HOME/local/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Download wheel(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - name: Show wheels downloaded
+        run: ls -lh dist
+        shell: bash
+      - name: Upgrade setuptools, pip and wheel
+        run: uv pip install -U setuptools pip wheel --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - if: ${{ matrix.os == 'macos-latest' && matrix.cloud-provider == 'aws' }}
+        name: Check AutoSwitchBackend default value
+        # SNOW-2389912: Ensure hybrid is correctly enabled by default. We can't use pytest because
+        # our test suite sets the AutoSwitchBackend variable explicitly.
+        run: |
+          python -m tox -e "py${PYTHON_VERSION}-snowparkpandashybridcheck_sessionfirst-modin-ci" \
+          && python -m tox -e "py${PYTHON_VERSION}-snowparkpandashybridcheck_pluginfirst-modin-ci"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+        # only run doctest for macos on aws
+      - if: ${{ matrix.os == 'macos-latest' && matrix.cloud-provider == 'aws' }}
+        name: Run Snowpark pandas API doctests
+        run: python -m tox -e "py${PYTHON_VERSION}-doctest-snowparkpandasdoctest-modin-ci"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short
+          TOX_PARALLEL_NO_SPINNER: 1
+          # Specify SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1 when adding >= python3.11 with no server-side support
+          # For example, see https://github.com/snowflakedb/snowpark-python/pull/681
+        shell: bash
+        # do not run other tests for macos on aws
+      - if: ${{ !(matrix.os == 'macos-latest' && matrix.cloud-provider == 'aws') }}
+        name: Run Snowpark pandas API tests (excluding doctests)
+        run: python -m tox -e "py${PYTHON_VERSION/\./}-snowparkpandasnotdoctest-modin-ci"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short
+          TOX_PARALLEL_NO_SPINNER: 1
+        shell: bash
+      - name: Combine coverages
+        run: python -m tox -e coverage --skip-missing-interpreters false
+        shell: bash
+        env:
+          SNOWFLAKE_IS_PYTHON_RUNTIME_TEST: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: coverage_${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.cloud-provider }}-snowpark-pandas-testing
+          path: |
+            .tox/.coverage
+            .tox/coverage.xml
+
+  test-modin-extra-without-pandas-extra:
+    name: Test modin extra without pandas extra py-${{ matrix.os.download_name }}-${{ matrix.python-version }}-${{ matrix.cloud-provider }}.
+    needs: build
+    runs-on: ${{ matrix.os.image_name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - image_name: macos-latest
+            download_name: macos
+        python-version: ["3.9"]
+        cloud-provider: [aws]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Decrypt parameters.py
+        shell: bash
+        run: .github/scripts/decrypt_parameters.sh
+        env:
+          PARAMETER_PASSWORD: ${{ secrets.PARAMETER_PASSWORD }}
+          CLOUD_PROVIDER: ${{ matrix.cloud-provider }}
+      - name: Download wheel(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - name: Show wheels downloaded
+        run: ls -lh dist
+        shell: bash
+      - name: Upgrade setuptools, pip and wheel
+        run: uv pip install -U setuptools pip wheel --system
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Run all tests
+        run: python -m tox -e "modin_extra_without_pandas_extra"
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          cloud_provider: ${{ matrix.cloud-provider }}
+          PYTEST_ADDOPTS: --color=yes --tb=short
+          TOX_PARALLEL_NO_SPINNER: 1
+        shell: bash
+      - name: Combine coverages
+        run: python -m tox -e coverage --skip-missing-interpreters false
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: coverage_modin_extra_without_pandas_extra
+          path: |
+            .tox/.coverage
+            .tox/coverage.xml
+
+  combine-coverage:
+    if: ${{ success() || failure() }}
+    name: Combine coverage
+    needs:
+      - test
+      - test-local-testing
+      - test-snowpark-pandas
+      - test-modin-extra-without-pandas-extra
+      - test-ast-encoding
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Upgrade setuptools and pip
+        run: uv pip install -U setuptools pip --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Collect all coverages to one dir
+        run: |
+          python -c '
+          from pathlib import Path
+          import shutil
+
+          src_dir = Path("artifacts")
+          dst_dir = Path(".") / ".tox"
+          dst_dir.mkdir()
+          for src_file in src_dir.glob("*/.coverage"):
+              dst_file = dst_dir / ".coverage.{}".format(src_file.parent.name[9:])
+              print("{} copy to {}".format(src_file, dst_file))
+              shutil.copy(str(src_file), str(dst_file))'
+      - name: Combine coverages
+        run: python -m tox -e coverage
+      - name: Publish html coverage
+        uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: overall_cov_html
+          path: .tox/htmlcov
+      - name: Publish xml coverage
+        uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: overall_cov_xml
+          path: .tox/coverage.xml
+      - uses: codecov/codecov-action@v4
+        with:
+          file: .tox/coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Show coverage diff
+        run: |
+          uv pip install diff_cover --system
+          git log -n 5 --pretty=oneline
+          git fetch -f origin main:main || true
+          diff-cover .tox/coverage.xml --compare-branch=main --fail-under=95
+
+  doc:
+    needs: lint
+    name: Build Doc
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+      - name: Upgrade setuptools and pip
+        run: uv pip install -U setuptools pip --system
+      - name: Install tox
+        run: uv pip install tox --system
+      - name: Install protoc
+        shell: bash
+        run: .github/scripts/install_protoc.sh
+      - name: Build document
+        run: python -m tox -e docs
+      - name: Upload html files
+        uses: actions/upload-artifact@v4
+        with:
+          include-hidden-files: true
+          name: docs
+          path: .tox/docs_out

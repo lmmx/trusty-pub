@@ -1,0 +1,114 @@
+name: Create release
+
+on:
+  push:
+    tags:
+    - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+  UV_SYSTEM_PYTHON: "1"  # make uv do global installs
+
+jobs:
+  publish-pypi:
+    runs-on: ubuntu-latest
+    name: PyPI Release
+    environment: release
+    if: github.repository_owner == 'sphinx-doc'
+    permissions:
+      attestations: write  # for actions/attest
+      id-token: write  # for actions/attest & PyPI trusted publishing
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          enable-cache: false
+
+      - name: Install build dependencies (pypa/build, twine)
+        run: uv pip install --group package
+
+      - name: Build distribution
+        run: python -m build
+
+      - name: Check distribution
+        run: twine check dist/*
+
+      - name: Create Sigstore attestations for built distributions
+        uses: actions/attest@v1
+        id: attest
+        with:
+          subject-path: "dist/*"
+          predicate-type: "https://docs.pypi.org/attestations/publish/v1"
+          predicate: "null"
+          show-summary: "true"
+
+      - name: Convert attestations to PEP 740
+        run: >
+          python utils/convert_attestations.py
+          "$BUNDLE_PATH"
+          "$SIGNER_IDENTITY"
+        env:
+          BUNDLE_PATH: "${{ steps.attest.outputs.bundle-path }}"
+          # workflow_ref example: sphinx-doc/sphinx/.github/workflows/create-release.yml@refs/heads/master
+          # this forms the "signer identity" for the attestations
+          SIGNER_IDENTITY: "https://github.com/${{ github.workflow_ref }}"
+
+      - name: Inspect PEP 740 attestations
+        run: pypi-attestations inspect dist/*.publish.attestation
+
+      - name: Prepare attestation bundles for uploading
+        run: |
+          mkdir -p /tmp/attestation-bundles
+          cp "$BUNDLE_PATH" /tmp/attestation-bundles/
+          cp dist/*.publish.attestation /tmp/attestation-bundles/
+        env:
+          BUNDLE_PATH: "${{ steps.attest.outputs.bundle-path }}"
+
+      - name: Upload attestation bundles
+        uses: actions/upload-artifact@v6
+        with:
+          name: attestation-bundles
+          path: /tmp/attestation-bundles/
+
+      - name: Upload to PyPI
+        env:
+          TWINE_NON_INTERACTIVE: "true"
+        run: twine upload dist/* --attestations
+
+  github-release:
+    runs-on: ubuntu-latest
+    name: GitHub release
+    environment: release
+    if: github.repository_owner == 'sphinx-doc'
+    permissions:
+      contents: write  # needed to create a GitHub release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: >-
+          gh release create "${TAG}"
+          --title "Sphinx ${TAG#v}"
+          --notes "Changelog: https://www.sphinx-doc.org/en/master/changes.html"

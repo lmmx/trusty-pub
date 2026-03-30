@@ -1,0 +1,171 @@
+name: Release artifacts
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      tag_version:
+        description: 'Tag version:'
+        required: true
+
+permissions:
+    id-token: write # This is required for requesting the JWT
+    contents: write # This is required for actions/checkout
+    
+jobs:
+  define-release-version:
+    name: Define Release Version
+    runs-on: ubuntu-24.04
+
+    outputs:
+      version: ${{ steps.set-tag-version.outputs.tag_version }}
+    
+    steps:
+      - name: Define release version
+        id: set-tag-version
+        run: |
+          if [[ -n "$GITHUB_REF" && "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag_version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          elif [[ -n "$INPUT_TAG_VERSION" ]]; then
+            echo "tag_version=$INPUT_TAG_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "No tag version found."
+            exit 1
+          fi
+        env:
+          INPUT_TAG_VERSION: ${{ github.event.inputs.tag_version }}
+      
+  release-artifacts-docker:
+    name: Release Artifacts Docker
+    runs-on: ubuntu-24.04
+    needs: define-release-version
+  
+    steps:
+      - name: Check out code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          ref: ${{ needs.define-release-version.outputs.version }}
+          
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@4574d27a4764455b42196d70a065bc6853246a25 # v3.4.0
+        with:
+          platforms: linux/amd64,linux/arm64
+          # The latest version will lead to segmentation fault.
+          image: tonistiigi/binfmt:qemu-v7.0.0-28
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca  # v3.9.0
+
+      - name: Login to Docker Hub Registry 🔢
+        run: echo ${{ secrets.DOCKER_HUB_PASSWORD }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin || true
+
+      - name: Authenticate with gcloud for release registry 🎫
+        id: 'auth-release'
+        uses: 'google-github-actions/auth@ef5d53e30bbcd8d0836f4288f5e50ff3e086997d'
+        with:
+            workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+            service_account: '${{ secrets.RASA_SDK_RELEASE_ACCOUNT_NAME }}'
+            
+      - name: Authenticate docker for release registry 🎫
+        run: gcloud auth configure-docker europe-west3-docker.pkg.dev
+
+      - name: Build and Push Docker image to the DockerHub 📦
+        run: |
+          make build-and-push-multi-platform-docker
+        env:
+          IMAGE_TAG: ${{ needs.define-release-version.outputs.version }}
+          IMAGE_NAME: "rasa/rasa-sdk"
+
+      - name: Build and Push Docker image to the GCP 📦
+        run: |
+          make build-and-push-multi-platform-docker
+        env:
+          IMAGE_TAG: ${{ needs.define-release-version.outputs.version }}
+          IMAGE_NAME: "europe-west3-docker.pkg.dev/rasa-releases/rasa-sdk/rasa-sdk"
+            
+  release-artifacts-pypi:
+    name: Release Artifacts PyPI
+    runs-on: ubuntu-24.04
+    needs: define-release-version
+    
+    steps:
+      - name: Checkout git repository 🕝
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          ref: ${{ needs.define-release-version.outputs.version }}
+
+      - name: Set up Python 3.10 🐍
+        uses: actions/setup-python@d27e3f3d7c64b4bbf8e4abfb9b63b83e846e0435
+        with:
+          python-version: '3.10'
+
+      - name: Read Poetry Version 🔢
+        run: |
+          echo "POETRY_VERSION=$(scripts/poetry-version.sh)" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Install poetry 🦄
+        uses: Gr1N/setup-poetry@15821dc8a61bc630db542ae4baf6a7c19a994844
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+
+      - name: Build ⚒️ Distributions
+        run: poetry build
+
+      - name: Publish to PyPI 📦
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          skip_existing: true
+
+  release-atifacts-publish-release:
+    name: Release Artifacts Publish Release
+    runs-on: ubuntu-24.04
+    needs: [define-release-version, release-artifacts-docker, release-artifacts-pypi]
+
+    steps:
+      - name: Check out code
+        if: success()
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          ref: ${{ needs.define-release-version.outputs.version }}
+      
+      - name: Publish Release Notes 🗞
+        if: success()
+        env:
+          GITHUB_TAG: ${{ needs.define-release-version.outputs.version }}
+          GITHUB_REPO_SLUG: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.RASASDK_GITHUB_TOKEN }}
+        run: |
+          GITHUB_TAG=$GITHUB_TAG
+          pip install -U github3.py pep440-version-utils
+          python3 scripts/publish_gh_release_notes.py
+
+  release-artifact-slack-notifications:
+    name: Release Analytics Artifact Slack Notifications
+    runs-on: ubuntu-24.04
+    needs: [define-release-version, release-artifacts-docker, release-artifacts-pypi, release-atifacts-publish-release]
+
+    if: always()  # Ensures this job runs regardless of the result of previous jobs
+
+    steps:
+      - name: Notify Slack of successful release 💬
+        if: ${{ needs.release-artifacts-docker.result == 'success' && needs.release-artifacts-pypi.result == 'success' }}
+        uses: slackapi/slack-github-action@6c661ce58804a1a20f6dc5fbee7f0381b469e001 #v 1.25.0
+        with:
+          # Send notification to #release slack channel
+          channel-id: "C024Z61K9QU"
+          slack-message: ":rocket: New *Rasa SDK* version `${{ needs.define-release-version.outputs.version }}` has been released! More information can be found <https://github.com/RasaHQ/rasa-sdk/releases/tag/${{ needs.define-release-version.outputs.version }}|here>."
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Notify Slack of unsuccessful release ⛔️
+        if: ${{ needs.release-artifacts-docker.result != 'success' || needs.release-artifacts-pypi.result != 'success' }}
+        uses: slackapi/slack-github-action@6c661ce58804a1a20f6dc5fbee7f0381b469e001 #v 1.25.0
+        with:
+          # Send notification to ##prodeng-internal slack channel
+          channel-id: "C36SS4N8M"
+          slack-message: ":broken_heart: *Rasa SDK* release version `${{ needs.define-release-version.outputs.version }}` has failed! More information can be found <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|here>."
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}

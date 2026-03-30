@@ -1,0 +1,285 @@
+name: build
+
+on:
+  push:
+    branches:
+      - main
+      - 'dev/**'
+  pull_request:
+    branches: [ main ]
+  release:
+    types:
+      - published
+
+jobs:
+  # Build test wheel using oldest supported version
+  build_test_wheel:
+    # 3.7 requires older os
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.7"
+
+      - name: build
+        env:
+          SYSTEMRDL_REQUIRE_BINARY_BUILD: ~
+        run: |
+          python -m pip install build
+          python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test_wheel
+          path: dist/*.whl
+
+#-------------------------------------------------------------------------------
+  test:
+    needs:
+      - build_test_wheel
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.7"
+          - "3.8"
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+        include:
+          - os: ubuntu-24.04
+
+          # older versions need older OS
+          - python-version: "3.7"
+            os: ubuntu-22.04
+
+          - python-version: "3.8"
+            os: ubuntu-22.04
+
+    name: python${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: test_wheel
+          path: dist
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install -r test/requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install dist/*.whl
+
+      - name: Test
+        run: |
+          cd test
+          pytest --cov=systemrdl
+
+      - name: Test (without antlr accelerator)
+        run: |
+          cd test
+          export SYSTEMRDL_DISABLE_ACCELERATOR=1
+          pytest
+
+# Temporarily disable due to coveralls service outage
+#      - name: Coveralls
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#          COVERALLS_PARALLEL: true
+#        run: |
+#          cd test
+#          python -m pip install -U coveralls>=3.0.0
+#          coveralls --service=github
+#
+#  finish_coveralls:
+#    needs: test
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Setup Python
+#        uses: actions/setup-python@v4
+#        with:
+#          python-version: 3.x
+#
+#      - name: Coveralls
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#          COVERALLS_PARALLEL: true
+#        run: |
+#          python -m pip install -U coveralls>=3.0.0
+#          coveralls --service=github --finish
+
+#-------------------------------------------------------------------------------
+  lint:
+    needs:
+      - build_test_wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: test_wheel
+          path: dist
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install -r test/requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install dist/*.whl
+
+      - name: Run Lint
+        run: |
+          pylint --rcfile test/pylint.rc src/systemrdl
+
+#-------------------------------------------------------------------------------
+  mypy:
+    needs:
+      - build_test_wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: test_wheel
+          path: dist
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install -r test/requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install dist/*.whl
+
+      - name: Type Check
+        run: |
+          mypy --config-file test/mypy.ini src/systemrdl
+
+#-------------------------------------------------------------------------------
+  build_wheels:
+    needs:
+      - test
+      - lint
+      - mypy
+
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          # List of available: https://github.com/actions/runner-images
+          # Note: "*-large" runners cannot use free GH actions credits
+          - windows-2022
+          - macos-15-intel # intel silicon
+          - macos-15 # ARM64 silicon
+          - ubuntu-22.04
+          - ubuntu-22.04-arm # aarch64
+        include:
+          # Only build CPython 3.x targets
+          - cibw_build: "cp3*"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.23.3
+        env:
+          # Only build CPython targets
+          CIBW_BUILD: "cp3*"
+          # Ensure full C++17 availability on macOS builds
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          # Signal setup.py to fail if binary build fails
+          SYSTEMRDL_REQUIRE_BINARY_BUILD: ~
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install abi3audit
+
+      - name: ABI3 audit
+        run: |
+          abi3audit --debug --verbose --summary --strict wheelhouse/*.whl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist-whl-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+#-------------------------------------------------------------------------------
+  build_sdist:
+    needs:
+      - test
+      - lint
+      - mypy
+    name: Build source distribution
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        name: Install Python
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install build
+
+      - name: Build sdist
+        run: python -m build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist-sdist
+          path: dist/*.tar.gz
+
+#-------------------------------------------------------------------------------
+  deploy:
+    needs:
+      - build_wheels
+      - build_sdist
+
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+
+    # Only publish when a GitHub Release is created.
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-dist-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

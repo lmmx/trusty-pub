@@ -1,0 +1,75 @@
+# This is based on pyca/cryptography but we use cibuildwheel
+# https://github.com/pyca/cryptography/blob/50ae9623df9181e5d08bbca0791ae69af4d3d446/.github/workflows/wheel-builder.yml
+name: Wheel Builder
+
+permissions:
+  contents: read
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The Git ref to build
+  # Do not add any non-tag push events without updating pypi-publish.yml. If
+  # you do, it'll upload wheels to PyPI.
+  push:
+    tags:
+      - "*"
+  pull_request:
+    paths:
+      - .github/workflows/wheel-builder.yml
+      - setup.py
+      - pyproject.toml
+
+jobs:
+  sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The tag to build or the tag received by the tag event
+          ref: ${{ github.event.inputs.version || github.ref }}
+          persist-credentials: false
+
+      - run: python -m venv .venv
+      - name: Install Python dependencies
+        run: .venv/bin/pip install -U pip build
+      - name: Make sdist
+        run: .venv/bin/python -m build --sdist
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - windows-2025
+          - windows-11-arm
+          - macos-15
+
+    env:
+      CIBW_BEFORE_ALL_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y"
+      CIBW_ENVIRONMENT_LINUX: 'PATH="$PATH:$HOME/.cargo/bin"'
+      CIBW_BEFORE_ALL_MACOS: "rustup target add x86_64-apple-darwin"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The tag to build or the tag received by the tag event
+          ref: ${{ github.event.inputs.version || github.ref }}
+          persist-credentials: false
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@ee02a1537ce3071a004a6b08c41e72f0fdc42d9a # v3.4.0
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl

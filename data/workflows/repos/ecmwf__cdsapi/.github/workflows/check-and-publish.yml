@@ -1,0 +1,98 @@
+name: Check and publish
+
+on:
+  push:
+    branches: [master]
+
+  pull_request:
+    branches: [master]
+
+  # Trigger on public pull request approval
+  pull_request_target:
+    types: [labeled]
+
+  release:
+    types: [created]
+
+jobs:
+  quality-checks:
+    name: Code QA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: pip install black flake8 isort
+      - run: black --version
+      - run: isort --version
+      - run: flake8 --version
+      - run: isort --check .
+      - run: black --check .
+      - run: flake8 .
+
+  platform-checks:
+    needs: quality-checks
+    if: ${{ !github.event.pull_request.head.repo.fork && github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          - platform: macos-latest
+            python-version: "3.8"
+          - platform: macos-latest
+            python-version: "3.9"
+
+    name: Python ${{ matrix.python-version }} on ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}
+
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Tests
+        env:
+          CDSAPI_URL: https://cds.climate.copernicus.eu/api
+          CDSAPI_KEY: ${{ secrets.CDSAPI_KEY_2024 }}
+        run: |
+          pip install setuptools
+          python setup.py develop
+          pip install pytest
+          pytest
+
+  deploy:
+    needs: platform-checks
+
+    if: ${{ github.event_name == 'release' }}
+
+    name: Upload to Pypi
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - name: Build distributions
+        run: |
+          $CONDA/bin/python -m pip install build
+          $CONDA/bin/python -m build
+      - name: Publish a Python distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Notify climetlab
+        uses: mvasigh/dispatch-action@main
+        with:
+          token: ${{ secrets.NOTIFY_ECMWFLIBS }}
+          repo: climetlab
+          owner: ecmwf
+          event_type: cdsapi-updated

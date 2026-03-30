@@ -1,0 +1,71 @@
+# Coverage build - gather artifacts from other builds and merge them into a single report
+name: Coverage
+
+on:
+  workflow_call:
+    inputs:
+      trigger:
+        description: Type of workflow trigger
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  COVERAGE_DIR : "${{github.workspace}}/coverage"
+
+jobs:
+  Coverage:
+    name: Coverage build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          pattern: exports-coverage-*
+          path: coverage
+          merge-multiple: true
+
+      - name: Compute coverage
+        working-directory: ${{env.COVERAGE_DIR}}
+        id: coverage
+        run: |
+          echo "DIR: $(pwd)" && ls -al
+          ../scripts/coverage/merge_coverage_files.sh exports-coverage total_coverage
+          genhtml --no-function-coverage -o html_report total_coverage 2>&1 | tee output.txt
+          mkdir coverage_report
+          mv html_report ./coverage_report/
+          tail -n2 output.txt >> $GITHUB_STEP_SUMMARY
+          echo "COV_OUT=$(tail -n1 output.txt | grep -oP "lines[.]+: [\d.]+%" | cut -d ' ' -f2 | tr -d '%')" >> $GITHUB_OUTPUT
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: coverage_html_report
+          path: coverage/coverage_report
+
+      # Only update the badge on push (event is passed only for total coverage)
+      - name: Update coverity badge
+        if: ${{ success() && inputs.trigger == 'push' }}
+        uses: Schneegans/dynamic-badges-action@e9a478b16159b4d31420099ba146cdc50f134483 # v1.7.0
+        with:
+          auth: ${{ secrets.BB_GIST_TOKEN }}
+          gistID: 3f66c77d7035df39aa75dda8a2ac75b3
+          filename: umf_coverage_badge.svg
+          label: Coverage
+          message: ${{ steps.coverage.outputs.COV_OUT }}%
+          valColorRange: ${{ steps.coverage.outputs.COV_OUT }}
+          minColorRange: 50 # <= this value = color: red
+          maxColorRange: 90 # >= this value = color: green

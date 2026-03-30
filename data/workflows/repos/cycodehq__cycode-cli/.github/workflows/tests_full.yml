@@ -1,0 +1,75 @@
+name: Unit Tests on all supported Python versions and OS
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  unit_tests:
+    strategy:
+      matrix:
+        os: [ macos-latest, ubuntu-latest, windows-latest ]
+        python-version: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.14" ]
+
+    runs-on: ${{matrix.os}}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Run Cimon
+        if: matrix.os == 'ubuntu-latest'
+        uses: cycodelabs/cimon-action@1c3e30d508634b3f4a60b02843126c9f93944d80 # v0.9.4
+        with:
+          client-id: ${{ secrets.CIMON_CLIENT_ID }}
+          secret: ${{ secrets.CIMON_SECRET }}
+          prevent: true
+          allowed-hosts: >
+            files.pythonhosted.org
+            install.python-poetry.org
+            pypi.org
+            *.ingest.us.sentry.io
+
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Load cached Poetry setup
+        id: cached-poetry
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ~/.local
+          key: poetry-${{ matrix.os }}-${{ matrix.python-version }}-3  # increment to reset cache
+
+      - name: Setup Poetry
+        if: steps.cached-poetry.outputs.cache-hit != 'true'
+        uses: snok/install-poetry@76e04a911780d5b312d89783f7b1cd627778900a # v1.4.1
+        with:
+          version: 2.2.1
+
+      - name: Add Poetry to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run executable test
+        # we care about the one Python version that will be used to build the executable
+        if: matrix.python-version == '3.13'
+        run: |
+          poetry run pyinstaller pyinstaller.spec
+          ./dist/cycode-cli version
+
+      - name: Run pytest
+        run: poetry run python -m pytest

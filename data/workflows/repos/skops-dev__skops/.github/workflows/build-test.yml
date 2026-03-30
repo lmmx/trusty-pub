@@ -1,0 +1,73 @@
+name: pytest
+
+on:
+  - push
+  - pull_request
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pytest:
+    runs-on: ${{ matrix.os }}
+    if: github.repository == 'skops-dev/skops'
+    strategy:
+      fail-fast: false # need to see which ones fail
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        environment: [
+          ci-sklearn12,
+          ci-sklearn13,
+          ci-sklearn14,
+          ci-sklearn15,
+          ci-sklearn16,
+          ci-sklearn17,
+          ci-sklearn18,
+          ci-sklearn-nightly
+        ]
+
+    # Timeout: https://stackoverflow.com/a/59076067/4521646
+    timeout-minutes: 30
+
+    steps:
+      # The following two steps are workarounds to retrieve the "real" commit
+      # message and make it available in later steps. This is because we want to
+      # check the content of the commit message, but on PRs, it's replaced by an
+      # artificial commit message. See https://github.com/skops-dev/skops/pull/147
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{github.event.after}}
+
+      - run: |
+          echo PR_COMMIT_MESSAGE=$(git log -1 --pretty=format:\"%s\") >> $GITHUB_ENV
+        shell: bash
+
+      - uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          pixi-version: v0.39.5
+          environments: ${{ matrix.environment }}
+          # we can freeze the environment and manually bump the dependencies to the
+          # latest version time to time.
+          frozen: true
+
+      - name: Linters
+        run: pixi run -e lint lint
+
+      - name: Run tests
+        run: pixi run -e ${{ matrix.environment }} tests
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          env_vars: OS,PYTHON
+          fail_ci_if_error: true
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          verbose: true
+          # the coverage is uploaded with or without a token. This only helps with some
+          # codecov errors. It's a recommended action from here:
+          # https://github.com/codecov/codecov-action/issues/837#issuecomment-1453877750
+          token: 2b8d4d69-6de6-4e1d-840a-5ccf9d849565

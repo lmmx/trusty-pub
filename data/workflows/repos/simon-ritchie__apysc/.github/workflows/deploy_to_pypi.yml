@@ -1,0 +1,479 @@
+name: Deploy to PyPI
+on:
+  push:
+    branches:
+      - main
+jobs:
+
+  SetGlobalConstants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      PYTHON_38_VERSION: 3.8.17
+      PYTHON_39_VERSION: 3.9.12
+      PYTHON_310_VERSION: 3.10.4
+      PYTHON_311_VERSION: 3.11.1
+      PYTHON_312_VERSION: 3.12.0
+      CHECKING_BADGE_COLOR: FFAA00
+      PASSING_BADGE_COLOR: 0088FF
+      RUNNING_OR_FAILING_STATUS: running or failed
+      PASSING_STATUS: passing
+      PASSING_LINTS_BADGE_NAME: passing_lints
+      PASSING_LINTS_BADGE_LABEL: 'passing lints'
+      PASSING_UNIT_TEST_PYTHON_VERSIONS_BADGE_NAME: passing_unit_test_python_versions
+      PASSING_UNIT_TEST_PYTHON_VERSIONS_BADGE_LABEL: 'passing unit tests Python versions'
+    steps:
+      - run: echo 'Setting constans.'
+
+  CreateCache:
+    needs: SetGlobalConstants
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_38_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_310_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_311_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_312_VERSION }}',
+        ]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: CreateCache
+        uses: ./.github/actions/create_env_cache
+        with:
+          python-version: ${{ matrix.python-version }}
+
+  UpdateReadmeBadgesToCheckingStatus:
+    needs: SetGlobalConstants
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Update each lint badge status to running or failing
+        uses: RubbaBoy/BYOB@v1.3.0
+        with:
+          name: '${{ needs.SetGlobalConstants.outputs.PASSING_LINTS_BADGE_NAME }}'
+          label: '${{ needs.SetGlobalConstants.outputs.PASSING_LINTS_BADGE_LABEL }}'
+          status: '${{ needs.SetGlobalConstants.outputs.RUNNING_OR_FAILING_STATUS }}'
+          color: ${{ needs.SetGlobalConstants.outputs.CHECKING_BADGE_COLOR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update the passing unit tests Python versions status
+        uses: RubbaBoy/BYOB@v1.3.0
+        with:
+          name: '${{ needs.SetGlobalConstants.outputs.PASSING_UNIT_TEST_PYTHON_VERSIONS_BADGE_NAME }}'
+          label: '${{ needs.SetGlobalConstants.outputs.PASSING_UNIT_TEST_PYTHON_VERSIONS_BADGE_LABEL }}'
+          status: '${{ needs.SetGlobalConstants.outputs.RUNNING_OR_FAILING_STATUS }}'
+          color: ${{ needs.SetGlobalConstants.outputs.CHECKING_BADGE_COLOR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  RunFlake8:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: '${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}'
+      - name: Set the flake8 alias
+        run: alias flake8=/opt/hostedtoolcache/Python/${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}/x64/bin/flake8
+      - name: Run the flake8 command
+        run: python ./scripts/run_flake8.py
+
+  RunMypy:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Set the mypy alias
+        run: alias mypy=/opt/hostedtoolcache/Python/${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}/x64/bin/mypy
+      - name: Run the mypy command
+        run: python ./scripts/run_mypy.py
+
+  RunNumdoclint:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Set the numdoclint alias
+        run: alias numdoclint=/opt/hostedtoolcache/Python/${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}/x64/bin/numdoclint
+      - name: Run the numdoclint command
+        run: python ./scripts/run_numdoclint.py
+
+  RunPyright:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Set the Pyright alias
+        run: alias pyright=/opt/hostedtoolcache/Python/${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}/x64/bin/pyright
+      - name: Run the Pyright command
+        run: python ./scripts/run_pyright.py
+
+  RunCheckingApyscTopLevelImporting:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Run the checking command
+        run: python ./scripts/check_apysc_top_level_import.py
+
+  RunTestsAndSaveCoverageAndPassingNum:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      COVERAGE: ${{ steps.set-coverage.outputs.coverage }}
+      PASSING_TESTS_NUM: ${{ steps.set-passing-tests-num.outputs.passing-tests-num }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Set the pytest alias
+        run: alias pytest=/opt/hostedtoolcache/Python/${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}/x64/bin/pytest
+      - name: Install playwright and Chromium
+        run: playwright install chromium
+      - name: Run the test runner command
+        uses: nick-fields/retry@v3
+        with:
+          timeout_seconds: 480
+          max_attempts: 3
+          command: python ./scripts/run_tests_and_save_coverage_and_num.py
+      - name: Set the environment variables from .env file
+        uses: c-py/action-dotenv-to-setenv@v5
+        with:
+          env-file: .env
+      - name: Set the coverage to outputs value
+        id: set-coverage
+        run: echo '::set-output name=coverage::${{ env.COVERAGE }}'
+      - name: Set the passing tests number to outputs value
+        id: set-passing-tests-num
+        run: echo '::set-output name=passing-tests-num::${{ env.PASSING_TESTS_NUM }}'
+
+  RunTestsOnEachPythonVersion:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_38_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_310_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_311_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_312_VERSION }}',
+        ]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install playwright and Chromium
+        run: playwright install chromium
+      - name: Run the test runner command
+        uses: nick-fields/retry@v3
+        with:
+          timeout_seconds: 300
+          max_attempts: 3
+          command: python ./scripts/run_tests.py
+
+  CheckDocsCodeBlockError:
+    needs: [CreateCache, SetGlobalConstants, RunTestsOnEachPythonVersion]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        alphabets-group: [
+          'a',
+          'bcd',
+          'ef',
+          'g',
+          'hijkl',
+          'mn',
+          'opq',
+          'rs',
+          'tuvwxyz',
+        ]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Run the checking command
+        run: python ./scripts/check_docs_code_block_error.py --alphabets_group ${{ matrix.alphabets-group }}
+
+  RunTestProjectsE2ETesting:
+    needs: [CreateCache, SetGlobalConstants, RunTestsOnEachPythonVersion]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        alphabets-group: [
+          'a',
+          'bcdefghijklmno',
+          'pqrs',
+          'tuvwxyz',
+        ]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Install playwright and Chromium
+        run: playwright install chromium
+      - name: Run the E2E testing command
+        run: python ./scripts/run_test_projects_e2e_testing.py --alphabets_group ${{ matrix.alphabets-group }}
+
+  RunDocTest:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      PASSING_TESTS_NUM: ${{ steps.set-passing-tests-num.outputs.passing-tests-num }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Set the pytest alias
+        run: alias pytest=/opt/hostedtoolcache/Python/${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}/x64/bin/pytest
+      - name: Run the doctest runner command
+        run: python ./scripts/run_doctest_and_save_passing_num.py
+      - name: Set the environment variables from .env file
+        uses: c-py/action-dotenv-to-setenv@v5
+        with:
+          env-file: .env
+      - name: Set the passing tests number to outputs value
+        id: set-passing-tests-num
+        run: echo '::set-output name=passing-tests-num::${{ env.PASSING_TESTS_NUM }}'
+
+  RunDocE2ETest:
+    needs: [CreateCache, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        lang: ['en', 'jp']
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Install playwright and Chromium
+        run: playwright install chromium
+      - name: Run the E2E test runner command
+        run: python ./scripts/run_docs_e2e_tests.py --lang ${{ matrix.lang }}
+
+  CheckReferencesDocumentsExist:
+    needs: [CreateCache, SetGlobalConstants, RunTestsOnEachPythonVersion]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Run the checking command
+        run: python ./scripts/check_docstring_references_docs_exist.py
+
+  DeployToPyPI:
+    needs: [
+      RunFlake8,
+      RunMypy,
+      RunNumdoclint,
+      RunPyright,
+      RunCheckingApyscTopLevelImporting,
+      RunTestsAndSaveCoverageAndPassingNum,
+      CheckDocsCodeBlockError,
+      RunTestProjectsE2ETesting,
+      RunDocTest,
+      RunDocE2ETest,
+      CheckReferencesDocumentsExist,
+      SetGlobalConstants,
+      UpdateReadmeBadgesToCheckingStatus,
+    ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Execute the Python package build
+        run: python ./scripts/build.py
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
+
+  CreateReleaseNotes:
+    needs: [
+      RunFlake8,
+      RunMypy,
+      RunNumdoclint,
+      RunPyright,
+      RunCheckingApyscTopLevelImporting,
+      RunTestsAndSaveCoverageAndPassingNum,
+      CheckDocsCodeBlockError,
+      RunTestProjectsE2ETesting,
+      RunDocTest,
+      RunDocE2ETest,
+      CheckReferencesDocumentsExist,
+      SetGlobalConstants,
+      UpdateReadmeBadgesToCheckingStatus,
+      DeployToPyPI,
+    ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}
+      - name: Set the apysc version to environment variable
+        run: python -c "import apysc; print(f'apysc_version={apysc.__version__}')" >> $GITHUB_ENV
+      - name: Create the release note
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ env.apysc_version }}
+          release_name: v${{ env.apysc_version }}
+          draft: false
+          prerelease: false
+
+  UpdateReadmeBadgesToPassingStatus:
+    needs: [
+      RunFlake8,
+      RunMypy,
+      RunNumdoclint,
+      RunPyright,
+      RunCheckingApyscTopLevelImporting,
+      UpdateReadmeBadgesToCheckingStatus,
+      RunTestsAndSaveCoverageAndPassingNum,
+      CheckDocsCodeBlockError,
+      RunTestProjectsE2ETesting,
+      RunDocTest,
+      RunDocE2ETest,
+      CheckReferencesDocumentsExist,
+      SetGlobalConstants,
+    ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Update each lint badge status
+        uses: RubbaBoy/BYOB@v1.3.0
+        with:
+          name: '${{ needs.SetGlobalConstants.outputs.PASSING_LINTS_BADGE_NAME }}'
+          label: '${{ needs.SetGlobalConstants.outputs.PASSING_LINTS_BADGE_LABEL }}'
+          status: 'flake8 | mypy | Pyright | numdoclint'
+          color: ${{ needs.SetGlobalConstants.outputs.PASSING_BADGE_COLOR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Echo the passing unit tests number value
+        run: echo ${{ needs.RunTestsAndSaveCoverageAndPassingNum.outputs.COVERAGE }}
+      - name: Update tests line coverage
+        uses: RubbaBoy/BYOB@v1.3.0
+        with:
+          name: unit_tests_coverage
+          label: 'unit tests coverage'
+          status: ${{ needs.RunTestsAndSaveCoverageAndPassingNum.outputs.COVERAGE }}
+          color: ${{ needs.SetGlobalConstants.outputs.PASSING_BADGE_COLOR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Echo the passing unit tests number value
+        run: echo ${{ needs.RunTestsAndSaveCoverageAndPassingNum.outputs.PASSING_TESTS_NUM }}
+      - name: Update the passing unit tests number
+        uses: RubbaBoy/BYOB@v1.3.0
+        with:
+          name: passing_unit_tests_num
+          label: 'passing unit tests number'
+          status: ${{ needs.RunTestsAndSaveCoverageAndPassingNum.outputs.PASSING_TESTS_NUM }}
+          color: ${{ needs.SetGlobalConstants.outputs.PASSING_BADGE_COLOR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update the passsing doctests number
+        uses: RubbaBoy/BYOB@v1.3.0
+        with:
+          name: passing_doctests_num
+          label: 'passing doctests number'
+          status: ${{ needs.RunDocTest.outputs.PASSING_TESTS_NUM }}
+          color: ${{ needs.SetGlobalConstants.outputs.PASSING_BADGE_COLOR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update the passing unit tests Python versions status
+        uses: RubbaBoy/BYOB@v1.3.0
+        with:
+          name: '${{ needs.SetGlobalConstants.outputs.PASSING_UNIT_TEST_PYTHON_VERSIONS_BADGE_NAME }}'
+          label: '${{ needs.SetGlobalConstants.outputs.PASSING_UNIT_TEST_PYTHON_VERSIONS_BADGE_LABEL }}'
+          status: '${{ needs.SetGlobalConstants.outputs.PYTHON_38_VERSION }} | ${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }} | ${{ needs.SetGlobalConstants.outputs.PYTHON_310_VERSION }} | ${{ needs.SetGlobalConstants.outputs.PYTHON_311_VERSION }} | ${{ needs.SetGlobalConstants.outputs.PYTHON_312_VERSION }}'
+          color: ${{ needs.SetGlobalConstants.outputs.PASSING_BADGE_COLOR }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  RunPackageInstallingTests:
+    needs: [DeployToPyPI, SetGlobalConstants]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_38_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_39_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_310_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_311_VERSION }}',
+          '${{ needs.SetGlobalConstants.outputs.PYTHON_312_VERSION }}',
+        ]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup the Python dependencies
+        uses: ./.github/actions/setup_py_dependencies
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run the package installing and testing script
+        run: python ./scripts/install_released_package.py
+      - name: Checkout
+        uses: actions/checkout@v4

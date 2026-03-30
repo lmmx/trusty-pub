@@ -1,0 +1,28 @@
+name: Release
+on:
+  release:
+    types: [published]
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+    - name: Install build dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    - name: Code checks
+      run: |
+        flake8 .
+        black --skip-string-normalization --line-length 120 .
+    - name: Build
+      run: python -m build .
+    - name: Publish
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_TOKEN }}
+        skip_existing: true

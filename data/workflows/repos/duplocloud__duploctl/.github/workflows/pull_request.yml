@@ -1,0 +1,59 @@
+name: Pull Request
+
+on:
+  pull_request:
+    branches:
+    - main
+permissions:
+  issues: write
+  pull-requests: write
+  security-events: write
+jobs: 
+
+  prerequisites:
+    name: Prerequisites
+    runs-on: ubuntu-latest
+    steps:
+    - name: Auto Assign 
+      uses: kentaro-m/auto-assign-action@v2.0.1
+      with:
+        configuration-path: .github/assign.yml
+    - name: Make sure Changleog is updated
+      uses: tarides/changelog-check-action@v3
+      with:
+        changelog: CHANGELOG.md
+
+  quality:
+    name: Test
+    uses: ./.github/workflows/quality.yml
+    secrets: inherit
+    with:
+      push: false
+      codescan: false
+
+  unit_test:
+    name: Test
+    uses: ./.github/workflows/test_unit.yml
+    secrets: inherit
+
+  docs_check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Setup
+      id: setup
+      uses: duplocloud/duploctl/.github/actions/setup@main
+      with:
+        ref: ${{ github.ref }}
+        fetch-depth: 0
+        install: ".[build,docs,sdk]"
+        app-id: ${{ vars.GH_APP_ID }}
+        private-key: ${{ secrets.GH_APP_KEY }}
+        submodules: "true"
+
+    - name: Generated Docs Folder
+      run: |
+        mkdir -p dist dist/docs
+
+    - name: Build Docs
+      run: mkdocs build

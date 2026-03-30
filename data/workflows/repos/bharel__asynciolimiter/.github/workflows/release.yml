@@ -1,0 +1,69 @@
+name: Release asynciolimiter
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  check_version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Verify version
+        run: |
+          PY_VER=$(python -c "import asynciolimiter;print(asynciolimiter.__version__)")
+          echo Python version - "$PY_VER"
+          TAG_VER=${{ github.event.release.tag_name }}
+          echo Tag version "$TAG_VER"
+          [[ $TAG_VER == $PY_VER ]]
+  upload_test_pypi:
+    needs: check_version
+    runs-on: ubuntu-latest
+    environment:
+      name: Test PyPi
+      url: https://test.pypi.org/p/asynciolimiter
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel
+        run: |
+          pip install hatch
+          hatch build
+      - name: Publish on Test PyPi
+        run: hatch publish -r test -u ${{ secrets.PYPI_USERNAME }} -a ${{ secrets.PYPI_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+  upload_production_pypi:
+    needs: upload_test_pypi
+    runs-on: ubuntu-latest
+    environment:
+      name: Production PyPi
+      url: https://pypi.org/p/asynciolimiter
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: AButler/upload-release-assets@v3.0
+        with:
+          files: 'dist/*'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload release to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

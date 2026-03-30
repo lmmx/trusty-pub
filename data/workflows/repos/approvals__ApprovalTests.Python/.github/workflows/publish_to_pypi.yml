@@ -1,0 +1,53 @@
+name: Publish Python Package to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    env:
+      TWINE_REPOSITORY_URL: https://upload.pypi.org/legacy/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          # Override .python-version so we can use the latest features
+          python-version: "3.x"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build setuptools wheel twine
+      - name: Determine version from git tag
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
+      - name: set version
+        run: python setup/set_version.py ${{ steps.version.outputs.tag }}
+      - name: Push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git commit -m "${{ steps.version.outputs.tag }} - ${{ github.event.release.name }} --------------" -a  || echo "nothing to commit"
+          git checkout -b temp
+          git fetch
+          git checkout main
+          git merge temp
+          remote="https://${GITHUB_ACTOR}:${{secrets.GITHUB_TOKEN}}@github.com/${GITHUB_REPOSITORY}.git"
+          branch="main"
+          git push "${remote}" ${branch} || echo "nothing to push"
+        shell: bash
+      - run: setup/publish_approval_utilities.sh
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_APPROVAL_UTILITIES }}
+      - run: setup/publish_approvaltests.sh
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+      - run: setup/publish_minimal.sh
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_APPROVALTESTS_MINIMAL }}

@@ -1,0 +1,37 @@
+name: Release notes
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    # Important that we run on `labeled` and `unlabeled` to pick up `no-releasenote` being added/removed
+    # DEV: [opened, reopened, synchronize] is the default
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+jobs:
+  validate:
+    name: Validate release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        # Include all history and tags
+        with:
+          fetch-depth: 0
+
+      # Ensure a new reno release note was added in this PR.
+      # Use `reno new <slug>` to add a new note to `no-releasenote`,
+      #   or add `no-releasenote` label if no release note is needed.
+      - name: Ensure release note added
+        # Only run this on pull requests
+        if: github.event_name == 'pull_request'
+        run: releasenotes/check-releasenotes
+
+      - uses: actions/setup-python@e9aba2c848f5ebd159c070c61ea2c4e2b122355e # v2.3.4
+        name: Install Python
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: pip install reno docutils
+
+      - name: Lint release notes
+        run: reno lint

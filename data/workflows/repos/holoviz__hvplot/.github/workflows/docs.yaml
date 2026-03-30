@@ -1,0 +1,103 @@
+name: docs
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+a[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+b[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+rc[0-9]+'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Site to build and deploy'
+        type: choice
+        options:
+        - dev
+        - main
+        - dryrun
+        required: true
+        default: dryrun
+      version:
+        description: 'Version tag X.X.X (required if target is main)'
+        required: false
+  schedule:
+    - cron: '0 15 * * SUN'
+
+defaults:
+  run:
+    shell: bash -e {0}
+
+jobs:
+  pixi_lock:
+    name: Pixi lock
+    runs-on: ubuntu-latest
+    steps:
+      - uses: holoviz-dev/holoviz_tasks/pixi_lock@v0
+
+  docs_build:
+    name: Build Documentation
+    needs: [pixi_lock]
+    runs-on: 'macos-latest'
+    timeout-minutes: 120
+    env:
+      DISPLAY: ":99.0"
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Validate version
+        if: ${{ inputs.target == 'main' }}
+        run: |
+          if [[ -z "$VERSION" || ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ 'version' is required and must match format X.X.X (e.g. 0.11.1) when target is 'main'"
+            exit 1
+          fi
+      - uses: holoviz-dev/holoviz_tasks/pixi_install@v0
+        with:
+          environments: docs
+      - name: Build documentation
+        run: pixi run -e docs docs-build
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: hvplot-docs
+          path: ./builtdocs/
+      - name: report failure
+        if: failure()
+        run: cat /tmp/sphinx-*.log | tail -n 100
+      - uses: holoviz-dev/holoviz_tasks/docs-publish@v0
+        with:
+          s3-url: s3://hvplot.holoviz.org
+          s3-cloudfront-id: E13QSRL36ILGWH
+          s3-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          s3-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          version: ${{ inputs.version }}
+
+  pip_build_docs:
+    name: Build Documentation (pip)
+    runs-on: 'ubuntu-latest'
+    timeout-minutes: 120
+    env:
+      DESC: "Documentation build"
+      MPLBACKEND: "Agg"
+      MOZ_HEADLESS: 1
+      DISPLAY: ":99.0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: install
+        run: pip install -v --prefer-binary -e ."[doc, examples, geo]"
+      - name: pip list
+        run: pip list
+      - name: Set and echo git ref
+        id: vars
+        run: |
+          echo "Deploying from ref ${GITHUB_REF#refs/*/}"
+          echo "tag=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
+      - name: build docs
+        run: sphinx-build -j auto -b html doc builtdocs
+      - name: report failure
+        if: failure()
+        run: cat /tmp/sphinx-*.log | tail -n 100

@@ -1,0 +1,66 @@
+name: Build and upload to PyPi manually
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload to PyPI'
+        type: boolean
+        required: false
+        default: false
+
+      python-version:
+        description: 'Python version to run on'
+        type: string
+        required: false
+        default: "3.13"
+
+      target:
+        description: "Target os to build for: linux,macos,windows"
+        type: string
+        required: false
+        default: "linux,macos-x86,macos-arm,windows,linux-aarch64"
+
+      target_tag:
+        description: "Publish particular tag"
+        type: string
+        required: false
+        default: ""
+
+      ignore_tests:
+        description: "Don't run tests"
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  build-and-publish:
+    name: "Build wheels"
+    uses: ./.github/workflows/lib-build-and-push.yml
+    with:
+      upload: false
+      python-version: ${{ inputs.python-version }}
+      ignore_tests: ${{ inputs.ignore_tests }}
+      target_tag: ${{ inputs.target_tag }}
+      target: ${{ inputs.target }}
+
+  # TODO: Remove when https://github.com/pypa/gh-action-pypi-publish/issues/166 is fixed and update build-and-publish.with.upload to ${{ inputs.upload }}
+  publish:
+    name: "Publish wheels to PyPi"
+    needs: build-and-publish
+    if: inputs.upload
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

@@ -1,0 +1,53 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Dependencies
+        run: uv sync --group dev
+
+      - name: Build Documentation
+        run: uv run make build-docs
+
+      - name: Install AWS CLI
+        run: uv pip install awscli
+
+      - name: Configure AWS CLI for Cloudflare R2
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          aws configure set default.region us-east-1
+          aws configure set default.output json
+
+      - name: Sync to Cloudflare R2
+        env:
+          CF_R2_ENDPOINT: ${{ secrets.CF_R2_ENDPOINT }}
+          CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
+        run: |
+          aws s3 sync docs/build/en/html s3://$CF_R2_BUCKET_NAME/en/ \
+            --delete \
+            --acl public-read \
+            --endpoint-url $CF_R2_ENDPOINT
+          aws s3 sync docs/build/ru/html s3://$CF_R2_BUCKET_NAME/ru/ \
+            --delete \
+            --acl public-read \
+            --endpoint-url $CF_R2_ENDPOINT

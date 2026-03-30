@@ -1,0 +1,755 @@
+name: ci
+
+on:
+  pull_request: {}
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  check-commits:
+    name: Check commit messages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: aevea/commitsar@v1.0.3
+
+  check-msrv:
+    name: Check MSRV
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.83.0"
+
+      - uses: Swatinem/rust-cache@v2
+
+      # (dd): These packages bumped their MSRV with a patch release.
+      #       As per my understanding cargo will be able to automatically
+      #       resolve the proper version with the resolver v3 which is MSRV-aware.
+      #       With the current MSRV it is not possible to force the resolver to find
+      #       proper versions, hence they are pinned manually here. The end users
+      #       will be able to do the same on their side (which is a bad UX though),
+      #       but apparently there is nothing can be done on the `jsonschema` side
+      #       beside bumping MSRV to 1.85 and upgrading to the new resolver.
+      - run: cargo update -p idna_adapter --precise 1.2.0
+      - run: cargo update -p litemap --precise 0.7.4
+      - run: cargo update -p zerofrom --precise 0.1.5
+      - run: cargo build -p jsonschema
+
+  test-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: ${{ matrix.os }}
+
+      - run: cargo test --no-fail-fast --all-features --workspace --exclude jsonschema-py --exclude jsonschema-rb
+
+  test-cross:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - s390x-unknown-linux-gnu  # big-endian;
+
+    name: Test on ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: ${{ matrix.target }}
+
+      - uses: taiki-e/install-action@cross
+
+      - name: Run tests on ${{ matrix.target }}
+        run: cross test --target ${{ matrix.target }} --no-fail-fast --all-features -p jsonschema
+
+  test-wasm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: wasm32-wasip1
+            needs_wasmtime: true
+            needs_wasm_bindgen: false
+            features: ""
+            display: wasm32-wasip1 (sync)
+          - target: wasm32-wasip1
+            needs_wasmtime: true
+            needs_wasm_bindgen: false
+            features: "resolve-async"
+            display: wasm32-wasip1 (async)
+          - target: wasm32-unknown-unknown
+            needs_wasmtime: false
+            needs_wasm_bindgen: true
+            features: ""
+            display: wasm32-unknown-unknown
+    name: Test on ${{ matrix.display }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+
+      - name: Setup `wasmtime`
+        if: ${{ matrix.needs_wasmtime }}
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+
+      - name: Get wasm-bindgen version
+        if: ${{ matrix.needs_wasm_bindgen }}
+        id: wasm-bindgen-version
+        run: |
+          VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="wasm-bindgen") | .version')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install wasm-bindgen
+        if: ${{ matrix.needs_wasm_bindgen }}
+        uses: taiki-e/install-action@wasm-bindgen
+        with:
+          tool: 'wasm-bindgen@${{ steps.wasm-bindgen-version.outputs.version }}'
+
+      - name: Run tests
+        env:
+          JSONSCHEMA_SUITE_DRAFT_FILTER: draft2020-12
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            cargo test --target ${{ matrix.target }} --no-default-features --features "${{ matrix.features }}" -p jsonschema
+          else
+            cargo test --target ${{ matrix.target }} --no-default-features -p jsonschema
+          fi
+
+  check-wasm-compile-errors:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: wasm32-unknown-unknown
+            feature: resolve-http
+            pattern: "resolve-http.*resolve-file.*not supported.*wasm32-unknown-unknown"
+          - target: wasm32-unknown-unknown
+            feature: resolve-file
+            pattern: "resolve-http.*resolve-file.*not supported.*wasm32-unknown-unknown"
+    name: Check ${{ matrix.feature }} fails on ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: ${{ matrix.target }}-${{ matrix.feature }}
+
+      - name: Verify compile error
+        run: |
+          output=$(cargo check --target ${{ matrix.target }} --features ${{ matrix.feature }} -p jsonschema 2>&1 || true)
+          echo "$output"
+          if ! echo "$output" | grep -q "${{ matrix.pattern }}"; then
+            echo "Expected compile error not found!"
+            echo "Expected pattern: ${{ matrix.pattern }}"
+            exit 1
+          fi
+          echo "✓ Correctly rejects ${{ matrix.feature }} on ${{ matrix.target }}"
+
+  test-coverage:
+    name: Test coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run tests with all features
+        run: |
+          cargo llvm-cov --no-report --all-features --workspace \
+            --exclude jsonschema-py \
+            --exclude jsonschema-rb \
+            --exclude benchmark \
+            --exclude benchmark-suite \
+            --exclude jsonschema-testsuite \
+            --exclude jsonschema-testsuite-codegen \
+            --exclude jsonschema-testsuite-internal \
+            --exclude jsonschema-referencing-testsuite \
+            --exclude jsonschema-referencing-testsuite-codegen \
+            --exclude jsonschema-referencing-testsuite-internal \
+            --exclude testsuite-common
+
+      - name: Run tests without arbitrary-precision
+        run: cargo llvm-cov --no-report -p jsonschema
+
+      - name: Generate merged coverage report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          name: coverage
+          files: lcov.info
+          fail_ci_if_error: true
+
+  test-miri:
+    name: Test with Miri
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+
+      - name: Run tests with Miri
+        run: cargo miri test -p referencing --lib
+
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+
+      - run: uvx ruff check python tests-py
+        working-directory: crates/jsonschema-py
+
+      - run: uvx mypy python
+        working-directory: crates/jsonschema-py
+
+  test-python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', 'pypy3.11']
+
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: astral-sh/setup-uv@v7
+
+      - run: uv python install ${{ matrix.python-version }}
+
+      - run: uvx --with=".[tests]" --python='${{ matrix.python-version }}' pytest tests-py
+        working-directory: crates/jsonschema-py
+
+  test-python-freethreaded:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+        python-version: ['3.13t', '3.14t']
+
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: astral-sh/setup-uv@v7
+
+      - run: uv python install ${{ matrix.python-version }}
+
+      - name: Find Python path (Windows)
+        if: runner.os == 'Windows'
+        id: python-path-windows
+        shell: bash
+        run: echo "path=$(uv python find ${{ matrix.python-version }})" >> "$GITHUB_OUTPUT"
+
+      - name: Build wheel (Windows)
+        if: runner.os == 'Windows'
+        uses: messense/maturin-action@v1
+        with:
+          args: --release -m crates/jsonschema-py/Cargo.toml --out crates/jsonschema-py/dist --interpreter ${{ steps.python-path-windows.outputs.path }}
+
+      - name: Build wheel (Unix)
+        if: runner.os != 'Windows'
+        uses: messense/maturin-action@v1
+        with:
+          args: --release -m crates/jsonschema-py/Cargo.toml --out crates/jsonschema-py/dist --interpreter ${{ matrix.python-version }}
+
+      - name: Test wheel
+        shell: bash
+        run: |
+          uv venv --python ${{ matrix.python-version }}
+          uv pip install crates/jsonschema-py/dist/*.whl
+          uv run --with pytest --with hypothesis pytest crates/jsonschema-py/tests-py
+
+  test-ruby:
+    env:
+      BUNDLE_WITHOUT: "lint:benchmark"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        ruby-version: ["3.2", "3.4", "4.0"]
+
+    name: Test Ruby ${{ matrix.ruby-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: ruby-${{ matrix.os }}
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+          bundler-cache: true
+          working-directory: crates/jsonschema-rb
+
+      - run: bundle exec rake compile
+        env:
+          RB_SYS_CARGO_PROFILE: dev
+        working-directory: crates/jsonschema-rb
+
+      - run: bundle exec rspec
+        env:
+          JSONSCHEMA_RB_LIFETIME_STRESS_ITERATIONS: "10"
+          JSONSCHEMA_RB_LIFETIME_GC_ROUNDS: "3"
+        working-directory: crates/jsonschema-rb
+
+  test-ruby-gem-install:
+    name: Ruby Gem Install ${{ matrix.ruby-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        ruby-version: ["3.2", "3.4", "4.0"]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: ruby-gem-install-${{ matrix.os }}
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+          bundler-cache: false
+
+      - name: Build gem
+        run: gem build jsonschema.gemspec
+        working-directory: crates/jsonschema-rb
+
+      - name: Install rb_sys
+        run: gem install rb_sys -v '~> 0.9' --no-document
+
+      - name: Install gem
+        run: |
+          GEM_FILE=$(ls jsonschema_rs-*.gem | head -1)
+          gem install "./$GEM_FILE" --local --no-document
+        working-directory: crates/jsonschema-rb
+        shell: bash
+
+      - name: Smoke test
+        run: |
+          ruby -e "
+            require 'jsonschema_rs'
+            raise 'valid? failed' unless JSONSchema.valid?({'type' => 'string'}, 'hello')
+            raise 'valid? false positive' if JSONSchema.valid?({'type' => 'string'}, 42)
+            puts 'Gem installation OK'
+          "
+
+  test-ruby-gem-install-musl:
+    name: Ruby Gem Install (Alpine/musl)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Test gem install on Alpine/musl
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            public.ecr.aws/docker/library/ruby:3.4-alpine3.21 \
+            sh -c '
+              set -e
+              apk add --no-cache alpine-sdk curl gcompat clang clang-dev llvm-dev
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              . ~/.cargo/env
+              gem update --system
+              cd crates/jsonschema-rb
+              gem install rb_sys -v "~> 0.9" --no-document
+              gem build jsonschema.gemspec
+              gem install jsonschema_rs-*.gem --local --no-document
+              ruby -e "require \"jsonschema_rs\"; raise unless JSONSchema.valid?({\"type\" => \"string\"}, \"hello\"); puts \"musl OK\""
+            '
+
+  lint-ruby:
+    name: Lint Ruby
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      BUNDLE_WITHOUT: "development:test:benchmark"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+          working-directory: crates/jsonschema-rb
+
+      - run: bundle exec rubocop
+        working-directory: crates/jsonschema-rb
+
+  lint-fmt:
+    name: Lint formatting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - run: cargo fmt --all -- --check
+
+  lint-clippy:
+    name: Lint Clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets --features arbitrary-precision -p jsonschema -- -D warnings
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: profiler
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: fuzz
+
+  lint-clippy-wasm:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wasm32-unknown-unknown, wasm32-wasip1]
+    name: Lint Clippy on ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: ${{ matrix.target }}
+
+      - run: cargo clippy --target ${{ matrix.target }} --all-targets --no-default-features -p jsonschema -- -D warnings
+      - run: cargo clippy --target ${{ matrix.target }} --all-targets --no-default-features -p referencing -- -D warnings
+
+  check-release-rust:
+    name: Check Rust release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+
+      - run: cargo publish --dry-run -p referencing
+      - run: cargo publish --dry-run -p jsonschema
+      - run: cargo publish --dry-run -p jsonschema-cli
+
+  check-release-python:
+    name: Check Python release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: astral-sh/setup-uv@v7
+
+      - run: uv python install "3.12"
+
+      - run: uv build --sdist --wheel --out-dir dist
+        working-directory: crates/jsonschema-py
+
+      - run: uv venv
+        working-directory: crates/jsonschema-py
+
+      - name: Install sdist
+        run: |
+          uv pip install dist/*.tar.gz --force-reinstall
+        working-directory: crates/jsonschema-py
+
+      - name: Install wheel
+        run: |
+          uv pip install dist/*.whl --force-reinstall
+        working-directory: crates/jsonschema-py
+
+  check-release-python-freethreaded:
+    name: Check Python release (free-threaded)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: astral-sh/setup-uv@v7
+
+      - run: uv python install 3.13t
+
+      - name: Build wheel
+        uses: messense/maturin-action@v1
+        with:
+          args: --release -m crates/jsonschema-py/Cargo.toml --out crates/jsonschema-py/dist --interpreter 3.13t
+
+      - name: Install and verify wheel
+        run: |
+          uv venv --python 3.13t
+          uv pip install crates/jsonschema-py/dist/*.whl
+          uv run python -c "import jsonschema_rs; assert jsonschema_rs.is_valid({'type': 'string'}, 'foo')"
+
+  check-features:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            name: native
+            flags: "--feature-powerset --exclude-features resolve-http"
+          - target: wasm32-unknown-unknown
+            name: wasm32-unknown-unknown
+            flags: "--feature-powerset --exclude-features default,resolve-http,resolve-file,resolve-async,retrieve-async"
+          - target: wasm32-wasip1
+            name: wasm32-wasip1
+            flags: "--feature-powerset --exclude-features retrieve-async"
+    name: Check features on ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - uses: taiki-e/install-action@cargo-hack
+
+      - name: Check features for jsonschema
+        run: cargo hack check --target ${{ matrix.target }} ${{ matrix.flags }} -p jsonschema
+
+      - name: Check features for referencing
+        run: cargo hack check --target ${{ matrix.target }} ${{ matrix.flags }} -p referencing
+
+  fuzz:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ["builder", "validation", "referencing"]
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo install cargo-fuzz --force
+
+      - run: cargo +nightly fuzz run --release ${{ matrix.target }} fuzz/seeds -- -dict=fuzz/dict -max_total_time=60
+
+  test-python-musllinux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64
+            arch: amd64
+          - target: aarch64
+            arch: aarch64
+    name: Test Python musllinux on ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Build wheel
+        uses: messense/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: musllinux_1_2
+          args: -m crates/jsonschema-py/Cargo.toml --out dist
+
+      - uses: uraimo/run-on-arch-action@v3
+        name: Install and test wheel on Alpine
+        with:
+          base_image: '--platform=linux/${{ matrix.arch }} python:3.10-alpine'
+          githubToken: ${{ github.token }}
+          shell: /bin/sh
+          install: apk add --no-cache py3-pip
+          run: |
+            pip install dist/*.whl --break-system-packages
+            python -c "import jsonschema_rs; assert jsonschema_rs.is_valid({'type': 'string'}, 'foo')"
+
+  lint-docs:
+    name: Lint documentation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+
+      - run: cargo doc --workspace --no-deps --all-features --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  lint-spelling:
+    name: Lint spelling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: crate-ci/typos@v1

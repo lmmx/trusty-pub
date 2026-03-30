@@ -1,0 +1,21 @@
+name: Release
+on:
+  release:
+    types: [published]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        # Install a specific version of uv.
+        version: "0.6.9"
+
+    - name: Set up Python
+      run: uv python install
+
+    - run: uv build
+    - run: uv publish --token ${{ secrets.PYPI_TOKEN }}

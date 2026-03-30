@@ -1,0 +1,79 @@
+---
+name: Test Dragonfly
+
+on:
+  workflow_dispatch:
+
+
+concurrency:
+  group: dragon-fly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tests:
+          - "test_json"
+          - "test_mixins"
+          - "test_stack"
+          - "test_connection.py"
+          - "test_asyncredis.py"
+          - "test_general.py"
+          - "test_scan.py"
+          - "test_zadd.py"
+          - "test_translations.py"
+          - "test_sortedset_commands.py"
+    permissions:
+      pull-requests: write
+    services:
+      redis:
+        image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+        ports:
+          - 6390:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          cache-dependency-path: uv.lock
+          python-version: 3.13
+      - name: Install dependencies
+        env:
+          PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
+        run: |
+          uv sync --extra json --extra bf --extra lua --extra cf
+
+      - name: Test without coverage
+        run: |
+          uv run pytest test/${{ matrix.tests }} \
+          --html=report-${{ matrix.tests }}.html \
+          --self-contained-html \
+          -v
+      - name: Upload Tests Result
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: tests-result-${{ matrix.tests }}
+          path: report-${{ matrix.tests }}.html
+
+  upload-results:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Collect Tests Result
+        uses: actions/upload-artifact/merge@v5
+        with:
+          delete-merged: true

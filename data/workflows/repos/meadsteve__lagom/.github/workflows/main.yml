@@ -1,0 +1,88 @@
+name: Validate
+
+on: [push, pull_request]
+
+jobs:
+  test-code:
+    name: ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        make setup
+    - name: Run Tests
+      run: |
+        make test
+  test-build:
+    name: build-test-${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        make setup
+        pip install build
+    - name: build wheel and then remove code
+      env:
+        LAGOM_COMPILE: "1"
+      run: |
+        python -m build
+        rm -rf ./lagom
+    - name: install built wheel
+      run: |
+        find ./dist -name '*.whl'| head -n 1 | xargs pipenv install --skip-lock
+    - name: Run Tests
+      run: |
+        pipenv run pytest tests -m "not benchmarking and not mypyc_failing" -vv
+    - name: Run Benchmarking
+      run: |
+        make benchmark
+    - uses: actions/upload-artifact@v4
+      name: Save Benchmarks
+      with:
+        name: benchmark-compiled-results
+        path: .benchmarks/
+  test-non-compiled-build:
+    name: build-non-compiled-test-${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["pypy3.9"]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        make setup
+        pip install build
+    - name: build wheel and then remove code
+      env:
+        LAGOM_SKIP_COMPILE: "1"
+      run: |
+        python -m build
+        rm -rf ./lagom
+    - name: install built wheel
+      run: |
+        find ./dist -name '*.whl'| head -n 1 | xargs pipenv install --skip-lock
+    - name: Run Tests
+      run: |
+        pipenv run pytest tests -m "not benchmarking and not pypy_failing" -vv

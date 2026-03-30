@@ -1,0 +1,188 @@
+# https://docs.github.com/en/actions/guides/building-and-testing-python#publishing-to-package-registries
+
+# When executed manually, this will upload a ".devNNN" build to testpypi;
+# when executed upon a release, it will upload a regular build to pypi.
+#
+# For pypi, you need to have the PYPI_USERNAME and PYPI_PASSWORD secrets configured.
+# For testpypi, you'll need TESTPYPI_USERNAME and TESTPYPI_PASSWORD.
+
+name: build & upload
+
+on:
+  release:
+    types: [ published ]
+  workflow_dispatch: # manual execution
+
+jobs:
+  pick-devN:
+    name: create .devN build date coordinated across all matrix jobs
+    runs-on: ubuntu-latest
+    steps:
+      - run: TZ='America/New_York' date '+%Y%m%d%H%M' > devN.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: devN
+          path: devN.txt
+
+  build-and-upload:
+    needs: pick-devN
+    strategy:
+      matrix:
+        python_version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+        plat: ['manylinux_2_28', 'macos-latest', 'windows-latest']
+        include:
+          - plat: manylinux_2_28
+            os: ubuntu-latest
+            container: quay.io/pypa/manylinux_2_28_x86_64  # https://github.com/pypa/manylinux
+
+          - plat: macos-latest
+            os: macos-latest
+
+          - plat: macos-latest
+            os: macos-latest
+
+          - plat: macos-latest
+            os: macos-latest
+            python_version: 3.11
+            upload_source: true   # just need ONE of them to do it
+
+          - plat: windows-latest
+            os: windows-latest
+
+        exclude:
+          - plat: windows-latest
+            python_version: 3.11
+
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+
+    steps:
+      - name: get coordinated .devN
+        uses: actions/download-artifact@v4
+        with:
+          name: devN
+
+      - name: make dev build if not a release (non-Windows version)
+        if: github.event_name != 'release' && matrix.os != 'windows-latest'
+        run: echo "DEV_BUILD=$(cat devN.txt)" >> $GITHUB_ENV  # for setup.py
+
+      - name: make dev build if not a release (Windows version)
+        if: github.event_name != 'release' && matrix.os == 'windows-latest'
+        run: ("DEV_BUILD=" + (get-content devN.txt)) >> $env:GITHUB_ENV  # for setup.py
+
+      # downgraded to @v3 if using container: https://github.com/actions/checkout/issues/1487
+      - uses: actions/checkout@v3
+        if: matrix.container != ''
+
+      - uses: actions/checkout@v4
+        if: matrix.container == ''
+
+      - name: Mark workspace safe for git
+        # needed for container and self-hosted runners; see https://github.com/actions/checkout/issues/766
+        if: matrix.container != ''
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # setuptool's bdist uses 'git archive' to find files, and fails silently if it can't,
+          # leading to missing files in the archive.  Run it separately to force a failure in that case.
+          (cd scalene; git archive --prefix scalene/ HEAD | tar -t > /dev/null)
+  
+      - name: select Xcode version
+        # MacOS > 14.2 requires Xcode >= 15.3; otherwise loading native extension modules fails with e.g.:
+        # dlopen(/opt/homebrew/lib/python3.11/site-packages/slipcover/probe.abi3.so, 0x0002): bad bind opcode 0x00 
+        if: startsWith(matrix.os, 'macos-')
+        run: |
+          if [ -d /Applications/Xcode_15.3.app/Contents/Developer ]; then sudo xcode-select --switch /Applications/Xcode_15.3.app/Contents/Developer; fi
+          clang++ --version
+          g++ --version
+
+      - name: Set up python (script version)
+        if: matrix.container == ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python_version }}
+  
+      - name: Set up python (container version)
+        if: matrix.container != ''
+        run: |
+          PYV=`echo "${{ matrix.python_version }}" | tr -d "."`; ls -d -1 /opt/python/cp$PYV*/bin | head -n 1 >> $GITHUB_PATH
+          cat $GITHUB_PATH
+  
+      - name: Install dependencies
+        run: |
+          pip3 install --upgrade setuptools wheel twine build virtualenv
+  
+      - name: Work around arm64 support on MacOS
+        # https://github.com/actions/virtual-environments/issues/2557
+        if: matrix.os == 'macos-latest'
+        run: sudo rm -Rf /Library/Developer/CommandLineTools/SDKs/*
+
+      - name: Install CMake on Windows
+        # CMake is required to build libscalene.dll for memory profiling on Windows
+        if: matrix.os == 'windows-latest'
+        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+
+      - name: Build source dist
+        if: matrix.upload_source
+        run: make sdist
+  
+      - name: Build binary dist
+        # Invoking with "bash -c" works around the "bash.exe: ... could not find /tmp" issue on Windows.
+        # The issue is somehow related to git providing a sh.exe (the "git shell")
+        # See eg https://help.appveyor.com/discussions/problems/1531-having-issues-with-configured-git-bash
+        run: bash -c "make bdist"
+
+      - name: Check that all required platforms are included
+        if: matrix.os == 'macos-latest'
+        run: |
+          for P in x86_64 arm64 arm64e; do
+            for F in build/lib.*/scalene/*.so ; do
+              file $F | grep -q "\\b$P\\b"
+              if [ $? != 0 ]; then
+                echo "$P missing"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Check that libscalene.dll is included in Windows wheel
+        if: matrix.os == 'windows-latest'
+        shell: python
+        run: |
+          import zipfile
+          import glob
+          import sys
+
+          wheels = glob.glob('dist/*.whl')
+          if not wheels:
+              print("ERROR: No wheel files found")
+              sys.exit(1)
+
+          for whl in wheels:
+              print(f"Checking {whl}...")
+              with zipfile.ZipFile(whl, 'r') as z:
+                  files = z.namelist()
+                  dll_files = [f for f in files if 'libscalene.dll' in f]
+                  if dll_files:
+                      print(f"  Found: {dll_files}")
+                  else:
+                      print(f"  ERROR: libscalene.dll not found in wheel!")
+                      print(f"  Files in wheel: {[f for f in files if f.endswith(('.dll', '.pyd', '.so'))]}")
+                      sys.exit(1)
+
+          print("All Windows wheels contain libscalene.dll")
+  
+      - name: Non-release (dev) upload
+        if: github.event_name != 'release'
+        env:
+          TWINE_REPOSITORY: testpypi
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TESTPYPI_TOKEN }}
+        run: twine upload --verbose dist/*
+
+      - name: Release upload
+        if: github.event_name == 'release'
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: twine upload --verbose dist/*

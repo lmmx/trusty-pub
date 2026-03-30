@@ -1,0 +1,82 @@
+# PR CI workflow for openslide-bin
+
+name: Build PR
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    name: Rerun pre-commit checks
+    runs-on: ubuntu-slim
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.14
+      - name: Install dependencies
+        run: python -m pip install pre-commit
+      - name: Cache pre-commit environments
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Run pre-commit hooks
+        run: pre-commit run -a --show-diff-on-failure --color=always
+
+  setup:
+    name: Set up
+    runs-on: ubuntu-latest
+    outputs:
+      linux_builder_repo_and_digest: ${{ steps.find-linux.outputs.builder_repo_and_digest }}
+      suffix: ${{ steps.params.outputs.suffix }}
+      windows_builder_repo_and_digest: ${{ steps.find-windows.outputs.builder_repo_and_digest }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+      - name: Find Linux builder container digest
+        id: find-linux
+        uses: ./.github/find-container-digest
+        with:
+          builder_image: linux
+      - name: Find Windows builder container digest
+        id: find-windows
+        uses: ./.github/find-container-digest
+        with:
+          builder_image: windows
+      - name: Calculate parameters
+        id: params
+        run: echo "suffix=$(date +%Y%m%d).bin.pr.${{ github.event.number }}.${{ github.run_number }}.${{ github.run_attempt }}.$(echo ${{ github.sha }} | cut -c-7)" >> $GITHUB_OUTPUT
+
+  stable:
+    name: Stable
+    needs: setup
+    uses: ./.github/workflows/build.yml
+    with:
+      linux_builder_repo_and_digest: ${{ needs.setup.outputs.linux_builder_repo_and_digest }}
+      macos_enable: true
+      openslide_bin_repo: ${{ github.repository }}
+      openslide_bin_ref: ${{ github.ref }}
+      suffix: ${{ needs.setup.outputs.suffix }}.stable
+      windows_builder_repo_and_digest: ${{ needs.setup.outputs.windows_builder_repo_and_digest }}
+
+  git:
+    name: Git
+    needs: setup
+    uses: ./.github/workflows/build.yml
+    with:
+      linux_builder_repo_and_digest: ${{ needs.setup.outputs.linux_builder_repo_and_digest }}
+      macos_enable: true
+      openslide_repo: openslide/openslide
+      openslide_ref: main
+      openslide_bin_repo: ${{ github.repository }}
+      openslide_bin_ref: ${{ github.ref }}
+      suffix: ${{ needs.setup.outputs.suffix }}.git
+      werror: true
+      windows_builder_repo_and_digest: ${{ needs.setup.outputs.windows_builder_repo_and_digest }}

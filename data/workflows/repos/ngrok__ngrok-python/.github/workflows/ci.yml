@@ -1,0 +1,166 @@
+name: CI
+env:
+  DEBUG: napi:*
+  APP_NAME: ngrok
+  MACOSX_DEPLOYMENT_TARGET: '10.13'
+on:
+  workflow_call:
+    inputs:
+      publish:
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      NGROK_AUTHTOKEN:
+        required: true
+      MATURIN_PASSWORD:
+        required: true
+  push:
+    inputs:
+      publish:
+        required: false
+        default: false
+        type: boolean
+    branches:
+      - '**'
+    tags-ignore:
+      - '**'
+    paths-ignore:
+      - '**/*.md'
+      - LICENSE
+      - '**/*.gitignore'
+      - .editorconfig
+      - docs/**
+
+jobs:
+  udeps:
+    name: Udeps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jrobsonchase/direnv-action@v0.7
+      - uses: ./.github/workflows/rust-cache
+      - name: Run Udeps
+        run: |
+          cargo udeps --workspace --all-targets --all-features
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jrobsonchase/direnv-action@v0.7
+      - name: Run Rustfmt
+        run: |
+          cargo fmt --all -- --check
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jrobsonchase/direnv-action@v0.7
+      - uses: ./.github/workflows/rust-cache
+      - name: Run Clippy
+        run: |
+          cargo clippy --all-targets --all-features --workspace
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jrobsonchase/direnv-action@v0.7
+      - uses: ./.github/workflows/rust-cache
+      - name: Run Tests
+        run: |
+          NGROK_AUTHTOKEN=${{ secrets.NGROK_AUTHTOKEN }} make mypy
+          NGROK_AUTHTOKEN=${{ secrets.NGROK_AUTHTOKEN }} make testfast
+
+  build:
+    needs:
+      - clippy
+      - fmt
+      - test
+      - udeps
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+    with:
+      publish: ${{ inputs.publish || false }}
+      docker: ${{ matrix.settings.docker }}
+      host: ${{ matrix.settings.host }}
+      setup: ${{ matrix.settings.setup }}
+      target: ${{ matrix.settings.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          # MACOS
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: macos-latest
+            target: universal2-apple-darwin
+          - host: macos-latest
+            target: x86_64-apple-darwin
+
+          # LINUX
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            docker: ghcr.io/rust-cross/manylinux2014-cross:aarch64
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            docker: alpine:3.21
+          - host: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            docker: ghcr.io/rust-cross/manylinux2014-cross:armv7
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            docker: ghcr.io/rust-cross/manylinux2014-cross:x86_64
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            docker: alpine:3.21
+
+          # WINDOWS
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
+          - host: windows-latest
+            target: i686-pc-windows-msvc
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc 
+  
+  build-freebsd:
+    runs-on: ubuntu-22.04
+    name: Build FreeBSD
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - name: Run lscpu
+        run: lscpu
+      - uses: actions/checkout@v4
+      - name: Build
+        id: build
+        uses: vmactions/freebsd-vm@v1
+        env:
+          RUSTUP_HOME: /usr/local/rustup
+          CARGO_HOME: /usr/local/cargo
+          RUSTUP_IO_THREADS: 1
+        with:
+          envs: RUSTUP_HOME CARGO_HOME RUSTUP_IO_THREADS
+          usesh: true
+          mem: 3000
+          prepare: |
+            pkg install -y -f curl libnghttp2 python3 cmake llvm ca_root_nss
+            alias curl="curl --retry 5 --retry-all-errors"
+            curl https://sh.rustup.rs -sSf --output rustup.sh
+            sh rustup.sh -y --profile minimal --default-toolchain beta
+            export PATH="/usr/local/cargo/bin:$PATH"
+          run: |
+            export PATH="/usr/local/cargo/bin:$PATH"
+            python3 -m venv .env
+            . .env/bin/activate && pip install -r requirements.txt
+            echo "~~~~ maturin building"
+            . .env/bin/activate && maturin build
+            rm -rf .env/ target/debug/ target/release/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-freebsd
+          path: target/wheels/*.whl
+          if-no-files-found: error

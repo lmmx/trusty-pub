@@ -1,0 +1,99 @@
+name: Docs Preview
+
+on:
+  pull_request_target:
+    types:
+      - labeled
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  docs_preview:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.repository }}-${{ github.head_ref || github.sha }}-${{ github.workflow }}-${{ github.event.label.name }}
+      cancel-in-progress: true
+    if: github.event.label.name == 'docs-preview'
+    steps:
+      - uses: actions/create-github-app-token@v2.2.1
+        id: generate_token
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_APP_PRIVATE_KEY }}
+
+      - name: reset label
+        uses: actions-ecosystem/action-remove-labels@v1
+        with:
+          labels: docs-preview
+          github_token: ${{ steps.generate_token.outputs.token }}
+
+      - name: install nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            access-tokens = github.com=${{ steps.generate_token.outputs.token }}
+
+      - name: setup cachix
+        uses: cachix/cachix-action@v16
+        with:
+          name: ibis
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          extraPullNames: nix-community
+
+      - name: checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: generate url alias
+        id: get_alias
+        run: |
+          echo "id=pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: get changed files
+        id: changed-files
+        run: |
+          changed_qmd_files="$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep -P '\.qmd$' | xargs)"
+          echo "changed_qmd_files=${changed_qmd_files}" >> "$GITHUB_OUTPUT"
+
+      - name: get preview links
+        env:
+          PREVIEW_URL: "https://${{ steps.get_alias.outputs.id }}--ibis-quarto.netlify.app"
+        run: |
+          {
+            echo 'Docs preview: https://${{ steps.get_alias.outputs.id }}--ibis-quarto.netlify.app'
+            for file in ${{ steps.changed-files.outputs.changed_qmd_files }}; do
+              link="${file#docs/}"
+              echo "- [${file}](${PREVIEW_URL}/${link%.qmd})"
+            done
+          } | tee /tmp/comment
+
+      - name: restore cache of the previously rendered notebooks
+        uses: actions/cache/restore@v5
+        with:
+          key: docs-${{ github.event.pull_request.base.sha }}
+          path: docs/**/.jupyter_cache
+
+      - name: build docs
+        run: nix develop '.#ibis312' --ignore-environment --keep HOME -c just docs-build-all
+
+      - name: install netlify cli
+        run: npm install -g netlify-cli
+
+      - name: build and push quarto docs to preview url
+        run: netlify deploy --dir=docs/_output --alias="${{ steps.get_alias.outputs.id }}"
+        env:
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+
+      - name: create preview link comment
+        if: success()
+        uses: peter-evans/create-or-update-comment@v5
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: /tmp/comment

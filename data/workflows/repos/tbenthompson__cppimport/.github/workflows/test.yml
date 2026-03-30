@@ -1,0 +1,81 @@
+name: Test
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+  push:
+    branches:
+      - main 
+    tags:
+      - '*'
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "macos-latest"]
+        python-version: [ "3.8", "3.9", "3.10"]
+    name: Test (${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on:  ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+    - uses: actions/checkout@v2
+    - uses: conda-incubator/setup-miniconda@v3
+      with:
+        mamba-version: "*"
+        channels: conda-forge
+        activate-environment: cppimport
+        environment-file: environment.yml
+        python-version: ${{ matrix.python-version }}
+    - name: Install cppimport
+      run: |
+        pip install --no-deps -e .
+    - name: Lint with flake8
+      run: |
+        flake8 . 
+    - name: Check formatting with black
+      run: |
+        black --check . 
+    - name: Check import ordering with isort
+      run: |
+        isort --check . 
+    - name: Test
+      if: ${{ matrix.os == 'macos-latest' }}
+      run: |
+        CFLAGS='-stdlib=libc++' pytest --cov=./ --cov-report=xml
+    - name: Test
+      if: ${{ matrix.os != 'macos-latest' }}
+      run: |
+        pytest --cov=./ --cov-report=xml
+  build-and-publish:
+    # based on https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+    # also see: https://github.com/marketplace/actions/pypi-publish#advanced-release-management
+    needs: test
+    name: Build and publish Python distributions to PyPI and TestPyPI
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: conda-incubator/setup-miniconda@v2
+      with:
+        mamba-version: "*"
+        channels: conda-forge
+        activate-environment: cppimport
+        environment-file: environment.yml
+        python-version: ${{ matrix.python-version }}
+    - name: Get history and tags for SCM versioning to work
+      run: |
+        git fetch --prune --unshallow
+        git fetch --depth=1 origin +refs/tags/*:refs/tags/*
+    - name: Build sdist
+      run: >- 
+        python setup.py sdist
+    - name: Publish distribution 📦 to PyPI
+      if: startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        verbose: true

@@ -1,0 +1,26 @@
+name: Self test
+
+on: [workflow_call]
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install poetry
+        run: pipx install poetry
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'poetry'
+      - name: Install project
+        run: poetry sync --no-interaction --with=nox,test,lint,format,dev
+      - name: Run fawltydeps on Python ${{ matrix.python-version }}
+        run: poetry run nox -- --no-venv --no-install --non-interactive -s self_test -- -vv

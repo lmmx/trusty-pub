@@ -1,0 +1,48 @@
+name: Update Galata References
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  update-reference-screenshots:
+    name: Update Galata References
+    runs-on: ubuntu-latest
+
+    if: github.event.issue.pull_request && contains(github.event.comment.body, 'please update snapshots')
+
+    steps:
+      - uses: jupyterlab/maintainer-tools/.github/actions/update-snapshots-checkout@main
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Conda environment with Micromamba
+        uses: mamba-org/setup-micromamba@main
+        with:
+          environment-file: test-environment.yml
+          channels: conda-forge
+
+      - name: Install bqplot
+        run: pip install .
+
+      - name: Install dependencies
+        shell: bash -l {0}
+        working-directory: ui-tests
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+        run: jlpm install
+
+      - uses: jupyterlab/maintainer-tools/.github/actions/update-snapshots@main
+        with:
+          npm_client: jlpm
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          start_server_script: 'null'
+          test_folder: ui-tests

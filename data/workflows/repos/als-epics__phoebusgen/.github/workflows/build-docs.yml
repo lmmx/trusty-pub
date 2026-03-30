@@ -1,0 +1,51 @@
+name: Build Docs
+
+on:
+  push:
+    branches:
+      - master
+        #pull_request:
+        #    branches:
+        #      - master
+
+jobs:
+  docs:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.10"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install sphinx
+        pip install sphinx_autodoc_typehints
+        pip install sphinx-rtd-theme
+    - name: Build Docs
+      run: ./.docbuild/build-docs.sh
+    - name: Archive docs
+      uses: actions/upload-artifact@v4
+      with:
+        name: save-docs
+        path: docs
+    - name: Commit documentation changes
+      run: |
+        git clone https://github.com/als-epics/phoebusgen.git --branch gh-pages --single-branch gh-pages
+        cp -r docs/* gh-pages/
+        cd gh-pages
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .
+        git commit -m "Update documentation" -a || true
+        # The above command will fail if no changes were present, so we ignore
+        # the return code.
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        branch: gh-pages
+        directory: gh-pages
+        github_token: ${{ secrets.GITHUB_TOKEN }}

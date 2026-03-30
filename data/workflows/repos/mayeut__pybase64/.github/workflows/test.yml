@@ -1,0 +1,35 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - "temp/**"
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        submodules: recursive
+        persist-credentials: false
+    - name: Install the latest version of uv
+      uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+    - uses: wntrblm/nox@5a277b752f6094150e25237d47c34168e2b7526e # 2026.02.09
+      with:
+        python-versions: "3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.13t, 3.14, 3.14t, 3.15, 3.15t, pypy3.9, pypy3.10, pypy3.11"
+    - name: "Run tests"
+      run: |
+        nox --error-on-missing-interpreters -s test
+        nox --error-on-missing-interpreters -s test_parallel

@@ -1,0 +1,43 @@
+name: Sonar
+'on':
+  push:
+    branches:
+      - "**"
+  pull_request_target:
+    branches:
+      - "**"
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: 0 16 * * *
+  workflow_dispatch:
+jobs:
+  sonarcloud:
+    name: Sonar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Check for external PR
+        if: ${{ !(contains(github.event.pull_request.labels.*.name, 'safe') ||
+          github.event.pull_request.head.repo.full_name == github.repository ||
+          github.event_name != 'pull_request_target') }}
+        run: echo "Unsecure PR, must be labelled with the 'safe' label, then run the workflow again" && exit 1
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: |
+          pip3 install -r requirements.txt
+          pip3 install .
+          pip3 install coverage
+      - name: Run Tests
+        run: |
+          coverage run setup.py test
+          coverage xml
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          SONAR_TOKEN: '${{ secrets.SONAR_TOKEN }}'

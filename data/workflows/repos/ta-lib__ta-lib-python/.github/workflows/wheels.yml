@@ -1,0 +1,249 @@
+
+name: Wheels
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  TALIB_C_VER: 0.6.4
+  PIP_NO_VERIFY: 0
+  PIP_VERBOSE: 1
+  CIBW_BEFORE_BUILD: pip install -U setuptools Cython wheel meson-python ninja && pip install -U numpy
+  CIBW_TEST_REQUIRES: pytest pandas maturin polars
+  CIBW_SKIP: "pp* cp313t* cp314t*"
+
+jobs:
+  build_linux_x86_64:
+    name: Build Linux x86_64 wheels
+    strategy:
+      matrix:
+        os: ["ubuntu-24.04"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_BEFORE_ALL: |
+              bash ./tools/build_talib_linux.sh
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_MUSLLINUX_X86_64_IMAGE: musllinux_1_2
+          CIBW_TEST_SKIP: "cp*-musllinux*"
+          CIBW_TEST_COMMAND: >
+            cd .. &&
+            pytest -k "not RSI and not threading" {project}/tests
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_BUILD_FRONTEND: build
+          CIBW_ENVIRONMENT_LINUX : >
+            TA_LIBRARY_PATH="ta-lib-install/lib"
+            TA_INCLUDE_PATH="ta-lib-install/include"
+            PIP_NO_BUILD_ISOLATION=false
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: |
+            export LD_LIBRARY_PATH="/project/ta-lib-install/lib:$LD_LIBRARY_PATH"
+            auditwheel repair -w {dest_dir} {wheel}
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./wheelhouse/*.whl
+          name: "ta_lib-${{ github.ref_name }}-linux_x86_64"
+  build_linux_arm64:
+    name: Build Linux arm64 wheels
+    strategy:
+      matrix:
+        os: ["ubuntu-24.04-arm"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_BEFORE_ALL: |
+              bash ./tools/build_talib_linux.sh
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          CIBW_MUSLLINUX_AARCH64_IMAGE: musllinux_1_2
+          CIBW_TEST_SKIP: "cp*-musllinux*"
+          CIBW_TEST_COMMAND: >
+            cd .. &&
+            pytest -k "not RSI and not threading" {project}/tests
+          CIBW_ARCHS_LINUX: aarch64
+          CIBW_BUILD_FRONTEND: build
+          CIBW_ENVIRONMENT_LINUX : >
+            TA_LIBRARY_PATH="ta-lib-install/lib"
+            TA_INCLUDE_PATH="ta-lib-install/include"
+            PIP_NO_BUILD_ISOLATION=false
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: |
+            export LD_LIBRARY_PATH="/project/ta-lib-install/lib:$LD_LIBRARY_PATH"
+            auditwheel repair -w {dest_dir} {wheel}
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./wheelhouse/*.whl
+          name: "ta_lib-${{ github.ref_name }}-linux_arm64"
+  build_windows_amd64:
+    name: Build Windows amd64 wheels
+    strategy:
+      matrix:
+        os: ["windows-2022"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+      - name: Set up MSVC for x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+      - name: Build TA-Lib C Library
+        run: tools/build_talib_windows.cmd
+        shell: cmd
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_TEST_SKIP: "cp*"
+          CIBW_TEST_COMMAND: >
+            cd .. &&
+            pytest --rootdir=C: -k "not RSI and not threading" {project}/tests
+          MSBUILDTREATHIGHERTOOLSVERSIONASCURRENT: 1
+          CIBW_ARCHS_WINDOWS: AMD64
+          CIBW_ENVIRONMENT_WINDOWS: >
+            TA_LIBRARY_PATH="ta-lib-$TALIB_C_VER\\_build;$LIB"
+            TA_INCLUDE_PATH="ta-lib-$TALIB_C_VER\\include;$INCLUDE"
+            PIP_NO_BUILD_ISOLATION=false
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./wheelhouse/*.whl
+          name: "ta_lib-${{ github.ref_name }}-win_amd64"
+  build_windows_x86:
+    name: Build Windows x86 wheels
+    strategy:
+      matrix:
+        os: ["windows-2022"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+      - name: Set up MSVC for x86
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_x86
+      - name: Build TA-Lib C library
+        run: tools/build_talib_windows.cmd
+        shell: cmd
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_TEST_SKIP: "cp*"
+          CIBW_TEST_COMMAND: >
+            cd .. &&
+            pytest --rootdir=C: -k "not RSI and not threading" {project}/tests
+          MSBUILDTREATHIGHERTOOLSVERSIONASCURRENT: 1
+          CIBW_ARCHS_WINDOWS: x86
+          CIBW_ENVIRONMENT_WINDOWS: >
+            TA_LIBRARY_PATH="ta-lib-$TALIB_C_VER\\_build;$LIB"
+            TA_INCLUDE_PATH="ta-lib-$TALIB_C_VER\\include;$INCLUDE"
+            PIP_NO_BUILD_ISOLATION=false
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./wheelhouse/*.whl
+          name: "ta_lib-${{ github.ref_name }}-win32"
+  build_windows_arm64:
+    name: Build Windows arm64 wheels
+    strategy:
+      matrix:
+        os: ["windows-11-arm"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+      - name: Set up MSVC for arm
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+      - name: Build TA-Lib C Library
+        run: tools/build_talib_windows.cmd
+        shell: cmd
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_TEST_SKIP: "cp*"
+          CIBW_TEST_COMMAND: >
+            cd .. &&
+            pytest --rootdir=C: -k "not RSI and not threading" {project}/tests
+          MSBUILDTREATHIGHERTOOLSVERSIONASCURRENT: 1
+          CIBW_ARCHS_WINDOWS: ARM64
+          CIBW_ENVIRONMENT_WINDOWS: >
+            TA_LIBRARY_PATH="ta-lib-$TALIB_C_VER\\_build;$LIB"
+            TA_INCLUDE_PATH="ta-lib-$TALIB_C_VER\\include;$INCLUDE"
+            PIP_NO_BUILD_ISOLATION=false
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./wheelhouse/*.whl
+          name: "ta_lib-${{ github.ref_name }}-win_arm64"
+  build_macos_x86_64:
+    name: Build MacOS x86_64 wheels
+    strategy:
+      matrix:
+        os: [macos-13]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_BEFORE_ALL: |
+              bash ./tools/build_talib_macos.sh
+          CIBW_TEST_COMMAND: >
+            cd .. &&
+            pytest -k "not RSI and not threading" {project}/tests
+          CIBW_ARCHS_MACOS: x86_64
+          CIBW_ENVIRONMENT_MACOS : >
+            TA_LIBRARY_PATH="ta-lib-install/lib"
+            TA_INCLUDE_PATH="ta-lib-install/include"
+            PIP_NO_BUILD_ISOLATION=false
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: |
+            export MACOSX_DEPLOYMENT_TARGET=13.7
+            export DYLD_LIBRARY_PATH="/Users/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/ta-lib-install/lib:$DYLD_LIBRARY_PATH"
+            delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./wheelhouse/*.whl
+          name: "ta_lib-${{ github.ref_name }}-macos_x86_64"
+  build_macos_arm64:
+    name: Build MacOS arm64 wheels
+    strategy:
+      matrix:
+        os: [macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        env:
+          CIBW_BEFORE_ALL: |
+              bash ./tools/build_talib_macos.sh
+          CIBW_TEST_COMMAND: >
+            cd .. &&
+            pytest -k "not RSI and not threading" {project}/tests
+          CIBW_ARCHS_MACOS: arm64
+          CIBW_ENVIRONMENT_MACOS : >
+            TA_LIBRARY_PATH="ta-lib-install/lib"
+            TA_INCLUDE_PATH="ta-lib-install/include"
+            PIP_NO_BUILD_ISOLATION=false
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: |
+            export MACOSX_DEPLOYMENT_TARGET=14.0
+            export DYLD_LIBRARY_PATH="/Users/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/ta-lib-install/lib:$DYLD_LIBRARY_PATH"
+            delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./wheelhouse/*.whl
+          name: "ta_lib-${{ github.ref_name }}-macos_arm64"

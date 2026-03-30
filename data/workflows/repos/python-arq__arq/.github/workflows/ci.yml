@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '**'
+  pull_request: {}
+
+env:
+  COLUMNS: 150
+  FORCE_COLOR: 1
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        python-version: '3.13'
+
+    - run: |
+        uv sync --group linting --extra watch
+        uv pip install pre-commit
+
+    - run: uv run pre-commit run -a --verbose
+      env:
+        SKIP: no-commit-to-branch
+
+  docs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        python-version: '3.13'
+
+    - run: uv sync --group docs
+
+    - run: make docs
+
+    - name: Store docs site
+      uses: actions/upload-artifact@v6
+      with:
+        name: docs
+        path: docs/_build/
+
+  test:
+    name: test py${{ matrix.python }} with redis:${{ matrix.redis }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu]
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        redis: ['5']
+        include:
+          - python: '3.11'
+            redis: '6'
+            os: 'ubuntu'
+          - python: '3.11'
+            redis: '7'
+            os: 'ubuntu'
+
+    env:
+      PYTHON: ${{ matrix.python }}
+      OS: ${{ matrix.os }}
+      ARQ_TEST_REDIS_VERSION: ${{ matrix.redis }}
+
+    runs-on: ${{ matrix.os }}-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ matrix.python }}
+
+    - run: uv sync --group testing --extra watch
+
+    - run: make test
+
+    - run: uv run coverage xml
+
+    - uses: codecov/codecov-action@v5
+      with:
+        file: ./coverage.xml
+        env_vars: PYTHON,OS
+
+  check:
+    if: always()
+    needs: [lint, docs, test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        id: all-green
+        with:
+          jobs: ${{ toJSON(needs) }}
+
+  release:
+    name: Release
+    needs: [check]
+    if: "success() && startsWith(github.ref, 'refs/tags/')"
+    runs-on: ubuntu-latest
+    environment: release
+
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: get docs
+        uses: actions/download-artifact@v6
+        with:
+          name: docs
+          path: docs/_build/
+
+      - name: set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: install
+        run: pip install -U build
+
+      - name: check version
+        id: check-version
+        uses: samuelcolvin/check-python-version@v5
+        with:
+          version_file_path: 'arq/version.py'
+
+      - name: build
+        run: python -m build
+
+      - name: Upload package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: publish docs
+        if: '!fromJSON(steps.check-version.outputs.IS_PRERELEASE)'
+        run: make publish-docs
+        env:
+          NETLIFY: ${{ secrets.netlify_token }}

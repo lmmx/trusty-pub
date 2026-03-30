@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '5 1 * * *'  # every day at 01:05
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  tests:
+    timeout-minutes: 15
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        pyv: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        fsspec: ["fsspec"]
+        include:
+        - os: ubuntu-latest
+          pyv: "3.10"
+          fsspec: "fsspec @ git+https://github.com/fsspec/filesystem_spec.git"
+        - os: ubuntu-latest
+          pyv: "3.10"
+          fsspec: "fsspec==2021.7.0"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.pyv }}
+          allow-prereleases: true
+
+      - uses: astral-sh/setup-uv@v7
+      - run: uv pip install ".[dev]" "${{ matrix.fsspec }}" --system
+      - run: uv pip show fsspec
+      - uses: j178/prek-action@v1
+      - run: mypy
+      - run: pytest --cov-report=term
+      - run: uv build
+      - run: sphinx-build docs build/docs
+
+  check:
+    if: always()
+    needs: [tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

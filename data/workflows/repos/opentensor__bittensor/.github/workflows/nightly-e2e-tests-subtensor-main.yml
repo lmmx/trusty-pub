@@ -1,0 +1,178 @@
+name: Nightly E2E Subtensor tests
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: e2e-subtensor-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # Run every night at 2:00 PST
+
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: "Output more information when triggered manually"
+        required: false
+        default: ""
+
+env:
+  CARGO_TERM_COLOR: always
+  VERBOSE: ${{ github.event.inputs.verbose }}
+
+# job to run tests in parallel
+jobs:
+  # Looking for e2e tests
+  find-tests:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    outputs:
+      test-files: ${{ steps.get-tests.outputs.test-files }}
+    steps:
+      - name: Check-out repository under $GITHUB_WORKSPACE
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: false
+          cache-dependency-glob: '**/pyproject.toml'
+          ignore-nothing-to-cache: true
+
+      - name: Cache uv and venv
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: uv-${{ runner.os }}-py3.10-${{ hashFiles('pyproject.toml') }}
+          restore-keys: uv-${{ runner.os }}-py3.10-
+
+      - name: Install dependencies (faster if cache hit)
+        run: uv sync --extra dev --dev
+
+      - name: Find test files
+        id: get-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_matrix=$(
+            uv run pytest -q --collect-only tests/e2e_tests \
+            | sed -n '/^e2e_tests\//p' \
+            | sed 's|^|tests/|' \
+            | jq -R -s -c '
+                split("\n")
+                | map(select(. != ""))
+                | map({nodeid: ., label: (sub("^tests/e2e_tests/"; ""))})
+              '
+          )
+          echo "Found tests: $test_matrix"
+          echo "test-files=$test_matrix" >> "$GITHUB_OUTPUT"
+
+  # Read Python versions
+  read-python-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      python-versions: ${{ steps.read-versions.outputs.versions }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read-versions
+        run: |
+          versions=$(cat .github/supported-python-versions.json)
+          echo "versions=$versions" >> $GITHUB_OUTPUT
+
+  # Pull docker images (devnet-ready and main)
+  pull-docker-images:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+
+      - name: Pull Docker Image
+        run: |
+          docker pull ghcr.io/opentensor/subtensor-localnet:main
+          docker pull ghcr.io/opentensor/subtensor-localnet:devnet-ready
+
+      - name: List pulled images
+        run: docker images
+
+      - name: Save Docker Images to Cache
+        run: |
+          docker save -o subtensor-localnet-main.tar ghcr.io/opentensor/subtensor-localnet:main
+          docker save -o subtensor-localnet-devnet-ready.tar ghcr.io/opentensor/subtensor-localnet:devnet-ready
+
+      - name: Upload main Docker Image as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: subtensor-localnet-main
+          path: subtensor-localnet-main.tar
+
+      - name: Upload devnet-ready Docker Image as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: subtensor-localnet-devnet-ready
+          path: subtensor-localnet-devnet-ready.tar
+
+  # Daily run of fast-blocks tests from `bittensor:master` based on `subtensor:main docker` image
+  run-fast-blocks-e2e-test-master:
+    name: "master: ${{ matrix.label }}"
+    needs:
+      - find-tests
+      - pull-docker-images
+      - read-python-versions
+    strategy:
+      fail-fast: false
+      max-parallel: 64
+      matrix:
+        include: ${{ fromJson(needs.find-tests.outputs.test-files) }}
+    uses: ./.github/workflows/_run-e2e-single.yaml
+    with:
+      nodeid: ${{ matrix.nodeid }}
+      image-name: ghcr.io/opentensor/subtensor-localnet:main
+      python-versions: ${{ needs.read-python-versions.outputs.python-versions }}
+      ref: master
+      artifact-name: subtensor-localnet-main
+    secrets: inherit
+
+  # Daily run of fast-blocks tests from `bittensor:staging` based on `subtensor:devnet-ready` docker image
+  run-fast-blocks-e2e-test-staging:
+    name: "staging: ${{ matrix.label }}"
+    needs:
+      - find-tests
+      - pull-docker-images
+      - read-python-versions
+    strategy:
+      fail-fast: false
+      max-parallel: 64
+      matrix:
+        include: ${{ fromJson(needs.find-tests.outputs.test-files) }}
+    uses: ./.github/workflows/_run-e2e-single.yaml
+    with:
+      nodeid: ${{ matrix.nodeid }}
+      image-name: ghcr.io/opentensor/subtensor-localnet:devnet-ready
+      python-versions: ${{ needs.read-python-versions.outputs.python-versions }}
+      ref: staging
+      artifact-name: subtensor-localnet-devnet-ready
+    secrets: inherit
+
+  # Send centralized Discord failure notification
+  notify-on-failure:
+    needs:
+      - run-fast-blocks-e2e-test-master
+      - run-fast-blocks-e2e-test-staging
+    if: always() && (needs.run-fast-blocks-e2e-test-master.result == 'failure' || needs.run-fast-blocks-e2e-test-staging.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send centralized Discord failure notification
+        run: |
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{\"username\": \"SDK\", \"content\": \"❌ Nightly E2E tests failed. Check run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}>\"}" \
+            "${{ secrets.NIGHTLY_WEBHOOK_URL }}"

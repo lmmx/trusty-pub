@@ -1,0 +1,119 @@
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '30 13 * * *'
+permissions: { }
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - 'ubuntu-22.04'
+          - 'ubuntu-22.04-arm'
+          - 'macos-13'
+          - 'macos-14'
+          - 'windows-2022'
+          - 'windows-11-arm'
+        py:
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+          - '3.13'
+          - '3.13t'
+          - '3.14'
+          - '3.14t'
+        arch:
+          - 'arm64'
+          - 'x86'
+          - 'x64'
+        exclude:
+          - os: 'ubuntu-22.04'
+            arch: 'arm64'
+          - os: 'ubuntu-22.04'
+            arch: 'x86'
+          - os: 'ubuntu-22.04-arm'
+            arch: 'x86'
+          - os: 'ubuntu-22.04-arm'
+            arch: 'x64'
+          - os: 'macos-13'
+            arch: 'arm64'
+          - os: 'macos-13'
+            arch: 'x86'
+          - os: 'macos-14'
+            arch: 'x86'
+          - os: 'macos-14'
+            arch: 'x64'
+          - os: 'macos-14'
+            arch: 'arm64'
+            py: '3.9'
+          - os: 'windows-2022'
+            arch: 'arm64'
+          - os: 'windows-11-arm'
+            arch: 'x86'
+          - os: 'windows-11-arm'
+            arch: 'x64'
+          - os: 'windows-11-arm'
+            py: '3.8'
+          - os: 'windows-11-arm'
+            py: '3.9'
+          - os: 'windows-11-arm'
+            py: '3.10'
+
+    runs-on: ${{ matrix.os }}
+    env:
+      # Enable fuzzing tests, other expensive tests.
+      ZSTD_SLOW_TESTS: '1'
+      # Make all compile warnings fatal except on 3.13, which has some deprecations
+      # at the moment.
+      ZSTD_WARNINGS_AS_ERRORS: '1'
+      # More thorough fuzzing coverage.
+      HYPOTHESIS_PROFILE: 'ci'
+      # Activate Python development mode so we get warnings.
+      PYTHONDEVMODE: '1'
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.py }}
+          architecture: ${{ matrix.arch }}
+          allow-prereleases: true
+
+      - name: Install Rust
+        if: matrix.arch != 'x86'
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # v1
+        with:
+          toolchain: stable
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d9e0f98d3fc6adb07d1e3d37f3043649ddad06a1 # v6.5.0
+        with:
+          version: "0.8.11"
+
+      - name: Test C Backend
+        run: |
+          uv -v run --locked pytest --numprocesses=auto --hypothesis-profile=${HYPOTHESIS_PROFILE} -v
+
+      - name: Test CFFI Backend
+        if: matrix.py != '3.13t'
+        env:
+          PYTHON_ZSTANDARD_IMPORT_POLICY: 'cffi'
+        run: |
+          uv -v run --locked -w cffi pytest --numprocesses=auto --hypothesis-profile=${HYPOTHESIS_PROFILE} -v
+
+      - name: Test Rust Backend
+        if: matrix.arch != 'x86'
+        # Rust backend is currently experimental. So ignore failures in it.
+        continue-on-error: true
+        env:
+          PYTHON_ZSTANDARD_IMPORT_POLICY: 'rust'
+        run: |
+          # We need --reinstall to get uv to pick up the config settings change.
+          # Unsure if this is a bug.
+          uv -v run --locked --config-settings-package 'zstandard:--global-option=--rust-backend' --reinstall pytest --numprocesses=auto --hypothesis-profile=${HYPOTHESIS_PROFILE} -v

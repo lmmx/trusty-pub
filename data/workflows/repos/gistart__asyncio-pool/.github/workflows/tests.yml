@@ -1,0 +1,27 @@
+name: test-all
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: run all tests
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version: [3.6, 3.7, 3.8, 3.9, '3.10', 'pypy3']
+    steps:
+    - name: checkout
+      uses: actions/checkout@v2
+    - name: python${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: pip-requirements
+      run: pip install --upgrade -r reqs-test.txt
+    - name: run-test
+      run: pytest -sv --continue-on-collection-errors ./tests

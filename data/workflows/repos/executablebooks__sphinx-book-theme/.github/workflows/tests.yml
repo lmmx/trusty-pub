@@ -1,0 +1,123 @@
+name: continuous-integration
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_call:
+
+env:
+  PY_COLORS: 1
+  FORCE_COLOR: True
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+    - uses: pre-commit/action@v3.0.1
+
+  tests:
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        # Test last 2 major releases of Sphinx; regression fixtures target the latest.
+        sphinx: ["~=7.0", "~=8.0", "~=9.0"]
+        include:
+        - os: windows-latest
+          python-version: 3.13
+          # Windows pulling in dependencies fails
+          experimental: true
+        - os: macos-latest
+          python-version: 3.x
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: "pip"
+        cache-dependency-path: "pyproject.toml"
+
+    - name: Install dependencies with Sphinx ${{ matrix.sphinx }}
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install --upgrade "sphinx${{matrix.sphinx}}" -e .[test] --pre
+
+    - name: Run pytest
+      run: >
+        pytest --durations=10 --cov=sphinx_book_theme --cov-report=xml --cov-report=term-missing
+
+    # Only upload to codecov on pull requests so that we don't trigger rate limit blocks
+    # Disabled for now with false &&
+    - name: Upload to Codecov
+      if: false && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && matrix.sphinx == '~=8.0' && github.repository == 'executablebooks/sphinx-book-theme' && github.event_name == 'pull_request'
+      uses: codecov/codecov-action@v5.4.0
+      with:
+        name: ebp-sbt-pytests-py3.11
+        flags: pytests
+        file: ./coverage.xml
+        fail_ci_if_error: true
+
+  # Build the docs and fail if an *unexpected* warning occurs.
+  docs-audit:
+    runs-on: ubuntu-latest
+    name: Build and Audit Documentation
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: "pip"
+        cache-dependency-path: "pyproject.toml"
+    - name: Install fonts
+      # This is required until sphinx-opengraph fixes their fallback
+      run: sudo apt-get install -y fonts-roboto
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[doc]
+
+    # Only check for broken links on pull requests so that we don't block releases
+    - name: Check for broken links
+      if: github.event_name == 'pull_request'
+      run: >
+        sphinx-build -b linkcheck docs docs/_build/linkcheck
+
+    - name: Build documentation to audit
+      run: >
+        sphinx-build -b html docs docs/_build/html -w warnings.txt
+
+    - name: Check that there are no unexpected warnings
+      shell: python
+      run: |
+        from pathlib import Path
+        import re
+        text = Path("./warnings.txt").read_text().strip()
+        expected_warning_patterns = [r"kitchen\-sink", r"urllib/parse\.py", r"Glyph 10024 .*? missing from current font", r"list assignment index out of range \[autodoc\]"]
+        print("\n=== Sphinx Warnings ===\n\n" + text)  # Print just for reference so we can look at the logs
+        unexpected = [l for l in text.splitlines() if not any(re.search(p, l) for p in expected_warning_patterns)]
+        assert len(unexpected) == 0, unexpected
+
+    - name: Audit with Lighthouse
+      uses: treosh/lighthouse-ci-action@12.1.0
+      with:
+        configPath: ".github/workflows/lighthouserc.json"
+        temporaryPublicStorage: true
+        uploadArtifacts: true
+        runs: 5

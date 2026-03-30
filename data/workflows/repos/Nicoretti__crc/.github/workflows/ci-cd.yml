@@ -1,0 +1,59 @@
+name: CI/CD
+
+on:
+  push:
+    tags:
+      - '**'
+
+jobs:
+
+  check-tag-version-job:
+
+    name: Check Tag Version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SCM Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/python-environment
+
+      - name: Check Tag Version
+        # make sure the pushed/created tag matched the project version
+        run: "[[ `uv run hatch version` == ${{ github.ref_name }} ]]"
+
+  ci-job:
+    name: Checks
+    needs: [ check-tag-version-job ]
+    uses: ./.github/workflows/checks.yml
+
+  cd-job:
+    name: Continues Delivery
+    needs: [ ci-job ]
+
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: SCM Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/python-environment
+
+      - name: Build Artifacts
+        run: uv build
+
+      - name: PyPi Release
+        env:
+          UV_PUBLISH_USERNAME: "__token__"
+          UV_PUBLISH_PASSWORD: "${{ secrets.PYPI_TOKEN }}"
+        run: uv publish
+
+      - name: GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release create ${GITHUB_REF_NAME}
+          --title ${GITHUB_REF_NAME} --notes-file docs/docs/changelog/changes_${GITHUB_REF_NAME}.md
+          dist/*

@@ -1,0 +1,62 @@
+name: Publish Docs
+
+on:
+  push:
+    branches: [ master ]
+  release:
+    types: [ created ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    name: Publish Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Conda
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          # https://github.com/mamba-org/setup-micromamba/issues/225
+          micromamba-version: 1.5.10-0
+          init-shell: bash
+          environment-name: docs
+          create-args: >-
+            python=3.12
+            rasterio
+            xarray
+            scipy
+            pyproj
+            pandoc
+
+      - name: Install and Build
+        shell: bash
+        run: |
+          micromamba run -n docs python -m pip install -e . --group doc
+          micromamba run -n docs sphinx-build -b html docs/ docs/_build/
+
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        if: ${{ github.event_name == 'release' }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gh-pages
+          folder: docs/_build/
+          clean: false
+          target-folder: ${{ github.ref_name }}
+
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        if: ${{ github.event_name == 'push' }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gh-pages
+          folder: docs/_build/
+          clean: false
+          target-folder: latest

@@ -1,0 +1,61 @@
+name: Lint source code
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: "Ruff & MyPy"
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install .[lint] pytest
+      # Also install pytest here, otherwise mypy will complain about our test files
+
+    - name: Lint with Ruff
+      run: ruff check . --output-format github
+
+    - name: Format with Ruff
+      run: ruff format . --diff
+
+    - name: Type check with MyPy
+      run: mypy
+
+  twine:
+    name: "Check packing with Twine"
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install --upgrade twine build
+    - name: Check with twine
+      run: |
+        python -m build .
+        twine check dist/*

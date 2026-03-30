@@ -1,0 +1,107 @@
+name: Onnx Model Export
+
+on:
+  #  push:
+  workflow_dispatch:
+
+jobs:
+  onnx_export:
+    name: Onnx Export
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - 'ubuntu-latest'
+        python-version:
+          - '3.8'
+        model-name:
+          #          - 'lpips'
+          #          - 'monochrome'
+          #          - 'person_detect'
+          #          - 'face_detect'
+          #          - 'manbits_detect'
+          - 'ccip'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 20
+      - name: Set up python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up python dependences
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade flake8 setuptools wheel twine
+          pip install -r requirements-test.txt
+          pip install -r requirements.txt
+          pip install 'torch<2'
+          pip install -r requirements-zoo.txt
+      - name: Prepare dataset
+        uses: nick-fields/retry@v2
+        env:
+          CI: 'true'
+        with:
+          shell: bash
+          timeout_minutes: 20
+          max_attempts: 5
+          retry_on: any
+          command: |
+            make dataset
+      - name: Transform models to onnx format
+        run: |
+          python -m zoo.${{ matrix.model-name }} export -O ./${{ matrix.model-name }} 
+          ls -al ./${{ matrix.model-name }}
+          zip -r ${{ matrix.model-name }}.zip ${{ matrix.model-name }}
+      - name: Upload the character databases
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-models
+          path: ${{ matrix.model-name }}.zip
+
+  data_upload:
+    name: Data Upload
+    runs-on: ${{ matrix.os }}
+    needs:
+      - onnx_export
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - 'ubuntu-latest'
+        python-version:
+          - '3.8'
+
+    steps:
+      - name: Prepare the repository
+        shell: bash
+        run: |
+          sudo apt-get install -y tree
+          git lfs install
+          git clone https://huggingface.co/deepghs/imgutils-models
+          ls -al imgutils-models
+      - name: Download from artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: onnx-models
+          path: imgutils-models
+      - name: See what is in this path
+        shell: bash
+        run: |
+          cd imgutils-models
+          for zfile in *.zip; do unzip -o $zfile; done
+          rm -rf *.zip
+          tree .
+      - name: Push models to hugging face repostory
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          cd imgutils-models
+          git config user.name 'narugo1992'
+          git config user.email 'narugo992@gmail.com'
+          git add -A
+          git diff-index --quiet HEAD || git commit -a -m "dev(narugo): model publish $(date -R)"
+          git push https://narugo:$HF_TOKEN@huggingface.co/deepghs/imgutils-models main

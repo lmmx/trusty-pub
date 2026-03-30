@@ -1,0 +1,30 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [master]
+  schedule:
+    - cron: '0 18 * * 3'
+
+permissions: read-all
+
+jobs:
+  analyse:
+    name: Analyse
+    runs-on: [self-hosted, public, linux, x64]
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v3
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@c0d1daa7f7e14667747d73a7dbbe8c074bc8bfe2  # v2
+        with:
+          languages: 'python'
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@c0d1daa7f7e14667747d73a7dbbe8c074bc8bfe2  # v2

@@ -1,0 +1,130 @@
+name: Build Node.js Archives
+
+on:
+  workflow_dispatch:
+    inputs:
+      nodejs_version:
+        description: 'Node.js version to build'
+        required: true
+        default: '22.11.0'
+
+jobs:
+  build-nodejs-linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyzstd
+
+      - name: Build Linux x86_64 archive
+        run: |
+          cd downloads-bins/tools
+          python fetch_and_archive_nodejs.py --platform linux --arch x86_64
+
+      - name: Upload Linux x86_64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-linux-x86_64
+          path: |
+            downloads-bins/assets/nodejs/linux/x86_64/nodejs-*.tar.zst
+            downloads-bins/assets/nodejs/linux/x86_64/nodejs-*.tar.zst.sha256
+            downloads-bins/assets/nodejs/linux/x86_64/nodejs-*.tar.zst.md5
+            downloads-bins/assets/nodejs/linux/x86_64/manifest.json
+
+  build-nodejs-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyzstd
+
+      - name: Build Linux ARM64 archive
+        run: |
+          cd downloads-bins/tools
+          python fetch_and_archive_nodejs.py --platform linux --arch arm64
+
+      - name: Upload Linux ARM64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-linux-arm64
+          path: |
+            downloads-bins/assets/nodejs/linux/arm64/nodejs-*.tar.zst
+            downloads-bins/assets/nodejs/linux/arm64/nodejs-*.tar.zst.sha256
+            downloads-bins/assets/nodejs/linux/arm64/nodejs-*.tar.zst.md5
+            downloads-bins/assets/nodejs/linux/arm64/manifest.json
+
+  build-nodejs-macos-x64:
+    runs-on: macos-15-intel  # Intel Mac
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyzstd
+
+      - name: Build macOS x86_64 archive
+        run: |
+          cd downloads-bins/tools
+          python fetch_and_archive_nodejs.py --platform darwin --arch x86_64
+
+      - name: Upload macOS x86_64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-darwin-x86_64
+          path: |
+            downloads-bins/assets/nodejs/darwin/x86_64/nodejs-*.tar.zst
+            downloads-bins/assets/nodejs/darwin/x86_64/nodejs-*.tar.zst.sha256
+            downloads-bins/assets/nodejs/darwin/x86_64/nodejs-*.tar.zst.md5
+            downloads-bins/assets/nodejs/darwin/x86_64/manifest.json
+
+  build-nodejs-macos-arm64:
+    runs-on: macos-latest  # Apple Silicon Mac
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyzstd
+
+      - name: Build macOS ARM64 archive
+        run: |
+          cd downloads-bins/tools
+          python fetch_and_archive_nodejs.py --platform darwin --arch arm64
+
+      - name: Upload macOS ARM64 archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-darwin-arm64
+          path: |
+            downloads-bins/assets/nodejs/darwin/arm64/nodejs-*.tar.zst
+            downloads-bins/assets/nodejs/darwin/arm64/nodejs-*.tar.zst.sha256
+            downloads-bins/assets/nodejs/darwin/arm64/nodejs-*.tar.zst.md5
+            downloads-bins/assets/nodejs/darwin/arm64/manifest.json

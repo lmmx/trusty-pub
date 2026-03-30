@@ -1,0 +1,133 @@
+name: Testing and distribution
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  SAVEPAGENOW_ACCESS_KEY: ${{ secrets.SAVEPAGENOW_ACCESS_KEY }}
+  SAVEPAGENOW_SECRET_KEY: ${{ secrets.SAVEPAGENOW_SECRET_KEY }}
+
+jobs:
+  lint-python:
+    name: Lint Python code
+    runs-on: ubuntu-latest
+    steps:
+      - id: checkout
+        name: Checkout
+        uses: actions/checkout@v6
+
+      - id: check-ruff
+        name: Check with Ruff
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: "check --exit-zero --verbose"
+
+      - id: format-ruff
+        name: Format with Ruff
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: "format --check --verbose"
+
+  mypy-python:
+    name: Static type check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: 'pipenv'
+
+      - name: Install pipenv
+        run: curl https://raw.githubusercontent.com/pypa/pipenv/master/get-pipenv.py | python
+        shell: bash
+
+      - name: Install Python dependencies
+        run: pipenv sync --dev
+        shell: bash
+
+      - name: Mypy
+        run: pipenv run mypy ./savepagenow
+
+  test-python:
+    name: Test Python code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: 'pipenv'
+
+      - name: Install pipenv
+        run: curl https://raw.githubusercontent.com/pypa/pipenv/master/get-pipenv.py | python
+        shell: bash
+
+      - name: Install Python dependencies
+        run: pipenv sync --dev
+        shell: bash
+
+      - name: Run tests
+        run: pipenv run pytest tests
+
+  test-build:
+    name: Build Python package
+    runs-on: ubuntu-latest
+    needs: [test-python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: 'pipenv'
+
+      - name: Install pipenv
+        run: curl https://raw.githubusercontent.com/pypa/pipenv/master/get-pipenv.py | python
+
+      - name: Install Python dependencies
+        run: pipenv sync --dev
+
+      - name: Build release
+        run: |
+          pipenv run python setup.py sdist
+          pipenv run python setup.py bdist_wheel
+
+      - name: Check release
+        run: pipenv run twine check dist/*
+
+      - name: Save artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-release-${{ github.run_number }}
+          path: ./dist
+          if-no-files-found: error
+
+  tag-release:
+    name: Tagged PyPI release
+    runs-on: ubuntu-latest
+    needs: [test-build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    steps:
+      - name: Fetch artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: test-release-${{ github.run_number }}
+          path: ./dist
+
+      - name: Publish release
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verbose: true

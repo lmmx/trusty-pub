@@ -1,0 +1,71 @@
+name: Build and upload to PyPI
+
+on:
+  push:
+  pull_request:
+  release:
+    types:
+      - published
+
+jobs:
+  build_wheels:
+    name: "Build wheels on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: "actions/checkout@v4"
+        with:
+          submodules: true
+      - name: "Set up QEMU"
+        if: matrix.os == 'ubuntu-latest'
+        uses: "docker/setup-qemu-action@v3"
+        with:
+          platforms: arm64
+      - name: "Build wheels"
+        uses: "pypa/cibuildwheel@v3.3.0"
+        env:
+          CIBW_SKIP: "pp* cp36-* cp37-* cp38-* cp39-*"  # FIXME
+          CIBW_ARCHS_LINUX: "auto aarch64"
+          CIBW_TEST_REQUIRES: "pytest"
+          CIBW_TEST_COMMAND: "pytest {project}/tests --doctest-modules"
+      - uses: "actions/upload-artifact@v4"
+        with:
+          path: "./wheelhouse/*.whl"
+          name: wheel-${{ matrix.os }}
+ 
+  make_sdist:
+    name: "Build source distribution"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: "actions/checkout@v4"
+        with:
+          submodules: true
+      - name: "Build source distribution"
+        run: "pipx run build --sdist"
+      - uses: "actions/upload-artifact@v4"
+        with:
+          path: "./dist/*.tar.gz"
+          name: sdist
+
+  upload_to_pypi:
+    name: "Upload to PyPI"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs:
+      - build_wheels
+      - make_sdist
+    steps:
+      - uses: "actions/download-artifact@v4"
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: "pypa/gh-action-pypi-publish@v1.13.0"
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_TOKEN }}
+          print_hash: true
+          verbose: true
+          skip_existing: true

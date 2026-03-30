@@ -1,0 +1,58 @@
+name: Test sdist on example
+
+on:
+  push:
+    branches:
+      - cmeel
+  pull_request:
+    branches:
+      - cmeel
+
+jobs:
+  test:
+    name: Test sdist on ${{ matrix.os }}
+    runs-on: ${{ matrix.os}}
+    strategy:
+      matrix:
+        os: ["ubuntu-latest", "macos-latest"]
+    env:
+      SYSTEM_VERSION_COMPAT: 0
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: setup
+        run: |
+          python -m pip install -U pip
+          python -m pip install -U build poetry
+      - name: install cmeel
+        run: python -m pip install ".[build]"
+      - name: install dependencies
+        run: python -m pip install jrl-cmakemodules pybind11
+      - name: build cmeel-example sdist
+        run: |
+          git clone --recursive https://github.com/cmake-wheel/cmeel-example
+          python -m build -nso dist cmeel-example
+          rm -rf cmeel-example
+      - name: install cmeel-example
+        run: python -m pip install dist/cmeel_example-*.tar.gz
+      - name: test module
+        run: python -c "import cmeel_example; assert cmeel_example.cmeel_add(3, 4) == 7"
+      - name: test executable
+        run: cmeel-add 3 4
+
+  check:
+    if: always()
+    name: check-macos-linux-sdist
+
+    needs:
+      - test
+
+    runs-on: Ubuntu-latest
+
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

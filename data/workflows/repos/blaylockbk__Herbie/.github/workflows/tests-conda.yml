@@ -1,0 +1,56 @@
+name: Tests (Conda)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress jobs when pushing to the same branch.
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+        - os: windows-latest
+          python-version: "3.13"
+
+    name: Python ${{ matrix.python-version }} • ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Conda (Miniforge + Mamba)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+          miniforge-version: latest
+          use-mamba: true
+          auto-update-conda: true
+          environment-file: ci/environment.yml
+          mamba-version: "*"
+          activate-environment: herbie-test
+          auto-activate-base: false
+          channels: conda-forge
+          conda-remove-defaults: "true"
+          channel-priority: true
+
+      - name: Install package in editable mode
+        shell: bash -el {0}
+        run: pip install --editable=.
+
+      - name: Run tests
+        shell: bash -el {0}
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: pytest

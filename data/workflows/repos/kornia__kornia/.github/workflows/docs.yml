@@ -1,0 +1,79 @@
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '*.rst'
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: '["3.11"]'
+      fail-fast:
+        required: false
+        type: boolean
+        default: false
+      ref:
+        required: false
+        type: string
+        default: ${{ github.sha }}
+      cache-path:
+        required: false
+        type: string
+      cache-key:
+        required: false
+        type: string
+      cache-restore-keys:
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: ${{ inputs.fail-fast }}
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-version) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || inputs.ref }}
+
+      - name: Restore cache
+        if: inputs.cache-path != ''
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ inputs.cache-path }}
+          key: ${{ inputs.cache-key }}
+          restore-keys: ${{ inputs.cache-restore-keys }}
+
+      - name: Set pixi environment name
+        id: pixi-env
+        shell: bash
+        run: echo "name=py$(echo '${{ matrix.python-version }}' | tr -d '.')" >> $GITHUB_OUTPUT
+
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: v0.40.0
+          cache: true
+          environments: ${{ steps.pixi-env.outputs.name }}
+
+      - name: Install environment
+        run: pixi install -e ${{ steps.pixi-env.outputs.name }} --locked
+
+      - name: Install docs dependencies
+        run: pixi run -e ${{ steps.pixi-env.outputs.name }} install-docs
+
+      - name: Run doctest
+        run: pixi run -e ${{ steps.pixi-env.outputs.name }} doctest
+
+      - name: Build Documentation
+        run: pixi run -e ${{ steps.pixi-env.outputs.name }} build-docs

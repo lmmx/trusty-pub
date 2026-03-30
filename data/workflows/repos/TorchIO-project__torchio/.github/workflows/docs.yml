@@ -1,0 +1,140 @@
+# This workflow handles both PR doc previews (via Smokeshow) and production
+# deployment (via GitHub Pages). We use a single "push" trigger instead of
+# splitting into "push" + "pull_request" because:
+#   - "push" ensures secrets (SMOKESHOW_AUTH_KEY) are always available,
+#     even for PRs from forks (pull_request events don't expose secrets).
+#   - A single workflow avoids duplicating the build steps.
+# The tradeoff is that sticky-pull-request-comment can't auto-detect the PR
+# number from a push event, so we look it up explicitly with `gh pr list`.
+
+name: Documentation
+
+on:
+  push:
+
+permissions:
+  contents: write
+  pull-requests: write # needed to post PR preview comments
+  statuses: write # needed by smokeshow to set commit status
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group doc
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Restore TorchIO cached data
+        id: cache-torchio-data-restore
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/torchio
+          key: ${{ runner.os }}-torchio-data
+
+      - name: Generate plots
+        run: just generate-plots
+
+      - name: Generate examples gallery
+        run: just generate-gallery
+
+      - name: Build docs
+        run: just build-docs
+
+      - name: Save TorchIO cached data
+        if: steps.cache-torchio-data-restore.outputs.cache-hit != 'true'
+        id: cache-torchio-data-save
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/torchio
+          key: ${{ steps.cache-torchio-data-restore.outputs.cache-primary-key }}
+
+      # Upload to smokeshow if not on main branch
+      - name: Upload docs to smokeshow
+        id: smokeshow
+        if: github.ref != 'refs/heads/main'
+        env:
+          SMOKESHOW_AUTH_KEY: ${{ secrets.SMOKESHOW_AUTH_KEY || env.SMOKESHOW_AUTH_KEY }}
+          SMOKESHOW_GITHUB_STATUS_DESCRIPTION: Docs preview
+          SMOKESHOW_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SMOKESHOW_GITHUB_PR_HEAD_SHA: ${{ github.sha }}
+        run: |
+          # Smokeshow limit: 50 MB total, 25 MB per file
+          # Remove large GIFs to stay under the limit
+          find ./site -type f -size +25M -delete
+          find ./site -type f -name '*.gif' -size +2M -delete
+          uvx smokeshow upload ./site 2>&1 | tee /tmp/smokeshow_output.txt
+          URL=$(grep -oE 'https://smokeshow[^ ]+' /tmp/smokeshow_output.txt | tail -1 | sed 's/,$//')
+          echo "preview_url=$URL" >> "$GITHUB_OUTPUT"
+
+      # sticky-pull-request-comment auto-detects the PR number only on
+      # pull_request events. Since this workflow triggers on push, we need to
+      # look up the PR number ourselves.
+      - name: Find PR number
+        if: github.ref != 'refs/heads/main' && steps.smokeshow.outputs.preview_url != ''
+        id: find-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(gh pr list --head "${{ github.ref_name }}" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Comment PR with preview URL
+        if: github.ref != 'refs/heads/main' && steps.smokeshow.outputs.preview_url != '' && steps.find-pr.outputs.pr_number != ''
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: docs-preview
+          number: ${{ steps.find-pr.outputs.pr_number }}
+          message: |
+            ## 📖 Docs Preview
+
+            Preview of the documentation for this PR:
+
+            🔗 **${{ steps.smokeshow.outputs.preview_url }}**
+
+            <sub>Built from ${{ github.sha }}</sub>
+
+      # Upload to GitHub Pages if on main branch
+      - name: Upload artifacts using actions/upload-pages-artifact
+        if: github.ref == 'refs/heads/main'
+        id: deployment
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+
+    needs: build
+
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write # to deploy to Pages
+      id-token: write # to verify the deployment originates from an appropriate source
+
+    runs-on: ubuntu-latest
+
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

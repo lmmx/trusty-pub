@@ -1,0 +1,27 @@
+---
+name: Testing
+
+on: [push, pull_request, workflow_call] # yamllint disable rule:truthy
+
+env:
+  DEFAULT_PYTHON: "3.12"
+
+jobs:
+  pytest:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@v5.0.0
+      - name: 🏗 Set up uv
+        uses: astral-sh/setup-uv@v6.8.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - name: 🏗 Install dependencies
+        run: uv sync --all-extras --frozen --dev
+      - name: 🚀 Run pytest
+        run: uv run pytest tests

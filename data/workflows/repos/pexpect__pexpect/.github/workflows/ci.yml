@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-22.04"]
+        python-version: ["3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "pypy3.9"]
+        include:
+          # Python < 3.7 is not available on ubuntu-22.04
+          - os: "ubuntu-20.04"
+            python-version: "3.6"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
+
+    - name: Install packages
+      run: |
+        sudo apt-get install --yes zsh
+        export PYTHONIOENCODING=UTF8
+        pip install -r requirements-testing.txt
+
+    - name: Run tests
+      run: |
+        ./tools/display-sighandlers.py
+        ./tools/display-terminalinfo.py
+        pytest --cov pexpect --cov-config .coveragerc
+
+    - name: Coveralls
+      if: github.repository_owner == 'pexpect'
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        flag-name: ${{matrix.os}}-node-${{ matrix.node }}
+        parallel: true
+
+
+  finish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Coveralls Finished
+        if: github.repository_owner == 'pexpect'
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          parallel-finished: true
+

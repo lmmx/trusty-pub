@@ -1,0 +1,27 @@
+name: Branch Protection Check
+
+on: workflow_call
+
+jobs:
+  validate-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch name
+        run: |
+          BASE_BRANCH="${{ github.base_ref }}"
+          SOURCE_BRANCH="${{ github.head_ref }}"
+
+          echo "BASE_BRANCH: $BASE_BRANCH"
+          echo "SOURCE_BRANCH: $SOURCE_BRANCH"
+          
+          if [[ "$BASE_BRANCH" != "main" ]]; then
+            echo "Skipping branch validation - not targeting main branch"
+            exit 0
+          fi
+          
+          if [[ "$SOURCE_BRANCH" != "staging" && ! "$SOURCE_BRANCH" =~ ^hotfix/ ]]; then
+            echo "::error::Pull requests to main can only be created from 'staging' or 'hotfix/*' branches. Current branch: $SOURCE_BRANCH"
+            exit 1
+          fi
+          
+          echo "Branch validation passed. Source branch: $SOURCE_BRANCH"

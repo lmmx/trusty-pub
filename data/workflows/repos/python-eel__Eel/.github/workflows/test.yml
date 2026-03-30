@@ -1,0 +1,55 @@
+name: Test Eel
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+        python-version: [3.7, 3.8, 3.9, "3.10", "3.11", "3.12"]
+        exclude:
+          - os: macos-latest
+            python-version: 3.7
+          - os: ubuntu-24.04
+            python-version: 3.7
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Setup python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Setup test execution environment.
+        run: pip3 install -r requirements-meta.txt
+      - name: Run tox tests
+        run: tox -- --durations=0 --timeout=240
+
+  typecheck:
+    strategy:
+      matrix:
+        os: [windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Setup python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.x"
+      - name: Setup test execution environment.
+        run: pip3 install -r requirements-meta.txt
+      - name: Run tox tests
+        run: tox -e typecheck

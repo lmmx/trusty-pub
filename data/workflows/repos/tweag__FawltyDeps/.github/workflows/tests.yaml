@@ -1,0 +1,35 @@
+name: Tests
+
+on: [workflow_call]
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install poetry
+        run: pipx install poetry
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'poetry'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pytest
+            ~/.cache/uv
+          key: ${{ runner.os }}-poetry-tests-${{ hashFiles('poetry.lock') }}
+      - name: Install project
+        run: poetry sync --no-interaction --with=nox,test
+      - name: Run unit tests on Python ${{ matrix.python-version }}
+        run: poetry run nox -- --no-venv --no-install --non-interactive -s tests -- -vv
+      - name: Run integration tests on Python ${{ matrix.python-version }}
+        run: poetry run nox -- --no-venv --no-install --non-interactive -s integration_tests -- -vv

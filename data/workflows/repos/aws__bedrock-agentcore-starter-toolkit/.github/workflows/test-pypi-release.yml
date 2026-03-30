@@ -1,0 +1,93 @@
+name: Test PyPI Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.0b1)'
+        required: true
+        type: string
+        default: '0.1.0b1'
+
+permissions:
+  contents: read
+  id-token: write  # For trusted publishing (optional)
+
+jobs:
+  build-and-publish:
+    name: Build and Publish to Test PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/bedrock-agentcore-starter-toolkit
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install build tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine toml
+
+    - name: Update version
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        sed -i "s/version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+        echo "Updated to version $VERSION"
+
+    - name: Clean pyproject.toml for release
+      run: |
+        python << 'EOF'
+        import re
+        with open('pyproject.toml', 'r') as f:
+            content = f.read()
+        # Remove [tool.uv.sources]
+        content = re.sub(r'\[tool\.uv\.sources\].*?(?=\[|$)', '', content, flags=re.DOTALL)
+        # Clean up extra newlines
+        content = re.sub(r'\n{3,}', '\n\n', content)
+        with open('pyproject.toml', 'w') as f:
+            f.write(content)
+        print("✓ Removed tool.uv.sources for Test PyPI")
+        EOF
+
+    - name: Build package
+      run: python -m build
+
+    - name: Check package
+      run: |
+        twine check dist/*
+        echo "=== Package contents ==="
+        python -m zipfile -l dist/*.whl | head -20
+        echo "=== Checking for wheelhouse ==="
+        python -m zipfile -l dist/*.whl | grep wheelhouse && exit 1 || echo "✓ No wheelhouse"
+
+    - name: Publish to Test PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      run: |
+        twine upload --repository testpypi dist/*
+
+    - name: Create installation instructions
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        echo "# Test PyPI Release Successful! 🎉" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Version \`$VERSION\` has been published to Test PyPI." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Installation Instructions" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "1. First install private dependencies:" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "pip install ./wheelhouse/*.whl" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "2. Install from Test PyPI:" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "pip install -i https://test.pypi.org/simple/ bedrock-agentcore-starter-toolkit==$VERSION" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

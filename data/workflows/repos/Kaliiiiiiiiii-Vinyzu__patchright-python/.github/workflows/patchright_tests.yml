@@ -1,0 +1,70 @@
+name: Patchright Chromium Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  run-patchright-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: |
+          uv python install
+
+      - name: Install Playwright-Python Package
+        run: |
+          uv sync --all-groups
+          PLAYWRIGHT_TAG=$(curl -fsSL "https://api.github.com/repos/microsoft/playwright-python/releases/latest" | jq -r '.tag_name')
+          PLAYWRIGHT_MINOR=${PLAYWRIGHT_TAG#v}
+          PLAYWRIGHT_MINOR=${PLAYWRIGHT_MINOR%.*}
+          PATCHRIGHT_RELEASE=$(curl -fsSL "https://api.github.com/repos/Kaliiiiiiiiii-Vinyzu/patchright/releases?per_page=100" | jq -r --arg minor "$PLAYWRIGHT_MINOR" '[.[].tag_name | ltrimstr("v") | select(startswith($minor + ".")) | select((try (split(".") | map(tonumber) | length) catch 0) == 3)] | sort_by(split(".") | map(tonumber)) | last')
+          test -n "$PATCHRIGHT_RELEASE" -a "$PATCHRIGHT_RELEASE" != "null"
+          echo "patchright_release=$PATCHRIGHT_RELEASE" >> $GITHUB_ENV
+          git clone https://github.com/microsoft/playwright-python --branch "$PLAYWRIGHT_TAG"
+          cd playwright-python
+          uv add -r local-requirements.txt
+
+      - name: Patch Playwright-Python Package
+        run: |
+          uv run patch_python_package.py
+          uvx ruff format playwright-python
+
+      - name: Build Patchright-Python Package
+        run: |
+          cd playwright-python
+          uv pip install -e .
+          for wheel in $(uv run setup.py --list-wheels); do
+            PLAYWRIGHT_TARGET_WHEEL=$wheel uv build --wheel
+          done
+
+      - name: Install Local Patchright Package
+        run: |
+          uv pip install --python .venv/bin/python playwright-python/dist/patchright-*-manylinux1_x86_64.whl
+
+      - name: Install Chromium with Patchright
+        run: |
+          uv run --no-sync patchright install --with-deps chromium
+
+      - name: Clone Playwright-Python Tests
+        run: |
+          cp -r playwright-python/tests ./tests
+
+      - name: Modify Tests
+        run: |
+          uv run --no-sync utils/modify_tests.py
+
+      - name: Run Chromium Tests
+        run: |
+          xvfb-run -a uv run --no-sync pytest --browser=chromium --disable-warnings --timeout 90 tests/sync/
+          xvfb-run -a uv run --no-sync pytest --browser=chromium --disable-warnings --timeout 90 tests/async/

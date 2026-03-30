@@ -1,0 +1,67 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  build:
+    uses: kitao/pyxel/.github/workflows/build.yml@main
+
+  release:
+    needs: build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten wheels
+        run: |
+          find dist -type f -name "*.whl" -exec mv {} dist/ \;
+          find dist -type d -empty -delete
+
+      - name: Get Pyxel version
+        run: |
+          PYXEL_VERSION=$(echo $GITHUB_REF | sed 's/refs\/tags\/v//')
+          echo "PYXEL_VERSION=${PYXEL_VERSION}" >> $GITHUB_ENV
+
+      - name: Check if pre-release
+        run: |
+          if echo "$PYXEL_VERSION" | grep -qE '(a|b|rc)[0-9]+$'; then
+            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+          else
+            echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Pyxel ${{ env.PYXEL_VERSION }}
+          tag_name: ${{ github.ref }}
+          files: dist/*
+          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Publish to PyPI
+        run: |
+          pip install twine
+          twine upload dist/*
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+

@@ -1,0 +1,85 @@
+name: Tests
+
+on: [pull_request]
+
+jobs:
+
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+      - name: Install dependencies
+        run: UV_FROZEN=1 make setup
+      - name: Run tests
+        run: |
+          make test
+      - name: Run examples
+        run: |
+          make examples
+        if: matrix.python-version == '3.14'
+      - name: Run tests (orjson)
+        run: |
+          uv sync --extra orjson --frozen
+          make test
+      - name: Run examples (orjson)
+        run: |
+          make examples
+        if: matrix.python-version == '3.14'
+      - name: Run tests (sqlalchemy)
+        run: |
+          uv sync --extra sqlalchemy --frozen
+          make test
+      - name: Run examples (sqlalchemy)
+        run: |
+          make examples
+        if: matrix.python-version == '3.14'
+
+  check_formatting:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Check formatting
+        run: UV_FROZEN=1 make setup check
+      - name: Comment PR
+        if: ${{ failure() && github.event_name == 'pull_request' }}
+        uses: thollander/actions-comment-pull-request@v3.0.1
+        with:
+          message: 'Please consider formatting your code according to the standards described here: https://github.com/yukinarit/pyserde/blob/main/CONTRIBUTING.md'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  check_coverage:
+    name: Check coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: uv sync --extra sqlalchemy --frozen
+      - name: Check coverage
+        run: make coverage
+      - name: Upload coverage report to codecov.io
+        uses: codecov/codecov-action@v5

@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - "master"
+      - "release-*"
+  pull_request:
+    branches:
+      - "master"
+      - "release-*"
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          - {os: ubuntu-latest, python: "pypy3.9"}
+          - {os: ubuntu-latest, python: "pypy3.10"}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup python and uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+
+      - name: Install nox
+        run: |
+          uv pip install nox
+          nox --version
+      - name: Run tests
+        run: |
+          nox -s "tests-${{ matrix.python }}" -- --cov-report=xml
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v5
+        if: github.actor != 'dependabot[bot]'
+        with:
+          fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

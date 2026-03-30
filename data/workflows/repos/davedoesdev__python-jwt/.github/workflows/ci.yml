@@ -1,0 +1,51 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: [3.7, 3.8, 3.9, "3.10", 3.11]
+        node-version: [18]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Use Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Use Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Show versions
+        run: |
+          python --version
+          node --version
+
+      - name: Install requirements
+        run: |
+          pip install -r requirements.txt
+          make node_deps
+
+      - name: Lint
+        run: make lint
+
+      - name: Coverage
+        run: make coverage
+
+      - name: Bench
+        run: make bench
+
+      - name: Coveralls
+        if: matrix.python-version == '3.11'
+        run: coveralls --service=github
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

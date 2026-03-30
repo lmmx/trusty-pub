@@ -1,0 +1,163 @@
+name: NodeJS (NAPI)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - nodejs/**
+      - rust/**
+      - docs/src/js/**
+      - .github/workflows/nodejs.yml
+      - docker-compose.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: "1"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: nodejs
+    env:
+      # Need up-to-date compilers for kernels
+      CC: gcc-12
+      CXX: g++-12
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        lfs: true
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+        cache-dependency-path: nodejs/package-lock.json
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        components: rustfmt, clippy
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y protobuf-compiler libssl-dev
+    - uses: Swatinem/rust-cache@v2
+    - name: Format Rust
+      run: cargo fmt --all -- --check
+    - name: Lint Rust
+      run: cargo clippy --profile ci --all --all-features -- -D warnings
+    - name: Lint Typescript
+      run: |
+        npm ci
+        npm run lint-ci
+    - name: Lint examples
+      working-directory: nodejs/examples
+      run: npm ci && npm run lint-ci
+  linux:
+    name: Linux (NodeJS ${{ matrix.node-version }})
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        node-version: [ "18", "20" ]
+    runs-on: "ubuntu-22.04"
+    defaults:
+      run:
+        shell: bash
+        working-directory: nodejs
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        lfs: true
+    - uses: actions/setup-node@v4
+      name: Setup Node.js 20 for build
+      with:
+        # @napi-rs/cli v3 requires Node >= 20.12 (via @inquirer/prompts@8).
+        # Build always on Node 20; tests run on the matrix version below.
+        node-version: 20
+        cache: 'npm'
+        cache-dependency-path: nodejs/package-lock.json
+    - uses: Swatinem/rust-cache@v2
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y protobuf-compiler libssl-dev
+    - name: Build
+      run: |
+        npm ci --include=optional
+        npm run build:debug -- --profile ci
+    - uses: actions/setup-node@v4
+      name: Setup Node.js ${{ matrix.node-version }} for test
+      with:
+        node-version: ${{ matrix.node-version }}
+    - name: Compile TypeScript
+      run: npm run tsc
+    - name: Setup localstack
+      working-directory: .
+      run: docker compose up --detach --wait
+    - name: Test
+      env:
+        S3_TEST: "1"
+      run: npm run test
+    - name: Setup examples
+      working-directory: nodejs/examples
+      run: npm ci
+    - name: Test examples
+      working-directory: ./
+      env:
+        OPENAI_API_KEY: test
+        OPENAI_BASE_URL: http://0.0.0.0:8000
+      run: |
+        python ci/mock_openai.py &
+        cd nodejs/examples
+        npm test
+    - name: Check docs
+      run: |
+        # We run this as part of the job because the binary needs to be built
+        # first to export the types of the native code.
+        set -e
+        npm ci
+        npm run docs
+        if ! git diff --exit-code -- ../ ':(exclude)Cargo.lock'; then
+          echo "Docs need to be updated"
+          echo "Run 'npm run docs', fix any warnings, and commit the changes."
+          exit 1
+        fi
+  macos:
+    timeout-minutes: 30
+    runs-on: "macos-14"
+    defaults:
+      run:
+        shell: bash
+        working-directory: nodejs
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        lfs: true
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+        cache-dependency-path: nodejs/package-lock.json
+    - uses: Swatinem/rust-cache@v2
+    - name: Install dependencies
+      run: |
+        brew install protobuf
+    - name: Build
+      run: |
+        npm ci --include=optional
+        npm run build:debug -- --profile ci
+        npm run tsc
+    - name: Test
+      run: |
+        npm run test

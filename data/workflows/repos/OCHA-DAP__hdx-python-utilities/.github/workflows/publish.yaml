@@ -1,0 +1,34 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/hdx-python-utilities
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Get history and tags for versioning to work
+      run: |
+        git fetch --prune --unshallow
+        git fetch --depth=1 origin +refs/tags/*:refs/tags/*
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Build with uv
+      run: uv build
+
+    - name: Publish distribution 📦 to PyPI
+      run: uv publish

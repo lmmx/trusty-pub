@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+
+jobs:
+  build:
+    name: Build distribution 📦
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4
+      - name: Get tag
+        id: tag
+        run: |
+          echo ::set-output name=tag::${GITHUB_REF#refs/tags/}
+      - name: Install poetry
+        run: pipx install poetry
+      - name: Set up Python 3.11
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v5
+        with:
+          python-version: 3.11
+          cache: "poetry"
+      - name: Build a binary wheel and a source tarball
+        run: poetry build
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  deploy_pypi:
+    permissions:
+      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    name: >-
+      Publish Python 🐍 distribution 📦 to PyPI
+    environment:
+      name: release
+      url: https://pypi.org/p/aiohomekit
+
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
+
+  deploy_github:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # IMPORTANT: this permission is mandatory for sigstore signing
+      contents: write # for creating a release
+    needs:
+      - build
+    name: >-
+      Publish Python 🐍 distribution 📦 to GitHub
+    environment:
+      name: release
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Collected dists
+        run: |
+          tree dist
+      - name: Sign the dists with Sigstore
+        uses: sigstore/gh-action-sigstore-python@f7ad0af51a5648d09a20d00370f0a91c3bdf8f84 # v3.0.1
+        with:
+          inputs: >-
+            ./dist/*.tar.gz
+            ./dist/*.whl
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          files: dist/**
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false

@@ -1,0 +1,40 @@
+name: Generate Github Pages docs
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gen-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Build docs
+        run: make docs outdir=./docs/dist
+
+      - name: Deploy Github Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: ./docs/dist
+          target-folder: ${{ github.ref_name == 'main' && '.' || github.ref_name }}
+          branch: gh-pages-gen-docs
+          single-commit: true
+          force: true
+          clean: true
+          clean-exclude: |
+            v*

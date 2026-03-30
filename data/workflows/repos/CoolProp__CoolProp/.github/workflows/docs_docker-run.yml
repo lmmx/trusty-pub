@@ -1,0 +1,181 @@
+name: Documentation builds (HTML)
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # daily
+    - cron: '0 4 * * 1' # weekly
+  workflow_dispatch:
+    inputs:
+      expensive:
+        description: 'Build expensive docs'
+        required: false
+        type: boolean
+  push:
+    branches: [ 'master', 'main', 'develop', 'actions_docs' ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ 'master', 'main', 'develop' ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    container:
+      image: ghcr.io/coolprop/coolprop_docs_02_builder:dev
+      # options: --user 1001 --group 1001
+      credentials:
+         username: ${{ github.actor }}
+         password: ${{ secrets.GITHUB_TOKEN }}
+         
+    steps: 
+    - uses: actions/checkout@v4.2.2
+      with:
+        submodules: recursive
+        fetch-depth: 0  # Fetch all history for git revision info
+    
+    - name: Set up Git
+      run: |
+        git config --global --add safe.directory $GITHUB_WORKSPACE
+        # Get the full git revision hash
+        git rev-parse HEAD > dev/gitrevision.txt
+        echo "Git revision: $(cat dev/gitrevision.txt)"
+    
+    - uses: actions/cache@v4
+      if: ${{ !env.ACT }} # skip during local actions testing
+      id: cached-props # steps.cached-props.outputs.cache-hit != 'true'
+      with:
+        path: |
+          ./Web/fluid_properties/fluids/Consistencyplots
+          ./Web/_static/fluid_properties/Incompressibles_reports
+          ./Web/fluid_properties/Incompressibles_mass-based-fluids.csv
+          ./Web/fluid_properties/Incompressibles_mole-based-fluids.csv
+          ./Web/fluid_properties/Incompressibles_volume-based-fluids.csv
+          ./Web/fluid_properties/Incompressibles_pure-fluids.csv
+          ./Web/scripts/incompressibles_consistency
+        key: cached-props
+        #key: cached-props-${{ github.sha }}
+        #restore-keys: |
+        #  cached-props-
+        
+    - name: Schedule calculations
+      id: schedule_calculation
+      shell: bash
+      run: |
+        set -x
+        echo ${{ github.event.schedule }}
+        echo "COOLPROP_DAILY=${{ github.event.schedule == '0 2 * * *' }}" >> $GITHUB_ENV
+        echo "COOLPROP_WEEKLY=${{ github.event.schedule == '0 4 * * 1' }}" >> $GITHUB_ENV
+        echo ${{ github.ref }}
+        echo "COOLPROP_TAGGED=${{ contains(github.ref, 'refs/tags') }}" >> $GITHUB_ENV
+        cat $GITHUB_ENV
+        
+    - name: Variable calculations
+      id: variable_calculation
+      shell: bash
+      run: |
+        set -x
+        conda install -y packaging
+        echo "COOLPROP_VERSION=$(python dev/extract_version.py --cmake-only)" >> $GITHUB_ENV
+        echo "COOLPROP_EXPENSIVE=${{ (steps.cached-props.outputs.cache-hit != 'true') || inputs.expensive || env.COOLPROP_TAGGED || env.COOLPROP_WEEKLY }}" >> $GITHUB_ENV
+        cat $GITHUB_ENV
+    
+    - name: Build and install wheel using bdist_wheel
+      shell: bash
+      run: |
+        source activate docs
+        # Ensure the gitrevision.txt is used for the build
+        python dev/generate_headers.py
+        # Build and install the wheel
+        pip -vv wheel .
+        pip install -vvv --force-reinstall --ignore-installed --upgrade --no-index `ls *.whl`
+        pip install pydata-sphinx-theme tqdm ninja
+        
+    - name: Test the installed CoolProp version
+      shell: bash
+      run: |
+        source activate docs
+        python -c "import CoolProp; print(CoolProp.__version__)"
+        python -c "import CoolProp; print(CoolProp.__gitrevision__)"
+        python -c "import CoolProp; print(CoolProp.__file__)"
+        
+    - name: Build homepage and create graphs
+      # Use a single argument with "True" or "1" to trigger a full rebuild
+      working-directory: ./Web/scripts/
+      shell: bash
+      run: |
+        source activate docs
+        echo "Calling: python -u __init__.py ${{ env.COOLPROP_EXPENSIVE }}"
+        python -u __init__.py ${{ env.COOLPROP_EXPENSIVE }}
+        
+    - name: Build documentation with Doxygen
+      shell: bash
+      run: |
+        source activate docs
+        doxygen --version
+        doxygen Doxyfile
+        
+    - name: Build documentation with Sphinx
+      working-directory: ./Web
+      shell: bash
+      run: |
+        source activate docs
+        sphinx-apidoc -T -f -e -o apidoc ../wrappers/Python/CoolProp
+        make html
+        
+    - name: Upload GitHub Pages artifact
+      if: ${{ !env.ACT }} # skip during local actions testing
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: ./Web/_build/html/
+    
+    - name: Zip the HTML documentation
+      working-directory: ./Web/_build/
+      shell: bash
+      run: |
+        tar -cvzf CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.tar.gz html/*
+      # zip -rq   CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.zip    html/*
+    
+    - name: Archive TGZ or ZIP artifacts
+      if: ${{ !env.ACT }} # skip during local actions testing
+      uses: actions/upload-artifact@v4
+      with:
+          name: docs
+          path: |
+            Web/_build/CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.tar.gz
+          # Web/_build/CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.zip
+    
+    #- name: Upload TGZ or ZIP to release
+    #  if: contains(github.ref, 'refs/tags')
+    #  uses: svenstaro/upload-release-action@v2
+    #  with:
+    #    repo_token: ${{ secrets.GITHUB_TOKEN }}
+    #    file: Web/_build/CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.tar.gz
+    #    tag: ${{ github.ref }}
+    #    overwrite: true
+    #    file_glob: false
+
+  # Deploy job
+  deploy:
+    # Add a dependency to the build job
+    needs: build
+    # Do not deploy intermediate builds, only deploy on tags
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write      # to deploy to Pages
+      id-token: write   # to verify the deployment originates from an appropriate source
+
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    # Specify runner + deployment step
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy to GitHub Pages
+      #if: contains(github.ref, 'refs/tags')
+      if: ${{ !env.ACT }} # skip during local actions testing
+      id: deployment
+      uses: actions/deploy-pages@v4

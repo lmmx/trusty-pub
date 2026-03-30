@@ -1,0 +1,46 @@
+name: LLVM Weekly
+
+# Compile LLVM weekly or on demand
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * 0"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ${{ matrix.config.os }}
+    env: ${{ matrix.config.env }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: "ubuntu-22.04", arch: "amd64", env: {} }
+          - { os: "windows-2022", arch: "amd64", env: {} }
+          - { os: "macos-15", arch: "aarch64", env: {} }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+      - name: Linux - Install build dependencies, ccache, ninja
+        run: sudo apt-get install -y ccache ninja-build
+        if: ${{ matrix.config.os == 'ubuntu-22.04' }}
+      - name: MacOS - Install build dependencies, ccache, ninja
+        run: brew install ccache ninja
+        if: ${{ matrix.config.os == 'macos-15' }}
+      - name: "Build and Package LLVM"
+        run: ./build.ps1 -t package-llvm
+        shell: pwsh
+      - name: Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.config.os }}-${{ matrix.config.arch }}
+          if-no-files-found: error
+          path: |
+            target/**/*.zip
+            target/**/*.tar.gz
+            target/**/*.rpm
+            target/**/*.deb

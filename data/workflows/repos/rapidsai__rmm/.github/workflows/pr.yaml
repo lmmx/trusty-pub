@@ -1,0 +1,329 @@
+name: pr
+on:
+  push:
+    branches:
+      - "pull-request/[0-9]+"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  pr-builder:
+    needs:
+      - check-nightly-ci
+      - changed-files
+      - checks
+      - conda-cpp-build
+      - conda-cpp-tests
+      - conda-cpp-debug-tests
+      - conda-python-build
+      - conda-python-tests
+      - conda-python-tests-integration-optional
+      - docs-build
+      - wheel-build-cpp
+      - wheel-build-python
+      - wheel-tests
+      - wheel-tests-integration-optional
+      - devcontainer
+      - telemetry-setup
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/pr-builder.yaml@main
+    if: always()
+    with:
+      needs: ${{ toJSON(needs) }}
+  telemetry-setup:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      OTEL_SERVICE_NAME: "pr-rmm"
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Telemetry setup
+        # This gate is here and not at the job level because we need the job to not be skipped,
+        # since other jobs depend on it.
+        if: ${{ vars.TELEMETRY_ENABLED == 'true' }}
+        uses: rapidsai/shared-actions/telemetry-dispatch-stash-base-env-vars@main
+  check-nightly-ci:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+      - name: Get PR Info
+        id: get-pr-info
+        uses: nv-gha-runners/get-pr-info@main
+      - name: Check if nightly CI is passing
+        uses: rapidsai/shared-actions/check_nightly_success/dispatch@main
+        with:
+          repo: ${{ github.repository }}
+          target-branch: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.ref }}
+  changed-files:
+    needs:
+      - telemetry-setup
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/changed-files.yaml@main
+    with:
+      files_yaml: |
+        build_docs:
+          - '**'
+          - '!AGENTS.md'
+          - '!**/*/REVIEW_GUIDELINES.md'
+          - '!.coderabbit.yaml'
+          - '!.devcontainer/**'
+          - '!.github/ISSUE_TEMPLATE/**'
+          - '!.github/copy-pr-bot.yaml'
+          - '!.github/labeler.yml'
+          - '!.github/ops-bot.yaml'
+          - '!.github/PULL_REQUEST_TEMPLATE.md'
+          - '!.github/release.yml'
+          - '!.github/workflows/new-issues-to-triage-projects.yml'
+          - '!.github/workflows/trigger-rbeaking-change-alert.yaml'
+          - '!.pre-commit-config.yaml'
+          - '!.shellcheckrc'
+          - '!ci/build_wheel*.sh'
+          - '!ci/check_style.sh'
+          - '!ci/check_symbols.sh'
+          - '!ci/release/update-version.sh'
+          - '!ci/test_wheel.sh'
+          - '!ci/validate_wheel.sh'
+        test_cpp:
+          - '**'
+          - '!AGENTS.md'
+          - '!**/*/REVIEW_GUIDELINES.md'
+          - '!.coderabbit.yaml'
+          - '!.devcontainer/**'
+          - '!.github/ISSUE_TEMPLATE/**'
+          - '!.github/copy-pr-bot.yaml'
+          - '!.github/labeler.yml'
+          - '!.github/ops-bot.yaml'
+          - '!.github/PULL_REQUEST_TEMPLATE.md'
+          - '!.github/release.yml'
+          - '!.github/workflows/new-issues-to-triage-projects.yml'
+          - '!.github/workflows/trigger-rbeaking-change-alert.yaml'
+          - '!.pre-commit-config.yaml'
+          - '!.shellcheckrc'
+          - '!CONTRIBUTING.md'
+          - '!README.md'
+          - '!ci/build_docs.sh'
+          - '!ci/build_python.sh'
+          - '!ci/build_wheel*.sh'
+          - '!ci/release/update-version.sh'
+          - '!ci/run_pytests.sh'
+          - '!ci/test_python.sh'
+          - '!ci/test_wheel.sh'
+          - '!ci/validate_wheel.sh'
+          - '!docs/**'
+          - '!img/**'
+          - '!python/**'
+        test_python_conda:
+          - '**'
+          - '!AGENTS.md'
+          - '!**/*/REVIEW_GUIDELINES.md'
+          - '!.coderabbit.yaml'
+          - '!.devcontainer/**'
+          - '!.github/ISSUE_TEMPLATE/**'
+          - '!.github/copy-pr-bot.yaml'
+          - '!.github/labeler.yml'
+          - '!.github/ops-bot.yaml'
+          - '!.github/PULL_REQUEST_TEMPLATE.md'
+          - '!.github/release.yml'
+          - '!.github/workflows/new-issues-to-triage-projects.yml'
+          - '!.github/workflows/trigger-rbeaking-change-alert.yaml'
+          - '!.pre-commit-config.yaml'
+          - '!.shellcheckrc'
+          - '!CONTRIBUTING.md'
+          - '!README.md'
+          - '!ci/build_wheel*.sh'
+          - '!ci/check_style.sh'
+          - '!ci/release/update-version.sh'
+          - '!ci/test_wheel.sh'
+          - '!ci/test_wheel_integrations.sh'
+          - '!ci/validate_wheel.sh'
+          - '!cpp/.clang-tidy'
+          - '!cpp/doxygen/**'
+          - '!docs/**'
+          - '!img/**'
+        test_python_wheels:
+          - '**'
+          - '!AGENTS.md'
+          - '!**/*/REVIEW_GUIDELINES.md'
+          - '!.coderabbit.yaml'
+          - '!.devcontainer/**'
+          - '!.github/ISSUE_TEMPLATE/**'
+          - '!.github/copy-pr-bot.yaml'
+          - '!.github/labeler.yml'
+          - '!.github/ops-bot.yaml'
+          - '!.github/PULL_REQUEST_TEMPLATE.md'
+          - '!.github/release.yml'
+          - '!.github/workflows/new-issues-to-triage-projects.yml'
+          - '!.github/workflows/trigger-rbeaking-change-alert.yaml'
+          - '!.pre-commit-config.yaml'
+          - '!.shellcheckrc'
+          - '!CONTRIBUTING.md'
+          - '!README.md'
+          - '!ci/build_cpp.sh'
+          - '!ci/build_docs.sh'
+          - '!ci/build_python.sh'
+          - '!ci/check_style.sh'
+          - '!ci/release/update-version.sh'
+          - '!ci/test_cpp.sh'
+          - '!ci/test_cpp_debug.sh'
+          - '!ci/test_python.sh'
+          - '!ci/test_python_integrations.sh'
+          - '!conda/**'
+          - '!cpp/.clang-tidy'
+          - '!cpp/doxygen/**'
+          - '!docs/**'
+          - '!img/**'
+  checks:
+    secrets: inherit
+    needs:
+      - telemetry-setup
+    uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@main
+    with:
+      enable_check_generated_files: false
+      ignored_pr_jobs: "telemetry-summarize conda-python-tests-integration-optional wheel-tests-integration-optional"
+  conda-cpp-build:
+    needs: checks
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-build.yaml@main
+    with:
+      build_type: pull-request
+      node_type: cpu8
+      script: ci/build_cpp.sh
+  conda-cpp-tests:
+    needs: [conda-cpp-build, changed-files]
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
+    with:
+      build_type: pull-request
+      script: ci/test_cpp.sh
+  conda-cpp-debug-tests:
+    needs: [checks, changed-files]
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_cpp
+    with:
+      build_type: pull-request
+      node_type: "gpu-l4-latest-1"
+      arch: "amd64"
+      container_image: "rapidsai/ci-conda:26.06-latest"
+      script: "ci/test_cpp_debug.sh"
+  conda-python-build:
+    needs: conda-cpp-build
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-build.yaml@main
+    with:
+      build_type: pull-request
+      script: ci/build_python.sh
+      # Build a conda package for each CUDA x ARCH x minimum supported Python version
+      matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
+  conda-python-tests:
+    needs: [conda-python-build, changed-files]
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-tests.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_conda
+    with:
+      build_type: pull-request
+      script: ci/test_python.sh
+  conda-python-tests-integration-optional:
+    needs: [conda-python-build, changed-files]
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/conda-python-tests.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_conda
+    with:
+      build_type: pull-request
+      script: ci/test_python_integrations.sh
+  docs-build:
+    needs: [conda-python-build, changed-files]
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/custom-job.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).build_docs
+    with:
+      build_type: pull-request
+      node_type: "gpu-l4-latest-1"
+      arch: "amd64"
+      container_image: "rapidsai/ci-conda:26.06-latest"
+      script: "ci/build_docs.sh"
+  wheel-build-cpp:
+    needs: checks
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    with:
+      matrix_filter: group_by([.ARCH, (.CUDA_VER|split(".")|map(tonumber)|.[0])]) | map(max_by(.PY_VER|split(".")|map(tonumber)))
+      build_type: pull-request
+      node_type: cpu8
+      script: ci/build_wheel_cpp.sh
+      package-name: librmm
+      package-type: cpp
+  wheel-build-python:
+    needs: wheel-build-cpp
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-build.yaml@main
+    with:
+      # Build a wheel for each CUDA x ARCH x minimum supported Python version
+      matrix_filter: group_by({CUDA_VER, ARCH}) | map(min_by(.PY_VER | split(".") | map(tonumber)))
+      build_type: pull-request
+      node_type: cpu8
+      script: ci/build_wheel_python.sh
+      package-name: rmm
+      package-type: python
+  wheel-tests:
+    needs: [wheel-build-python, changed-files]
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
+    with:
+      build_type: pull-request
+      script: ci/test_wheel.sh
+  wheel-tests-integration-optional:
+    needs: [wheel-build-python, changed-files]
+    secrets: inherit
+    uses: rapidsai/shared-workflows/.github/workflows/wheels-test.yaml@main
+    if: fromJSON(needs.changed-files.outputs.changed_file_groups).test_python_wheels
+    with:
+      build_type: pull-request
+      script: ci/test_wheel_integrations.sh
+  devcontainer:
+    secrets: inherit
+    needs:
+      - telemetry-setup
+    uses: rapidsai/shared-workflows/.github/workflows/build-in-devcontainer.yaml@main
+    with:
+      arch: '["amd64", "arm64"]'
+      cuda: '["13.1"]'
+      node_type: "cpu8"
+      env: |
+        SCCACHE_DIST_MAX_RETRIES=inf
+        SCCACHE_SERVER_LOG=sccache=debug
+        SCCACHE_DIST_FALLBACK_TO_LOCAL_COMPILE=false
+      build_command: |
+        sccache --zero-stats;
+        build-all -j0 -DBUILD_BENCHMARKS=ON --verbose 2>&1 | tee telemetry-artifacts/build.log;
+        sccache --show-adv-stats | tee telemetry-artifacts/sccache-stats.txt;
+  telemetry-summarize:
+    # This job must use a self-hosted runner to record telemetry traces.
+    runs-on: linux-amd64-cpu4
+    needs: pr-builder
+    if: ${{ vars.TELEMETRY_ENABLED == 'true' && !cancelled() && github.run_attempt == '1' }}
+    continue-on-error: true
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Telemetry summarize
+        uses: rapidsai/shared-actions/telemetry-dispatch-summarize@main
+    env:
+      GH_TOKEN: ${{ github.token }}

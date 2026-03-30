@@ -1,0 +1,342 @@
+name: CI
+on:
+  push:
+    paths-ignore:
+      - 'CHANGELOG.md'
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 11 * * 4'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: latest
+          cache: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - uses: pre-commit/action@v3.0.1
+
+  pyright:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: latest
+          cache: true
+      - run: pixi run pyright
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python, javascript
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  pytest:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.9, "3.10", "3.11", "3.12", "3.13", "3.14"]
+        pandas-version: [latest]
+        numpy-version: [latest]
+        typeguard-version: [latest]
+        include:
+          - python-version: "3.13"
+            pandas-version: pre
+          - python-version: "3.13"
+            uninstall_non_essential_dependencies: true
+          - python-version: "3.10"
+            typeguard-version: "<4.4.1"
+          - python-version: "3.10"
+            typeguard-version: "<4"
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install a development version of 'itables'
+        run: pip install -e .[test-all]
+
+      - name: Install pandas latest
+        if: matrix.pandas-version == 'latest'
+        run: pip install pandas
+      - name: Install pandas pre-release
+        if: matrix.pandas-version == 'pre'
+        run: pip install pandas --pre
+      - name: Install pandas ${{ matrix.pandas-version }}
+        if: matrix.pandas-version != 'pre' && matrix.pandas-version != 'latest'
+        run: pip install 'pandas${{ matrix.pandas-version }}'
+      - name: Install numpy ${{ matrix.numpy-version }}
+        if: matrix.numpy-version != 'latest'
+        run: pip install 'numpy${{ matrix.numpy-version }}'
+      - name: Install typeguard ${{ matrix.typeguard-version }}
+        if: matrix.typeguard-version != 'latest'
+        run: pip install 'typeguard${{ matrix.typeguard-version }}'
+
+      - name: Install shiny
+        run: pip install "shiny>=1.0" shinywidgets
+
+      - name: Uninstall non-essential dependencies
+        if: matrix.uninstall_non_essential_dependencies
+        run: pip uninstall polars jinja2 dash anywidget streamlit shiny shinywidgets -y
+
+      - name: Install a Jupyter Kernel
+        run: python -m ipykernel install --name itables --user
+
+      - name: Test with pytest
+        run: pytest --cov=./ --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          fail_ci_if_error: true
+          verbose: true
+
+  pytest-pixi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: latest
+          cache: true
+
+      - name: Install a Jupyter Kernel
+        run: pixi run python -m ipykernel install --name itables --user
+
+      - name: Test with pytest
+        run: pixi run pytest --cov=./ --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          fail_ci_if_error: true
+          verbose: true
+
+  pytest-pixi-updated:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0.9.1
+        with:
+          pixi-version: latest
+          cache: false
+
+      - name: Update pixi environment
+        run: pixi update
+
+      - name: Install a Jupyter Kernel
+        run: pixi run python -m ipykernel install --name itables --user
+
+      - name: Test with pytest
+        run: pixi run pytest --cov=./ --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          fail_ci_if_error: true
+          verbose: true
+
+  pytest-minimal-deps:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - minimal
+          - test-pandas-notebook
+          - test-polars-notebook
+          - test-pandas-dash
+          - test-polars-dash
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: latest
+          cache: true
+
+      - name: Install a Jupyter Kernel
+        if: endsWith(matrix.environment, 'notebook')
+        run: pixi run -e ${{ matrix.environment }} python -m ipykernel install --name itables --user
+
+      - name: Test with pytest in ${{ matrix.environment }}
+        run: pixi run -e ${{ matrix.environment }} pytest --cov=./ --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          fail_ci_if_error: false
+          verbose: true
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - name: Install hatch
+        # hatch==1.16.0 fails with
+        # hatchling.plugin.exceptions.UnknownPluginError: Unknown build hook: jupyter-builder
+        run : pip install 'hatch<1.16' 'virtualenv<21' # https://github.com/pypa/hatch/issues/2193
+      - name: Build package
+        run: hatch build
+      - name: Check LICENSE.txt in wheel
+        run: unzip -l dist/*.whl | grep -q itables_for_dash/async-ITable.js.LICENSE.txt
+      - name: Check LICENSE.txt in sdist
+        run: tar -tvf dist/*.tar.gz | grep -q itables_for_dash/async-ITable.js.LICENSE.txt
+
+      # Build conda package
+      - name: Set up Mambaforge
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-update-conda: true
+          python-version: 3.11
+
+      - name: Install conda-build
+        run: mamba install conda-build -y
+
+      - name: Build conda package
+        run: |
+          conda config --set anaconda_upload no
+          # Not sure how to remove the 'defaults' channel ?
+          # conda config --set conda-remove-defaults true
+          # conda config --remove channels defaults
+          conda build conda.recipe --output-folder conda-dist
+
+      # Upload the wheel and conda package as artifacts
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: itables-wheel
+          path: dist/itables-*.whl
+
+      - name: Upload conda package
+        uses: actions/upload-artifact@v4
+        with:
+          name: itables-conda-package
+          path: conda-dist/**/itables-*.conda
+
+      # Comment on PR with artifact link
+      - name: Comment with direct artifact link
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr_number = context.payload.pull_request.number;
+            const run_id = context.runId;
+            const marker = '<!-- itables-artifact-link -->';
+
+            // List artifacts for this run
+            const { data: { artifacts } } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run_id,
+            });
+
+            // Find the artifact named 'itables-wheel'
+            let artifact = artifacts.find(a => a.name === 'itables-wheel');
+            let wheel_url;
+            if (artifact) {
+              wheel_url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run_id}/artifacts/${artifact.id}`;
+            } else {
+              wheel_url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run_id}#artifacts`;
+            }
+
+            // Find the artifact named 'itables-conda-package'
+            artifact = artifacts.find(a => a.name === 'itables-conda-package');
+            let conda_url;
+            if (artifact) {
+              conda_url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run_id}/artifacts/${artifact.id}`;
+            } else {
+              conda_url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run_id}#artifacts`;
+            }
+
+
+            const body = `${marker}
+            Thank you for making this pull request.
+
+            Did you know? You can try it on Binder: [![Binder:lab](https://img.shields.io/badge/binder-jupyterlab-0172B2.svg)](https://mybinder.org/v2/gh/${{ github.event.pull_request.head.repo.full_name }}/${{ github.event.pull_request.head.ref }}?urlpath=lab/tree/docs/quick_start.md).
+
+            Also, the version of ITables developed in this PR is available as a wheel artifact :package: for easy installation.
+            Download it [here](${wheel_url}), unzip it and then run <code>pip install itables-xxx.whl</code> in the unzipped directory.
+
+            A conda package is also available for easy installation:
+            Download it [here](${conda_url}), and then run <code>conda install itables-xxx.tar.bz2</code> in the directory where you downloaded the file.
+            `;
+
+            // List comments on the PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr_number,
+            });
+
+            // Find existing comment by this workflow (by marker)
+            const existing = comments.find(
+              c => c.user.type === 'Bot' && c.body && c.body.includes(marker)
+            );
+
+            if (existing) {
+              // Update the existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              // Create a new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr_number,
+                body,
+              });
+            }

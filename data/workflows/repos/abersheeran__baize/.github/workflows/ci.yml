@@ -1,0 +1,125 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "*"
+    paths:
+      - ".github/workflows/ci.yml"
+      - "**.py"
+      - "pdm.lock"
+      - "!baize/__version__.py"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/ci.yml"
+      - "**.py"
+      - "pdm.lock"
+      - "!baize/__version__.py"
+
+jobs:
+  tests:
+    name: "Python ${{ matrix.python-version }} ${{ matrix.os }}"
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      matrix:
+        python-version: [3.9, "3.10", 3.11, 3.12, 3.13]
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        exclude:
+          - python-version: 3.9
+            os: macos-latest
+          - python-version: "3.10"
+            os: macos-latest
+        include:
+          - python-version: 3.9
+            os: macos-13
+          - python-version: "3.10"
+            os: macos-13
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pdm-project/setup-pdm@v4
+        name: Setup Python and PDM
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: x64
+
+      - name: Install dependencies
+        run: |
+          pdm sync -v -dG dev -dG test --no-self
+
+      - name: Static type and format checking
+        run: pdm run lint && pdm run format --check --diff
+
+      - name: Tests
+        run: pdm run test --cov=./baize --cov-report=xml -o log_cli=true -o log_cli_level=DEBUG
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          directory: ./coverage/reports/
+          verbose: true
+
+      - name: Tests with mypyc
+        run: |
+          pdm sync -v -dG build --no-isolation
+          pdm run test --cov=./baize -o log_cli=true -o log_cli_level=DEBUG
+
+      - name: Build binary wheel
+        run: pdm build --no-isolation -v
+
+  publish:
+    needs: tests
+    if: startsWith(github.ref, 'refs/tags/')
+
+    name: "Python ${{ matrix.python-version }} ${{ matrix.os }}"
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      matrix:
+        python-version: [3.9, "3.10", 3.11, 3.12, 3.13]
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        exclude:
+          - python-version: 3.9
+            os: macos-latest
+          - python-version: "3.10"
+            os: macos-latest
+        include:
+          - python-version: 3.9
+            os: macos-13
+          - python-version: "3.10"
+            os: macos-13
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pdm-project/setup-pdm@v4
+        name: Setup Python and PDM
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: x64
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U twine
+          pdm sync -v -dG dev -dG test --no-self
+
+      - name: Build binary wheel
+        run: |
+          pdm build --no-isolation -v
+
+      - name: Publish
+        run: |
+          twine upload --username __token__ --password ${{ secrets.PYPI_API_TOKEN }} --verbose --skip-existing dist/*
+
+      - name: Build pure python wheel
+        run: |
+          python script/disable_build.py
+          pdm build -v
+
+      - name: Publish
+        run: |
+          twine upload --username __token__ --password ${{ secrets.PYPI_API_TOKEN }} --verbose --skip-existing dist/*

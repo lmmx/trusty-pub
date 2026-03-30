@@ -1,0 +1,198 @@
+---
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: "1"
+  UV_PYTHON_DOWNLOADS: "false"
+  UV_NO_SYNC: "1"
+
+jobs:
+  linux:
+    name: "Linux (${{ matrix.python-version }})"
+    runs-on: "ubuntu-latest"
+
+    services:
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+
+    steps:
+      - uses: "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd" # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405" # v6.2.0
+        with:
+          python-version: "${{ matrix.python-version }}"
+          allow-prereleases: true
+      - uses: "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78" # v7.6.0
+        with:
+          enable-cache: true
+      - run: rustup component add llvm-tools-preview
+      - name: "Install dependencies"
+        run: |
+          set -xe
+          python -VV
+          python -m site
+          uv sync --only-group nox --only-group coverage
+
+      - name: "Run nox targets for ${{ matrix.python-version }}"
+        run: "uv run nox --python ${{ matrix.python-version }} -v -- -r aR"
+      - name: "Convert coverage"
+        run: |
+          uv run coverage combine
+          uv run coverage xml
+      - name: "Upload coverage to Codecov"
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
+        with:
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  windows:
+    name: "Windows (${{ matrix.python-version }}, ${{ matrix.arch }})"
+    runs-on: "windows-latest"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+        arch: ["x86", "x64"]
+
+    env:
+      ENABLE_LOGBOOK_NTEVENTLOG_TESTS: "1"
+
+    steps:
+      - uses: "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd" # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405" # v6.2.0
+        with:
+          python-version: "${{ matrix.python-version }}"
+          architecture: "${{ matrix.arch }}"
+          allow-prereleases: true
+      - uses: "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78" # v7.6.0
+        with:
+          enable-cache: true
+
+      - run: rustup component add llvm-tools-preview
+      - run: python -VV
+      - run: python -m site
+      - run: uv sync --only-group nox --only-group coverage
+      - name: "Run nox targets for ${{ matrix.python-version }} on ${{ matrix.arch }}"
+        run: "uv run nox --python ${{ matrix.python-version }} -v -k 'not rust' -- -r aR -k 'not redis'"
+      - run: uv run coverage combine
+      - run: uv run coverage xml
+      - name: "Upload coverage to Codecov"
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
+        with:
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  macos:
+    name: "macOS (${{ matrix.python-version }})"
+    runs-on: "macos-latest"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+
+    steps:
+      - uses: "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd" # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405" # v6.2.0
+        with:
+          python-version: "${{ matrix.python-version }}"
+          architecture: "${{ matrix.arch }}"
+          allow-prereleases: true
+      - uses: "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78" # v7.6.0
+        with:
+          enable-cache: true
+      - run: rustup component add llvm-tools-preview
+      - name: "Install dependencies"
+        run: |
+          set -xe
+          python -VV
+          python -m site
+          uv sync --only-group nox --only-group coverage
+
+      - name: "Run nox targets for ${{ matrix.python-version }}"
+        run: "uv run nox --python ${{ matrix.python-version }} -v -- -r aR -k 'not redis'"
+      - name: "Convert coverage"
+        run: |
+          uv run coverage combine
+          uv run coverage xml
+      - name: "Upload coverage to Codecov"
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
+        with:
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78" # v7.6.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+      - name: check-sdist
+        run: |
+          uv sync --only-group check-sdist
+          uv run check-sdist
+
+  msrv:
+    name: "Python ${{ matrix.python-version }} with Rust ${{ matrix.rust-version }}"
+    runs-on: "ubuntu-latest"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+        rust-version: ["1.74.0"]
+
+    steps:
+      - uses: "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd" # v6.0.2
+      - uses: "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78" # v7.6.0
+      - uses: "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405" # v6.2.0
+        with:
+          python-version: "${{ matrix.python-version }}"
+          allow-prereleases: true
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: ${{ matrix.rust-version }}
+      - run: rustup component add llvm-tools-preview
+      - name: "Install dependencies"
+        run: |
+          set -xe
+          python -VV
+          rustc --version
+          python -m site
+          uv --version
+          uv sync --only-group nox --only-group coverage
+      - name: "Run nox"
+        run: "uv run nox --python ${{ matrix.python-version }} -v -k 'not nospeedups' -- -r aR -k 'not redis'"

@@ -1,0 +1,185 @@
+name: Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  schedule:
+    # run every day at midnight
+    - cron: "0 0 * * *"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  Linting:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+
+      - name: Update packages
+        run: |
+          pip install -U pip wheel
+
+      - uses: pre-commit/action@v2.0.0
+
+  TestStable:
+    name: Ubuntu / Python ${{ matrix.python-version }} / TensorFlow ${{ matrix.tensorflow-version }} / Scikit-Learn Stable
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+        tensorflow-version: ["2.16.1"]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install and Set Up Poetry
+        run: |
+          python -m pip install --upgrade poetry
+          poetry config virtualenvs.in-project true
+          poetry run python -m pip install --upgrade pip
+
+      - name: Install Dependencies
+        run: |
+          poetry install
+          poetry run python -m pip install -U "tensorflow~=${{ matrix.tensorflow-version }}"
+
+      - name: Test with pytest
+        run: |
+          poetry run python -m pip freeze
+          poetry run python -m pytest -v --cov=scikeras --cov-report xml --color=yes
+
+      - uses: codecov/codecov-action@v1
+
+  TestDev:
+    name: Ubuntu / Python ${{ matrix.python-version }} / TensorFlow Nightly / Scikit-Learn Nightly
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install and Set Up Poetry
+        run: |
+          python -m pip install --upgrade poetry
+          poetry config virtualenvs.in-project true
+          poetry run python -m pip install --upgrade pip
+
+      - name: Install Dependencies
+        run: |
+          poetry remove scikit-learn
+          poetry install
+
+      - name: Install Nightly Versions
+        if: always()
+        run: |
+          poetry run python -m pip install -U scipy
+          poetry run python -m pip install -U git+https://github.com/keras-team/keras.git
+          poetry run python -m pip install -U --pre --extra-index https://pypi.anaconda.org/scipy-wheels-nightly/simple scikit-learn
+
+      - name: Test with pytest
+        if: always()
+        continue-on-error: true
+        run: |
+          poetry run python -m pip freeze
+          poetry run python -m pytest -v --cov=scikeras --cov-report xml --color=yes
+
+      - uses: codecov/codecov-action@v1
+
+  TestOldest:
+    name: Ubuntu / Python ${{ matrix.python-version }} / TF ${{ matrix.tf-version }} / Scikit-Learn ${{ matrix.sklearn-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tf-version: ["2.16.1"]
+        python-version: ["3.9"]
+        sklearn-version: ["1.4.1.post1"]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install and Set Up Poetry
+        run: |
+          python -m pip install --upgrade poetry
+          poetry config virtualenvs.in-project true
+          poetry run python -m pip install --upgrade pip
+
+      - name: Install Dependencies
+        run: |
+          poetry install -E tensorflow
+          poetry run pip install \
+            "tensorflow==${{ matrix.tf-version }}" \
+            "scikit-learn==${{matrix.sklearn-version}}"
+
+      - name: Test with pytest
+        run: |
+          poetry run python -m pip freeze
+          poetry run python -m pytest -v --cov=scikeras --cov-report xml --color=yes
+
+      - uses: codecov/codecov-action@v1
+
+  TestOSs:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }} / TF Stable / Scikit-Learn Stable
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      matrix:
+        os: [MacOS, Windows]  # test all OSs except Ubuntu, which is already running other tests
+        python-version: ["3.9", "3.11"]  # test only the two extremes of supported Python versions
+        tensorflow-version: ["2.16.1"]  # test only the two extremes of supported TF versions
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install and Set Up Poetry
+        run: |
+          pip install --upgrade poetry
+          poetry config virtualenvs.in-project true
+          poetry run python -m pip install --upgrade pip
+
+      - name: Install Dependencies
+        # TF is sorta dropping support for Windows
+        # At the very least they are no longer suppporting GPU
+        # See https://github.com/tensorflow/tensorflow/releases/tag/v2.12.0
+        # and
+        # https://www.tensorflow.org/install/pip#windows-native
+        run: |
+          poetry install
+          poetry run python -m pip install -U "tensorflow~=${{ matrix.tensorflow-version }}"
+
+      - name: Test with pytest
+        run: |
+          poetry run pip freeze
+          poetry run python -m pytest -v --cov=scikeras --cov-report xml --color=yes
+
+      - uses: codecov/codecov-action@v1

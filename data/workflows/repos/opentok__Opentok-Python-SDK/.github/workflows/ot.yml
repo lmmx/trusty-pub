@@ -1,0 +1,39 @@
+name: Opentok Actions
+
+on: [push]
+
+permissions:
+  actions: write
+  checks: write
+  contents: read
+  deployments: read
+  issues: write
+  discussions: write
+  packages: read
+  pages: write
+  pull-requests: write
+  security-events: write
+  statuses: write
+
+jobs:
+  test:
+
+    runs-on: "ubuntu-24.04"
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r test_requirements.txt
+        pip install -r requirements.txt
+    - name: Test with pytest
+      run: |
+        pytest -v tests/test_*

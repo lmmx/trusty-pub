@@ -1,0 +1,23 @@
+name: Check Method Parameter Order
+
+on: [push]
+
+jobs:
+  check_method_parameter_order:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # Step 2: Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'  # Choose your Python version
+
+      # Step 3: Check whether all parameters of defs are sorted
+      - name: Check whether all parameters of defs are sorted
+        run: |
+          python ./.github/workflows/check_method_parameter_order.py .

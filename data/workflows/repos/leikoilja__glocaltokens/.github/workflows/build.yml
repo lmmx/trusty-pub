@@ -1,0 +1,28 @@
+name: Build the package
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Build
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+
+      - name: Prepare and install deps
+        uses: ./.github/actions/install-deps
+
+      - name: Check if package builds
+        run: uv build

@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 6am UTC
+  push:
+    branches:
+      - main
+      - '*.x'
+    tags:
+      - '*'
+  pull_request:
+    # We also want this workflow triggered if the `jsonschema` label is
+    # added or present when PR is updated
+    types:
+      - synchronize
+      - labeled
+
+
+# Only cancel in-progress jobs or runs for the current workflow
+#   This cancels the already triggered workflows for a specific PR without canceling
+#   other instances of this workflow (other PRs, scheduled triggers, etc) when something
+#   within that PR re-triggers this CI
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+    - uses: pre-commit/action@v3.0.1
+  core:
+    needs: [pre-commit]
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@v2
+    with:
+      submodules: false
+      envs: |
+        - linux: coverage
+          name: Python 3.14 coverage
+          python-version: 3.14
+        - linux: coverage
+          name: Python 3.13 coverage
+          python-version: 3.13
+        - linux: coverage
+          name: Python 3.12 coverage
+          python-version: 3.12
+        - linux: coverage
+          name: Python 3.11 coverage
+          python-version: 3.11
+        - linux: coverage
+          name: Python 3.10 coverage
+          python-version: 3.10
+      coverage: codecov
+
+  jsonschema:
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@v2
+    if: (github.repository == 'asdf-format/asdf' && (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'jsonschema')))
+    with:
+      submodules: false
+      envs: |
+        - linux: jsonschema
+          python-version: 3.12
+
+  asdf-schemas:
+    needs: [core]
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@v2
+    with:
+      submodules: false
+      envs: |
+        - linux: asdf-standard
+          python-version: 3.12
+        - linux: asdf-transform-schemas
+          python-version: 3.12
+
+  test:
+    needs: [core]
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@v2
+    with:
+      submodules: false
+      envs: |
+        - macos: py311-parallel
+        - windows: py311-parallel
+
+  dev:
+    needs: [core]
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@v2
+    with:
+      submodules: false
+      envs: |
+        - linux: py310-coverage-devdeps-parallel
+        - linux: py311-coverage-devdeps-parallel
+        - linux: py312-coverage-devdeps-parallel
+        - linux: py313-coverage-devdeps-parallel
+        - linux: py314-coverage-devdeps-parallel
+        # separate pytest so a failure here doesn't cause the whole suite to fail
+        - linux: py314-coverage-pytestdev-parallel
+      coverage: codecov
+
+  oldest:
+    needs: [core]
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@v2
+    with:
+      submodules: false
+      envs: |
+        - linux: py310-oldestdeps-parallel
+
+  compatibility:
+    needs: [core]
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@v2
+    with:
+      submodules: false
+      envs: |
+        - linux: compatibility
+          python-version: 3.11
+
+  mocks3:
+    needs: [core]
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@v2
+    with:
+      submodules: false
+      envs: |
+        - linux: mocks3
+          python-version: 3.12

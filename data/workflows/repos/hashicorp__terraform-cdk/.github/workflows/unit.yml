@@ -1,0 +1,82 @@
+name: Unit Test Run
+on:
+  workflow_call:
+    inputs:
+      concurrency_group_prefix:
+        default: pr
+        required: false
+        type: string
+      package:
+        required: true
+        type: string
+      terraform_version:
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ inputs.concurrency_group_prefix }}-unit-${{ inputs.package }}-${{ inputs.terraform_version }}-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-test:
+    runs-on: custom-linux-xl
+    container:
+      image: docker.mirror.hashicorp.services/hashicorp/jsii-terraform
+    env:
+      CHECKPOINT_DISABLE: "1"
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: "Add Git safe.directory" # Go 1.18+ started embedding repo info in the build and e.g. building @cdktf/hcl2json fails without this
+        run: git config --global --add safe.directory /__w/terraform-cdk/terraform-cdk
+      - name: ensure correct user
+        run: chown -R root /__w/terraform-cdk
+
+      # Setup caches for yarn, terraform, go, and provider schema
+      - name: Get cache directory paths
+        id: global-cache-dir-path
+        run: |
+          echo "yarn=$(yarn cache dir)" >> $GITHUB_OUTPUT
+          mkdir -p /usr/local/share/.cache/go
+          echo "go=/usr/local/share/.cache/go" >> $GITHUB_OUTPUT
+          mkdir -p /usr/local/share/.cache/providerSchema
+          echo "providerSchema=/usr/local/share/.cache/providerSchema" >> $GITHUB_OUTPUT
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.global-cache-dir-path.outputs.yarn }}
+          key: yarn-${{ runner.os }}-${{ hashFiles('**/yarn.lock') }}-unit
+          restore-keys: |
+            yarn-${{ runner.os }}-${{ hashFiles('**/yarn.lock') }}-
+            yarn-${{ runner.os }}-
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.global-cache-dir-path.outputs.go }}
+          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}-unit
+          restore-keys: |
+            go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}-
+            go-${{ runner.os }}-
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.global-cache-dir-path.outputs.providerSchema }}
+          key: providerSchema-${{ runner.os }}-${{ inputs.terraform_version }}-unit-${{ inputs.package }}
+
+      - name: installing dependencies
+        run: |
+          yarn install --frozen-lockfile --prefer-offline
+      - name: compile
+        run: |
+          tools/align-version.sh
+          yarn build
+          yarn package
+        env:
+          TERRAFORM_BINARY_NAME: "terraform${{ inputs.terraform_version }}"
+          GOCACHE: ${{ steps.global-cache-dir-path.outputs.go }}
+      - name: test
+        run: |
+          unset TF_PLUGIN_CACHE_DIR
+          npx lerna run --scope '${{ inputs.package }}' test:ci
+        env:
+          TERRAFORM_BINARY_NAME: "terraform${{ inputs.terraform_version }}"
+          GOCACHE: ${{ steps.global-cache-dir-path.outputs.go }}
+          CDKTF_EXPERIMENTAL_PROVIDER_SCHEMA_CACHE_PATH: ${{ steps.global-cache-dir-path.outputs.providerSchema }}

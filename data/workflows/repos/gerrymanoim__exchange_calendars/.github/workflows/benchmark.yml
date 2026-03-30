@@ -1,0 +1,40 @@
+name: Benchmark
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+jobs:
+  benchmark:
+    name: Performance regression check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    - name: Install Python
+      run: uv python install
+    - name: Install the project
+      run: uv sync --locked --group test --no-cache
+    - name: Run benchmark
+      run: uv run -- pytest etc/bench.py --benchmark-json output.json
+    - name: Download previous benchmark data
+      uses: actions/cache@v5.0.4
+      with:
+        path: ./cache
+        key: ${{ runner.os }}-benchmark
+    - name: Store benchmark result
+      uses: rhysd/github-action-benchmark@v1
+      with:
+        tool: 'pytest'
+        output-file-path: output.json
+        external-data-json-path: ./cache/benchmark-data.json
+        fail-on-alert: true
+        # GitHub API token to make a commit comment
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        # Enable alert commit comment
+        comment-on-alert: true
+        alert-threshold: "150%"

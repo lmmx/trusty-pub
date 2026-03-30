@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "master"
+    tags:
+      - "*"
+
+jobs:
+  tests:
+    runs-on: ${{matrix.machine}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "2.7"
+            machine: ubuntu-latest
+          - python-version: "3.5"
+            machine: ubuntu-latest
+          - python-version: "3.6"
+            machine: ubuntu-latest
+          - python-version: "3.7"
+            machine: ubuntu-latest
+          - python-version: "3.8"
+            machine: ubuntu-latest
+          - python-version: "3.9"
+            machine: ubuntu-latest
+          - python-version: "3.10"
+            machine: ubuntu-latest
+          - python-version: "3.11"
+            machine: ubuntu-latest
+          - python-version: "3.12"
+            machine: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # some tests work on the git history so we need all of it!
+          fetch-depth: 0
+      - uses: jdx/mise-action@v2
+        with:
+          mise_toml: |
+            [tools]
+            python = "${{ matrix.python-version }}"
+      - name: Install tox
+        run: python${{ matrix.python-version }} -m pip install tox tox-gh-actions
+      - name: Run tox
+        run: python${{ matrix.python-version }} -m tox
+      - uses: codecov/codecov-action@v3

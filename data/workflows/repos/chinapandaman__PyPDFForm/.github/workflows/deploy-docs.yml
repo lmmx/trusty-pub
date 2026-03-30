@@ -1,0 +1,31 @@
+name: Deploy Docs
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Install mkdocs
+        run: uv pip install -U -r pyproject.toml --extra dev --system
+      - name: Deploy docs to GitHub page
+        run: |
+          git config --global user.name 'release-bot'
+          git config --global user.email 'bot@domain.com'
+          mike deploy --push --update-aliases $(tag=$(git describe --tags --abbrev=0) && echo "${tag%.*}") latest
+          mike set-default --push $(tag=$(git describe --tags --abbrev=0) && echo "${tag%.*}")

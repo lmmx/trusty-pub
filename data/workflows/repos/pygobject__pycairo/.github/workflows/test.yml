@@ -1,0 +1,224 @@
+name: Test
+
+on: 
+  push:
+  pull_request:
+
+jobs:
+
+  msys2:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - msystem: MINGW64
+            pkgprefix: mingw-w64-x86_64
+          - msystem: CLANG64
+            pkgprefix: mingw-w64-clang-x86_64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: setup-msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.pkgprefix }}-cairo
+            ${{ matrix.pkgprefix }}-python
+            ${{ matrix.pkgprefix }}-python-pip
+            ${{ matrix.pkgprefix }}-python-poetry
+            ${{ matrix.pkgprefix }}-cc
+            ${{ matrix.pkgprefix }}-meson
+            ${{ matrix.pkgprefix }}-ninja
+            ${{ matrix.pkgprefix }}-pkgconf
+
+      - name: Install dependencies
+        shell: msys2 {0}
+        run: |
+          # XXX: set CC for setuptools so it finds clang
+          export CC=cc
+          poetry install
+
+      - name: Build & Test with meson
+        shell: msys2 {0}
+        run: |
+          # XXX: pass python, so global python3 doesn't win
+          poetry run meson setup -Dpython=python --werror _build
+          poetry run meson compile -C _build
+          poetry run meson test -v -C _build
+          rm -Rf _build
+
+      - name: Build & Test with poetry
+        shell: msys2 {0}
+        run: |
+          export CFLAGS="-Werror -coverage"
+          export PYTHONDEVMODE=1
+          poetry run pip install --no-build-isolation -e .
+          poetry run coverage run --branch -m pytest
+          poetry run coverage xml -i
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+
+  ubuntu:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.14t', 'pypy-3.11']
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y libcairo2-dev ninja-build
+        pipx install uv
+        pipx install meson
+        uv sync
+
+    - name: Install optional test dependencies
+      if: ${{ !contains(matrix.python-version, 'pypy') && !contains(matrix.python-version, '3.14') }}
+      run: |
+        uv sync --group test-extras
+
+    - name: Build & Test with meson
+      run: |
+        uv run meson setup --werror _build
+        uv run meson compile -C _build
+        uv run meson test -v -C _build
+        rm -Rf _build
+
+    - name: Build & Test with uv
+      run: |
+        export CFLAGS="-Werror -coverage"
+        export PYTHONDEVMODE=1
+        uv pip install --no-build-isolation -e .
+        uv run coverage run --branch -m pytest
+        uv run coverage xml -i
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+
+    - name: Run linters
+      if: ${{ !contains(matrix.python-version, 'pypy') }}
+      run: |
+        uv run flake8
+        uv run mypy .
+
+    - name: Build docs
+      if: ${{ !contains(matrix.python-version, 'pypy') }}
+      run: |
+        uv sync --group docs
+        uv run python -m sphinx -W -a -E -b html -n docs docs/_build
+
+  msvc:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.14t', 'pypy-3.11']
+        architecture: ['x64']
+        os: ['windows-2022']
+        include:
+          - python-version: '3.10'
+            architecture: 'x86'
+            os: 'windows-2022'
+          - python-version: '3.14'
+            architecture: 'x86'
+            os: 'windows-2022'
+          - python-version: '3.14'
+            architecture: 'arm64'
+            os: 'windows-11-arm'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.architecture }}
+          allow-prereleases: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch : ${{ matrix.architecture }}
+
+      - name: Download and extract Cairo Binary
+        run: |
+          python .ci/download-cairo-win32.py "${{ matrix.architecture }}"
+
+      - name: Install dependencies
+        run: |
+          pipx install --python "${{ steps.setup-python.outputs.python-path }}" uv
+          pipx install --python "${{ steps.setup-python.outputs.python-path }}" meson
+          uv sync
+
+      - name: Build & Test with meson
+        env:
+          PKG_CONFIG: ${{ github.workspace }}/cairo-prebuild/bin/pkgconf.exe
+          PKG_CONFIG_PATH: ${{ github.workspace }}/cairo-prebuild/lib/pkgconfig
+          CFLAGS: "-DCAIRO_WIN32_STATIC_BUILD=1"
+        run: |
+          # XXX: pass python, so global python3 doesn't win
+          uv run meson setup -Dpython=python --werror _build
+          uv run meson compile -C _build
+          uv run meson test -v -C _build
+          if (-not $?) { exit 1 }
+          rm -r _build
+
+      - name: Build & Test with uv
+        env:
+          PKG_CONFIG: ${{ github.workspace }}/cairo-prebuild/bin/pkgconf.exe
+          PKG_CONFIG_PATH: ${{ github.workspace }}/cairo-prebuild/lib/pkgconfig
+          CFLAGS: "-DCAIRO_WIN32_STATIC_BUILD=1"
+          PYTHONDEVMODE: 1
+        run: |
+          uv pip install --no-build-isolation -e .
+          uv run coverage run --branch -m pytest
+          if (-not $?) { exit 1 }
+          uv run coverage xml -i
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+
+  macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          brew install pkg-config cairo python meson ninja uv
+          uv sync
+
+      - name: Build & Test with meson
+        run: |
+          uv run meson setup --werror _build
+          uv run meson compile -C _build
+          uv run meson test -v -C _build
+          rm -Rf _build
+
+      - name: Build & Test with uv
+        run: |
+          export CFLAGS="-Werror -coverage"
+          export PYTHONDEVMODE=1
+          uv pip install --no-build-isolation -e .
+          uv run coverage run --branch -m pytest
+          uv run coverage xml -i
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5

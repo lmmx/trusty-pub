@@ -1,0 +1,52 @@
+name: JAX Array API
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # Don't cancel in-progress jobs for main branches.
+  cancel-in-progress: ${{ github.ref != 'main' }}
+permissions: {}
+
+env:
+  UV_DEFAULT_INDEX: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
+
+jobs:
+  build:
+    runs-on: linux-x86-n4-16
+    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+    env:
+      PYTHON: "python${{ matrix.python-version }}"
+    steps:
+    - name: Checkout jax
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Checkout array-api-tests
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        repository: data-apis/array-api-tests
+        ref: 3249a739f8ce9be95e5210ed90ea5d8d62045eec
+        submodules: 'true'
+        path: 'array-api-tests'
+        persist-credentials: false
+    - name: Install dependencies
+      # TODO(jakevdp) remove numpy pin once ml_dtypes 0.6 is released
+      run: |
+        $PYTHON -m uv pip install --system .[ci] "numpy<2.4.0" pytest-xdist -r array-api-tests/requirements.txt
+    - name: Run the test suite
+      env:
+        ARRAY_API_TESTS_MODULE: jax.numpy
+        JAX_ENABLE_X64: 'true'
+      run: |
+        cd ${GITHUB_WORKSPACE}/array-api-tests
+        $PYTHON -m pytest -n auto array_api_tests --derandomize --disable-deadline --skips-file ${GITHUB_WORKSPACE}/tests/array_api_skips.txt

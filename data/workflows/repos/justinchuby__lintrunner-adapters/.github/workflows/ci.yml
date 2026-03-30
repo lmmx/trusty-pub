@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lintrunner
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python_version: ["3.9", "3.10", "3.11", "3.12"]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python_version }}
+      - name: Install dependencies
+        run: |
+          pip install .[dev]
+          pip install -r requirements-test.txt
+          lintrunner init
+      - name: Run lintrunner on all files - Linux
+        if: matrix.os != 'windows-latest'
+        run: |
+          set +e
+          if ! lintrunner -v --force-color --all-files --tee-json=lint.json; then
+              echo ""
+              echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner -m main\`.\e[0m"
+              exit 1
+          fi
+      - name: Run lintrunner on all files - Windows
+        if: matrix.os == 'windows-latest'
+        run: lintrunner -v --force-color --all-files --skip NOQA,TABS,SPACES
+      - name: Store annotations
+        if: always() && github.event_name == 'pull_request' && matrix.os != 'windows-latest'
+        continue-on-error: true
+        run: |
+          # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
+          jq --raw-output \
+            '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
+            lint.json
+      - name: Produce SARIF
+        if: always() && matrix.os == 'ubuntu-latest'
+        run: |
+          python -m lintrunner_adapters to-sarif lint.json lintrunner.sarif
+      - name: Upload SARIF file
+        if: always() && matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          # Path to SARIF file relative to the root of the repository
+          sarif_file: lintrunner.sarif
+          category: lintrunner
+          checkout_path: ${{ github.workspace }}
+  test:
+    name: pytest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python_version: ["3.9", "3.10", "3.11", "3.12"]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python_version }}
+      - name: Install dependencies
+        run: |
+          pip install .[dev]
+          pip install -r requirements-test.txt
+          lintrunner init
+      - name: Run pytest
+        run: |
+          pytest lintrunner_adapters
+        env:
+          PY_IGNORE_IMPORTMISMATCH: 1
+      - name: Build package with setuptools
+        run: |
+          pip install build
+          python -m build
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        if: matrix.python_version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+        with:
+          name: dist
+          path: dist
+  release:
+    name: Release
+    environment: PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test]
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+        with:
+          attestations: true

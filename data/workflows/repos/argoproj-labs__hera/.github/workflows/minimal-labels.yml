@@ -1,0 +1,30 @@
+name: Minimal Labels
+on:
+  pull_request:
+    types:
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+  merge_group:
+jobs:
+  semver:
+    name: Minimal Semver Labels
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - uses: mheap/github-action-required-labels@v5
+        with:
+          count: 1
+          labels: semver:major, semver:minor, semver:patch, type:skip-changelog
+          mode: exactly
+  type:
+    name: Minimal Type Labels
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - uses: mheap/github-action-required-labels@v5
+        with:
+          count: 1
+          labels: type:bug, type:dependency-upgrade, type:documentation, type:enhancement, type:question, type:task, type:informational, type:skip-changelog
+          mode: exactly

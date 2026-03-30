@@ -1,0 +1,37 @@
+name: Check helpers
+
+on:
+  push:
+    branches:
+      - cmeel
+  pull_request:
+    branches:
+      - cmeel
+
+jobs:
+  test:
+    name: Check helpers
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: setup
+        run: |
+          python -m pip install -U pip
+          python -m pip install .
+      - name: CMake
+        run: python -m cmeel cmake
+      - name: lib
+        run: python -m cmeel lib
+      - name: pc
+        run: python -m cmeel pc
+      - name: CMake script
+        run: cmeel cmake
+      - name: lib script
+        run: cmeel lib
+      - name: pc script
+        run: cmeel pc
+      - name: show version
+        run: cmeel version

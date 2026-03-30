@@ -1,0 +1,106 @@
+---
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: "Python ${{ matrix.python-version }} on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "pypy3.9"]
+
+    steps:
+      - uses: "actions/checkout@v4"
+
+      - uses: hynek/setup-cached-uv@v2
+      - uses: extractions/setup-just@v3
+
+      - name: "Run tox targets for ${{ matrix.python-version }}"
+        env:
+          V: ${{ matrix.python-version }}
+        run: "uv run --group tox tox -e py$(echo $V | tr -d . | sed 's/^py//')"
+
+      - name: "Lint"
+        if: matrix.python-version == '3.13' && runner.os == 'Linux'
+        run: "uv run --group tox tox -e lint"
+
+      - name: "Upload coverage data"
+        uses: "actions/upload-artifact@v4"
+        with:
+          name: coverage-data-${{ matrix.python-version }}
+          path: ".coverage.*"
+          if-no-files-found: "ignore"
+          include-hidden-files: true
+        if: runner.os == 'Linux'
+
+  coverage:
+    name: "Combine & check coverage."
+    needs: "tests"
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - uses: "actions/checkout@v4"
+      - uses: hynek/setup-cached-uv@v2
+
+      - uses: "actions/download-artifact@v4"
+        with:
+          pattern: "coverage-data-*"
+          merge-multiple: true
+
+      - name: "Combine coverage"
+        run: |
+          uv sync --group test --python 3.13
+          uv run coverage combine
+          uv run coverage html --skip-covered --skip-empty
+          uv run coverage json
+
+          # Report and write to summary.
+          uv run coverage report | sed 's/^/    /' >> $GITHUB_STEP_SUMMARY
+
+          export TOTAL=$(python -c "import json;print(json.load(open('coverage.json'))['totals']['percent_covered_display'])")
+          echo "total=$TOTAL" >> $GITHUB_ENV
+
+      - name: "Upload HTML report."
+        uses: "actions/upload-artifact@v4"
+        with:
+          name: "html-report"
+          path: "htmlcov"
+
+      - name: "Make badge"
+        if: github.ref == 'refs/heads/main'
+        uses: "schneegans/dynamic-badges-action@v1.4.0"
+        with:
+          # GIST_TOKEN is a GitHub personal access token with scope "gist".
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: 882f02e3df32136c847ba90d2688f06e
+          filename: covbadge.json
+          label: Coverage
+          message: ${{ env.total }}%
+          minColorRange: 50
+          maxColorRange: 90
+          valColorRange: ${{ env.total }}
+
+  package:
+    name: "Build & verify package"
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - uses: "actions/checkout@v4"
+      - uses: hynek/setup-cached-uv@v2
+
+      - name: "Build package"
+        run: "uv build"
+      - name: "List result"
+        run: "ls -l dist"
+      - name: "Check wheel contents"
+        run: "uvx check-wheel-contents dist/*.whl"
+      - name: "Check long_description"
+        run: "uvx twine check dist/*"

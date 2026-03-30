@@ -1,0 +1,38 @@
+---
+name: tox
+
+on:
+  merge_group:
+    branches: ["main", "devel/*"]
+  push:
+    branches:
+      - "main"
+      - "releases/**"
+      - "stable/**"
+  pull_request:
+    branches:
+      - "main"
+  pull_request_target:
+    types: [opened, labeled, unlabeled] # for ack job
+  workflow_call:
+
+permissions: # needed for tox.yml workflow
+  checks: write
+  contents: write # needed to update release
+  id-token: write
+  packages: write
+  pull-requests: write
+jobs:
+  ack:
+    # checks pull-request labels and updates the release notes on pushes
+    if: github.event_name == 'pull_request_target' || github.event_name == 'push'
+    uses: ansible/team-devtools/.github/workflows/push.yml@main
+  tox:
+    if: github.event_name != 'pull_request_target'
+    uses: ansible/team-devtools/.github/workflows/tox.yml@main
+    with:
+      jobs_producing_coverage: 6
+      other_names: |
+        docs
+        lint
+        pkg

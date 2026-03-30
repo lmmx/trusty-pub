@@ -1,0 +1,28 @@
+---
+name: Validate news entries
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read # to fetch code (actions/checkout)
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.x
+
+      - name: Validate new news items
+        run: python scripts/verify-news-fragments.py
+
+      - name: Install towncrier
+        run: pip install -qU setuptools wheel towncrier
+
+      - name: Run towncrier
+        run: towncrier --draft

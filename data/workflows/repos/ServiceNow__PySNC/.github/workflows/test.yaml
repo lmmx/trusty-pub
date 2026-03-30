@@ -1,0 +1,95 @@
+name: PySNC Test
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+jobs:
+  install-test:
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'ServiceNow'
+    strategy:
+      max-parallel: 1
+      matrix:
+        python-version: ["3.9", "3.11"]
+    env:
+      PYSNC_SERVER: ${{ secrets.PYSNC_SERVER }}
+      PYSNC_USERNAME: ${{ secrets.PYSNC_USERNAME }}
+      PYSNC_PASSWORD: ${{ secrets.PYSNC_PASSWORD }}
+      PYSNC_CLIENT_ID: ${{ secrets.PYSNC_CLIENT_ID }}
+      PYSNC_CLIENT_SECRET: ${{ secrets.PYSNC_CLIENT_SECRET }}
+    steps:
+    - name: check out repository
+      uses: actions/checkout@v5
+    - name: set up python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: setup poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: 2.1.3
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+    - name: cache deps
+      id: cache-deps
+      uses: actions/cache@v4
+      with:
+        path: .venv
+        key: pydeps-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+    - name: install dependencies
+      if: steps.cache-deps.outputs.cache-hit != 'true'
+      run: poetry install --no-interaction --no-root --with dev,docs --extras "asyncio"
+    - name: install project
+      run: poetry install --no-interaction --with dev,docs --extras "asyncio"
+    - name: run tests
+      run: |
+        poetry run pytest
+    - name: build docs
+      working-directory: ./docs
+      run: poetry run make clean html
+    - name: run extra sanity checks
+      run: |
+        poetry run mypy
+        poetry run cyclonedx-py poetry -o bom.json --mc-type library --all-extras
+  prerelease:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: install-test
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: cache poetry install
+        uses: actions/cache@v4
+        with:
+          path: ~/.local
+          key: poetry-2.1.3-0
+      - name: setup poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.1.3
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: cache deps
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: pydeps-${{ hashFiles('**/poetry.lock') }}
+      - name: prerelease
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          poetry config pypi-token.pypi $PYPI_TOKEN
+          poetry version prerelease
+          poetry publish --build
+      - name: update version
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: Automatic version bump
+          file_pattern: pyproject.toml
+

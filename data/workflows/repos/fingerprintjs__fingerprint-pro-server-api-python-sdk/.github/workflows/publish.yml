@@ -1,0 +1,57 @@
+name: 'Publish'
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: Tag name to release
+
+jobs:
+  publish:
+    name: 'Publish to PyPI'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://pypi.org/p/fingerprint-server-sdk
+    permissions:
+      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+    steps:
+      - name: 'Checkout repository'
+        uses: actions/checkout@v4
+        if: github.event_name == 'release'
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: 'Checkout repository'
+        uses: actions/checkout@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: 'Install Python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 'Build'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install wheel
+          pip install twine
+          pip install ruff
+          python setup.py sdist bdist_wheel
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc
+
+  e2e-tests:
+    needs: publish
+    uses: ./.github/workflows/e2e-tests.yml
+    secrets: inherit
+
+

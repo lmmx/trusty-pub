@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        show-progress: false
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1.3.4
+      with:
+        version: 1.6.1
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Set up Python
+      id: python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+        cache: poetry
+
+    - name: Install dependencies
+      if: steps.python.outputs.cache-hit != 'true'
+      run: poetry install --no-interaction --no-root
+
+    - name: Install library
+      run: poetry install --no-interaction
+
+    - name: Build
+      run: poetry build
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: package
+        path: dist/
+        retention-days: 7
+        if-no-files-found: error
+
+  pypi:
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment:
+        name: pypi-publishing
+        url: https://pypi.org/project/hvac/
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: package
+          path: dist
+
+      # `tree` not supported on slim
+      - name: Show tree
+        run: tree
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  asset:
+    needs: [build]
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: package
+          path: dist
+
+      # `tree` not supported on slim
+      - name: Show tree
+        run: ls -alhR
+
+      - name: Add release asset
+        uses: softprops/action-gh-release@a74c6b72af54cfa997e81df42d94703d6313a2d0
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*

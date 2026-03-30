@@ -1,0 +1,85 @@
+name: Release
+on:
+  push:
+    tags:
+      - V*
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+jobs:
+  pure-python-wheel-and-sdist:
+    name: Build a pure Python wheel and source distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch all tags; this is needed for hatch-vcs
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: hynek/build-and-inspect-python-package@v2
+
+  publish-test-release:
+    permissions:
+      contents: read
+      # Needed for trusted publishing.
+      id-token: write
+
+    name: Publish in-dev package to test.pypi.org
+    environment: publish-test-release
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request')
+    runs-on: ubuntu-latest
+    needs:
+      - pure-python-wheel-and-sdist
+
+    steps:
+      - name: Download packages built by build-and-inspect-python-package
+        uses: actions/download-artifact@v4
+        with:
+          name: Packages
+          path: dist
+
+      - name: Upload package to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-release:
+    permissions:
+      contents: read
+      # Needed for trusted publishing.
+      id-token: write
+
+    name: Publish release
+    environment: publish-release
+    needs:
+      - pure-python-wheel-and-sdist
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(github.event.ref, 'refs/tags'))
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Packages
+          path: dist
+
+      - name: Push build artifacts to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip_existing: true

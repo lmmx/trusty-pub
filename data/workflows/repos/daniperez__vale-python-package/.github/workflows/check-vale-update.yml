@@ -1,0 +1,57 @@
+name: Version Bump if Vale Updated 
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # This schedule runs every day at midnight UTC
+  workflow_dispatch:
+
+jobs:
+  update-version:
+    runs-on: ubuntu-latest
+   
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Check Vale's last version
+      id: check-last-version
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        VALE_LAST_VERSION=$(gh release list -L 1 -R errata-ai/vale | cut -f 1 | tr -d "v")
+        VALE_PYTHON_LAST_VERSION=$(cat pyproject.toml | grep "^version =" | cut -d "\"" -f 2 | sed "s/\.[^.]*$//" | cut -d "." -f -3)
+        echo "Current Vale version        : $VALE_LAST_VERSION" 
+        echo "Current Python Vale version : $VALE_PYTHON_LAST_VERSION" 
+
+        if [[ "$VALE_LAST_VERSION" == "$VALE_PYTHON_LAST_VERSION" ]]; then 
+          echo "Same versions 🎉"
+        elif [ -n "$VALE_LAST_VERSION" ]; then # not-empty
+          echo "Versions differ, updating."
+          echo "VALE_LAST_VERSION=$VALE_LAST_VERSION" >> $GITHUB_OUTPUT
+          echo "VALE_PYTHON_LAST_VERSION=$VALE_PYTHON_LAST_VERSION" >> $GITHUB_OUTPUT
+        fi
+      
+    - name: Version bump 
+      if: steps.check-last-version.outputs.VALE_LAST_VERSION
+      env:
+        VALE_LAST_VERSION: ${{steps.check-last-version.outputs.VALE_LAST_VERSION}}
+        VALE_PYTHON_LAST_VERSION: ${{steps.check-last-version.outputs.VALE_PYTHON_LAST_VERSION}}
+      run: |
+        # Commit version bump (change pyproject.yaml, CHANGELOG and README.md):
+        echo "Version bump to $VALE_LAST_VERSION:"
+        echo "🗒️ Adding a changelog entry"
+        sed -i -e "s/# Changelog/# Changelog\n\n## ${VALE_LAST_VERSION}.0 \($(date -Idate)\)\n\n- Using Vale v${VALE_LAST_VERSION}/" CHANGELOG.md
+        echo "✍️  Updating version"
+        sed -i -e "s/vale==${VALE_PYTHON_LAST_VERSION}/vale==${VALE_LAST_VERSION}/" README.md 
+        sed -i -e "s/version = \"${VALE_PYTHON_LAST_VERSION}.*\"/version = \"${VALE_LAST_VERSION}.0\"/" pyproject.toml
+        echo "Done!"
+        git diff
+
+    - name: Create Pull Request with Version Bump
+      if: steps.check-last-version.outputs.VALE_LAST_VERSION
+      env:
+        VALE_LAST_VERSION: ${{steps.check-last-version.outputs.VALE_LAST_VERSION}}
+      uses: peter-evans/create-pull-request@v5
+      with:
+        commit-message: Version Bump ${{steps.check-last-version.outputs.VALE_LAST_VERSION}} 
+        title: "[BOT] Update Vale to v${{steps.check-last-version.outputs.VALE_LAST_VERSION}}"

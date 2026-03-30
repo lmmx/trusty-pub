@@ -1,0 +1,106 @@
+name: build
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - master
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      python_version_publish: "3.14"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Fetch all
+          fetch-depth: 0
+      - name: Cache packages
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ~/.cache
+          key: ${{ runner.os }}-python${{ env.python_version_publish }}-pipcache
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ env.python_version_publish }}
+      - name: Install denendencies
+        run: |
+          pip install .[publish] && twine --version
+      - name: Publish to testpypi
+        run: make publish publish_repository=testpypi
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TESTPYPI_TOKEN }}
+      - name: Publish to pypi
+        if: github.ref_type == 'tag'
+        run: make publish publish_repository=pypi
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+  test:
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        # Available versions:
+        # https://github.com/actions/python-versions/blob/main/versions-manifest.json
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        runs-on: [ubuntu-latest]
+    env:
+      python_version_codecov: "3.14"
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Cache packages
+        # https://github.com/actions/cache/issues/152
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ~/.cache
+          key: ${{ runner.os }}-python${{ matrix.python-version }}-pipcache
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install denendencies
+        run: |
+          pip install .[test]
+      - name: Run test
+        run: |
+          make test
+      - name: Run codecov
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        if: matrix.python-version == env.python_version_codecov
+
+  lint:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    env:
+      python_version_lint: "3.14"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Cache packages
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ~/.cache
+          key: ${{ runner.os }}-python${{ env.python_version_lint }}-pipcache
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ env.python_version_lint }}
+      - name: Install denendencies
+        run: |
+          pip install .[lint]
+      - name: Run linter
+        run: make lint

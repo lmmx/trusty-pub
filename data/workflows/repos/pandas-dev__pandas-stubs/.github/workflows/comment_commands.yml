@@ -1,0 +1,80 @@
+name: Comment Commands to Trigger CI
+on:
+  issue_comment:
+    types: created
+
+permissions:
+  checks: write
+
+env:
+  # store mapping of commands to use with poetry
+  RUN_COMMAND: '{"/pandas_nightly": "pytest --nightly", "/mypy_nightly": "mypy --mypy_nightly"}'
+  # store mapping of labels to display in the check runs
+  DISPLAY_COMMAND: '{"/pandas_nightly": "Pandas nightly tests", "/mypy_nightly": "Mypy nightly tests"}'
+
+jobs:
+  optional_tests:
+    name: "Optional tests run"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # if more commands are added, they will need to be added here too as we don't have access to env at this stage
+    if: (github.event.issue.pull_request) && contains(fromJSON('["/pandas_nightly", "/mypy_nightly"]'), github.event.comment.body)
+
+    steps:
+      - name: Get head sha, branch name and store value
+        # get the sha of the last commit to attach the results of the tests
+        if: always()
+        id: get-branch-info
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ github.event.issue.number }}
+            })
+            core.setOutput('sha', pr.data.head.sha)
+            core.setOutput('branch', pr.data.head.ref)
+            core.setOutput('repository', pr.data.head.repo.full_name)
+
+      - name: Checkout code on the correct branch
+        uses: actions/checkout@v5
+        with:
+          # context is not aware which branch to checkout so it would otherwise
+          # default to main (we also need repo name to source from the right user
+          # otherwise it will look for the branch in pandas-stubs repo)
+          ref: ${{ steps.get-branch-info.outputs.branch }}
+          repository: ${{ steps.get-branch-info.outputs.repository }}
+
+      - name: Install project dependencies
+        uses: ./.github/setup
+        with:
+          os: ubuntu-latest
+          python-version: "3.12"
+
+      - name: Run ${{ fromJSON(env.DISPLAY_COMMAND)[github.event.comment.body] }}
+        # run the tests based on the value of the comment
+        id: tests-step
+        run: poetry run poe ${{ fromJSON(env.RUN_COMMAND)[github.event.comment.body] }}
+
+      - name: Report results of the tests and publish
+        # publish the results to a check run no matter the pass or fail
+        if: always()
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.checks.create({
+              name: '${{ fromJSON(env.DISPLAY_COMMAND)[github.event.comment.body] }}',
+              head_sha: '${{ steps.get-branch-info.outputs.sha }}',
+              status: 'completed',
+              conclusion: '${{ steps.tests-step.outcome }}',
+              output: {
+                title: 'Run ${{ fromJSON(env.DISPLAY_COMMAND)[github.event.comment.body] }}',
+                summary: 'Results: ${{ steps.tests-step.outcome }}',
+                text: 'See the actions run at ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+              },
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            })

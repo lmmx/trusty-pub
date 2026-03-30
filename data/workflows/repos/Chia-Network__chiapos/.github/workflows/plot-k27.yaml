@@ -1,0 +1,50 @@
+name: Plot k=27
+
+on:
+  push:
+    branches:
+    - main
+  release:
+    types: [published]
+  pull_request:
+    branches:
+    - '**'
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}--${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/long_lived/')) && github.sha || '' }}
+  cancel-in-progress: true
+
+jobs:
+  build_wheels:
+    name: Plot k=27 on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      name: Install Python
+      with:
+        python-version: '3.10'
+
+    - name: cmake, Plot k=27
+      run: |
+        mkdir build
+        cd build
+        cmake ../
+        cmake --build . -- -j 6
+        mkdir plots
+        mkdir plots/temp
+        mkdir plots/final
+        pip install wheel
+        pip install psutil
+        python ../tests/plot-resources.py -k 27 -r 2
+        EXPECTED_SHA="1f144aa10df010a557009c0c032926cfff58fd5e6b4a5317caca5c405b08163a  plots/final/plot.dat"
+        SHACHECK=$(sha256sum plots/final/plot.dat)
+        echo "$SHACHECK"
+        if [ "$SHACHECK" != "$EXPECTED_SHA" ]; then echo "Sha256sum does not match"; exit 1; else echo "Sha256sum matches 0x1f144aa1...163a"; fi

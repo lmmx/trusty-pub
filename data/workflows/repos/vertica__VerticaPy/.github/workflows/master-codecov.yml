@@ -1,0 +1,59 @@
+name: CI and Codecov
+on:
+  push:
+    branches:
+      - master
+jobs:
+  codecov:
+    name: Codecov Workflow
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    
+    steps:
+      - name: Installing graphviz package
+        run: sudo apt-get update && sudo apt-get install graphviz
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up a Vertica server
+        timeout-minutes: 15
+        run: |
+          docker pull opentext/vertica-ce:latest
+          docker run -d -v /tmp:/tmp -p 5433:5433 -p 5444:5444 \
+            --name vertica_docker \
+            opentext/vertica-ce
+          echo "Vertica startup ..."
+          until docker exec vertica_docker test -f /data/vertica/VMart/agent_start.out; do \
+            echo "..."; \
+            sleep 3; \
+          done;
+          echo "Vertica is up"
+          docker exec -u dbadmin vertica_docker /opt/vertica/bin/vsql -c "\l"
+          docker exec -u dbadmin vertica_docker /opt/vertica/bin/vsql -c "select version();"
+      - name: Install dependencies
+        run: pip install tox
+      - name: Run tests
+        run: |
+          export VP_TEST_USER=dbadmin
+          echo "*** Calling tox based on python-version ***"
+          echo ${{ matrix.python-version }}
+          if ${{ matrix.python-version == '3.9' }}; then
+            tox -e py39 -- --cov=./ --cov-report=xml
+          elif ${{ matrix.python-version == '3.10' }}; then
+            tox -e py310 -- --cov=./ --cov-report=xml
+          elif ${{ matrix.python-version == '3.11' }}; then
+            tox -e py311 -- --cov=./ --cov-report=xml
+          elif ${{ matrix.python-version == '3.12' }}; then
+            tox -e py312 -- --cov=./ --cov-report=xml
+          fi          
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          flags: unittests

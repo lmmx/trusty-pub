@@ -1,0 +1,51 @@
+name: update rclone remote and hash types
+
+on:
+  schedule:
+    - cron: '0 0 * * 1' # At 00:00 on Monday
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write           # 'write' access to repository contents
+    steps:
+
+      - name: checkout repo content
+        uses: actions/checkout@v2 # checkout the repository content
+
+      - name: setup python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10' # install the python version needed
+
+      - name: install the rclone software
+        run: sudo -v ; curl https://rclone.org/install.sh | sudo bash
+
+      - name: install black formatter
+        run: |
+          python -m pip install --upgrade pip
+          pip install black
+
+      - name: execute py script # run the update script
+        run: |
+          python rclone_python/scripts/update_hash_types.py
+          python rclone_python/scripts/update_remote_types.py
+
+      - name: run black formatter
+        run: |
+          black rclone_python/remote_types.py
+          black rclone_python/hash_types.py
+
+      - name: commit files
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -A
+          git diff-index --quiet HEAD || (git commit -a -m "Updated rclone remote & hash types" --allow-empty)
+
+      - name: push changes
+        uses: ad-m/github-push-action@v0.8.0
+        with:
+          branch: master
+          github_token: ${{ secrets.GITHUB_TOKEN }}

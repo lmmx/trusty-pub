@@ -1,0 +1,244 @@
+name: Test sspilib
+on:
+  push:
+    branches:
+    - main
+
+  pull_request:
+    branches:
+    - main
+
+  release:
+    types:
+    - published
+
+jobs:
+  build_sdist:
+    name: build sdist
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: 3.13
+
+    - name: build sdist
+      run: |
+        python -m pip install build
+        python -m build --sdist
+      env:
+        SSPI_SKIP_EXTENSIONS: true
+
+    - uses: actions/upload-artifact@v5
+      with:
+        name: artifact-sdist
+        path: ./dist/*.tar.gz
+
+  build_wheels:
+    name: build wheels
+    needs:
+    - build_sdist
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        # Free-threading needs version specific
+        - os: macos-15-intel
+          version: cp314t-macosx_x86_64
+        - os: macos-15
+          version: cp314t-macosx_arm64
+        # 3.11+ can use the Limited API/Stable ABI
+        - os: macos-15-intel
+          version: cp311-macosx_x86_64
+        - os: macos-15
+          version: cp311-macosx_arm64
+        - os: macos-15-intel
+          version: cp310-macosx_x86_64
+        - os: macos-15
+          version: cp310-macosx_arm64
+        - os: macos-15-intel
+          version: cp39-macosx_x86_64
+        - os: macos-15
+          version: cp39-macosx_arm64
+
+        # Free-threading needs version specific
+        - os: ubuntu-latest
+          version: cp314t-manylinux_x86_64
+        - os: ubuntu-22.04-arm
+          version: cp314t-manylinux_aarch64
+        # 3.11+ can use the Limited API/Stable ABI
+        - os: ubuntu-latest
+          version: cp311-manylinux_x86_64
+        - os: ubuntu-22.04-arm
+          version: cp311-manylinux_aarch64
+        - os: ubuntu-latest
+          version: cp310-manylinux_x86_64
+        - os: ubuntu-22.04-arm
+          version: cp310-manylinux_aarch64
+        - os: ubuntu-latest
+          version: cp39-manylinux_x86_64
+        - os: ubuntu-22.04-arm
+          version: cp39-manylinux_aarch64
+
+        # Free-threading needs version specific
+        - os: windows-2022
+          version: cp314t-win_amd64
+        - os: windows-11-arm
+          version: cp314t-win_arm64
+        - os: windows-2022
+          version: cp314t-win32
+
+        # 3.11+ can use the Limited API/Stable ABI
+        - os: windows-2022
+          version: cp311-win_amd64
+        - os: windows-11-arm
+          version: cp311-win_arm64
+        - os: windows-2022
+          version: cp311-win32
+        - os: windows-2022
+          version: cp310-win_amd64
+        - os: windows-11-arm
+          version: cp310-win_arm64
+        - os: windows-2022
+          version: cp310-win32
+        - os: windows-2022
+          version: cp39-win_amd64
+        - os: windows-11-arm
+          version: cp39-win_arm64
+        - os: windows-2022
+          version: cp39-win32
+
+    steps:
+    - uses: actions/download-artifact@v6
+      with:
+        name: artifact-sdist
+        path: ./
+
+    - name: extract sdist
+      shell: bash
+      run: |
+        tar xf sspilib-*.tar.gz
+        mv sspilib-*/* .
+        rm -r sspilib-*/
+        rm sspilib-*.tar.gz
+
+    - name: build wheel
+      uses: pypa/cibuildwheel@v3.3.0
+      env:
+        CIBW_BUILD: ${{ matrix.version }}
+        CIBW_BUILD_VERBOSITY: 1
+        CIBW_PRERELEASE_PYTHONS: ${{ matrix.prerelease || 'false' }}
+        MACOSX_DEPLOYMENT_TARGET: '10.12'  # rustc has a min on 10.12
+
+    - uses: actions/upload-artifact@v5
+      with:
+        path: ./wheelhouse/*.whl
+        name: artifact-wheel-${{ matrix.version }}
+
+  test:
+    name: test
+    needs:
+    - build_sdist
+    - build_wheels
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - macos-latest
+        - ubuntu-latest
+        - ubuntu-22.04-arm
+        - windows-latest
+        - windows-11-arm
+        python-version:
+        - 3.9
+        - '3.10'
+        - '3.11'
+        - '3.12'
+        - '3.13'
+        - '3.14'
+        - '3.14t'
+        python-arch:
+        - arm64
+        - x86
+        - x64
+
+        exclude:
+        - os: windows-latest
+          python-arch: arm64
+
+        - os: windows-11-arm
+          python-arch: x86
+        - os: windows-11-arm
+          python-arch: x64
+        # <= 3.10 is not available on arm64 Windows
+        - os: windows-11-arm
+          python-version: '3.9'
+        - os: windows-11-arm
+          python-version: '3.10'
+
+        - os: ubuntu-latest
+          python-arch: arm64
+        - os: ubuntu-latest
+          python-arch: x86
+
+        - os: ubuntu-22.04-arm
+          python-arch: x86
+        - os: ubuntu-22.04-arm
+          python-arch: x64
+
+        - os: macos-latest
+          python-arch: x86
+        - os: macos-latest
+          python-arch: x64
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        architecture: ${{ matrix.python-arch }}
+
+    - uses: actions/download-artifact@v6
+      with:
+        pattern: artifact-*
+        merge-multiple: true
+        path: ./dist
+
+    - name: Test
+      shell: bash
+      run: build_helpers/run-ci.sh
+      env:
+        PYTEST_ADDOPTS: --color=yes
+
+    - name: Upload Test Results
+      if: always()
+      uses: actions/upload-artifact@v5
+      with:
+        name: Unit Test Results (${{ matrix.os }} ${{ matrix.python-version }}) ${{ matrix.python-arch }}
+        path: ./junit/test-results.xml
+
+  publish:
+    name: publish
+    needs:
+    - test
+    runs-on: ubuntu-latest
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
+
+    steps:
+    - uses: actions/download-artifact@v6
+      with:
+        pattern: artifact-*
+        merge-multiple: true
+        path: ./dist
+
+    - name: Publish
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: pypa/gh-action-pypi-publish@release/v1

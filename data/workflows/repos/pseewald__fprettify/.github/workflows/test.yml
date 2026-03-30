@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 0 * * 3"
+  workflow_dispatch:
+
+jobs:
+
+  pip:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install project & dependencies
+        run: pip install .[dev]
+
+      - name: Run unit and short integration tests
+        run: |
+          coverage run -p --source=fprettify run_tests.py -s unittests builtin regular
+
+      - name: Run long integration tests
+        if: ${{ github.event_name == 'schedule' }}
+        run: |
+          coverage run -p --source=fprettify run_tests.py -s cron
+
+      - name: Combine coverage files
+        run: coverage combine
+
+      - name: Coverage upload
+        run: coveralls --service=github
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COVERALLS_FLAG_NAME: ${{ matrix.python }}
+          COVERALLS_PARALLEL: true
+
+  coverage:
+    needs:
+      - pip
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install coveralls
+
+      - name: Coverage upload
+        run: coveralls --service=github --finish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

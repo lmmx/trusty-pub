@@ -1,0 +1,63 @@
+name: python
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - run: npm ci --ignore-scripts
+      - run: make test-metrics-python-django-wsgi
+      - run: make test-metrics-python-django-asgi
+      - run: make test-metrics-python-flask
+      - run: make test-webhooks-python-flask
+      - run: make test-metrics-python-fastapi
+      - run: make test-webhooks-python-fastapi
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down
+
+  build:
+    name: ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: packages/python
+
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          # https://endoflife.date/python
+          - 3.9 # EOL: October 5rd, 2025
+          - '3.10' # EOL: October 4rd, 2026
+          - '3.11' # EOL: October 24th, 2027
+          - '3.12' # EOL: October 31th, 2028
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Check code standards
+        run: make lint
+
+      - name: Run tests
+        run: make test

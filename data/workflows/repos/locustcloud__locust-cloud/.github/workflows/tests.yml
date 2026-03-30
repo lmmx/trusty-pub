@@ -1,0 +1,62 @@
+name: Tests
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_ACCOUNT_ID: 637423602143
+  AWS_REGION: eu-north-1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --python 3.11
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pyright
+      # This peculiar way of running pytest is to ensure monkey patching is done before pytest starts loading modules.
+      # Otherwise you may get "MonkeyPatchWarning: Monkey-patching ssl after ssl has already been imported" and infinite recursion
+      # https://github.com/pytest-dev/pytest/issues/6210
+      - run: uv run --with locust --with . python -m gevent.monkey --module pytest
+        env:
+          LOCUSTCLOUD_USERNAME: ${{ secrets.LOCUSTCLOUD_USERNAME }}
+          LOCUSTCLOUD_PASSWORD: ${{ secrets.LOCUSTCLOUD_PASSWORD }}
+      # any local changes would make hatch-vcs set a "local version" (+dev0...), so we ignore any uv.lock updates:
+      - run: git update-index --assume-unchanged uv.lock
+      - run: uvx --from build pyproject-build --sdist --wheel --installer uv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-artifact
+          path: dist/*
+      # Ensure what customers will actually run does not rely on dev-dependencies
+      - run: rm -rf uv.lock .venv
+      - run: uv run --with locust --with . --no-default-groups locust --cloud --help
+
+  publish_pypi:
+    name: Publish to PyPI
+    needs: [build]
+    if: github.repository_owner == 'locustcloud' && ( github.ref == 'refs/heads/master' || startsWith(github.event.ref, 'refs/tags') )
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Download Python dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-artifact
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

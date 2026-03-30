@@ -1,0 +1,48 @@
+name: Build PoSpace Doc
+
+on: [workflow_dispatch]
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}--${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/long_lived/')) && github.sha || '' }}
+  cancel-in-progress: true
+
+jobs:
+  html_to_pdf:
+    name: Generate PDF of PoSpace Doc
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - uses: actions/setup-python@v6
+      name: Install Python
+      with:
+        python-version: '3.10'
+
+    - name: Install python markdown
+      shell: bash
+      run: |
+         python -m venv venv
+         source venv/bin/activate
+         python -m pip install --upgrade pip
+         pip install markdown
+         pip install python-markdown-math
+#         python -m markdown -x mdx_math --verbose -f proof_of_space.html proof_of_space.md
+
+    - name: html to pdf
+      uses: fifsky/html-to-pdf-action@v0.1
+      with:
+        htmlFile: ./documents/proof_of_space.html
+        outputFile: ./documents/proof_of_space.pdf
+        pdfOptions: '{"margin": {"top": "1cm", "left": "1cm", "right": "1cm", "bottom": "1cm"}}'
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v5
+      with:
+        name: Proof-of-Space-Document
+        path: ./documents/proof_of_space.pdf

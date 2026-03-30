@@ -138,10 +138,12 @@ source = { editable = "." }
 dependencies = [
     { name = "grepow" },
     { name = "polars" },
+    { name = "tqdm" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "grepow", specifier = ">=0.1.1" },
     { name = "polars", specifier = ">=1.39.3" },
+    { name = "tqdm", specifier = ">=4.67.3" },
 ]

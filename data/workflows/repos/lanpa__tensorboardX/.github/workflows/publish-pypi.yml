@@ -1,0 +1,85 @@
+on:
+  workflow_dispatch:
+    inputs:
+      publish_version:
+        required: true
+        type: string
+
+jobs:
+  log-the-inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "target version: ${{ github.event.inputs.publish_version }}"
+        env:
+          VERSION: ${{ github.event.inputs.publish_version }}
+
+  upload-to-pypi:
+    name: Publish to PyPI test site
+    runs-on: ubuntu-latest
+    steps:
+    - name: Dump GitHub context
+      id: github_context_step
+      run: |
+          echo '${{ toJSON(github) }}'
+          echo "target version: ${{ github.event.inputs.publish_version }}"
+
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v3
+      with:
+        python-version: 3.9
+
+    - name: Make sure the branch name is "refs/heads/releases/*"
+      run: |
+        if [[ "${{ github.ref }}" != refs/heads/releases/* ]]; then
+          echo "This workflow only runs on branches matching 'releases/*'. Current branch: ${{ github.ref }}"
+          exit 1
+        fi
+
+    - name: Fetch git tags and create version tag
+      run: |
+        git fetch --tags origin
+        git tag ${{ github.event.inputs.publish_version }}
+
+    - name: Install build and wheel packages
+      run: >-
+        python -m
+        pip install
+        build wheel
+        --user
+
+    - name: Build wheel and source distribution
+      run: |
+        echo `pwd`
+        python -m build --wheel --sdist
+
+    - name: Install tensorboardX from wheel
+      run: pip install dist/tensorboardx*.whl
+
+    - name: Print version
+      run: python -c "import tensorboardX; print(tensorboardX.__version__)"
+
+    - name: Check version matches publish_version
+      run: |
+        VERSION=$(python -c "import tensorboardX; print(tensorboardX.__version__)")
+        if [ "$VERSION" != "${{ github.event.inputs.publish_version }}" ]; then
+          echo "Version mismatch: $VERSION does not match ${{ github.event.inputs.publish_version }}"
+          exit 1
+        fi
+
+    - name: Publish to Test PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TESTSITE }}
+        repository-url: https://test.pypi.org/legacy/
+        attestations: false
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API }}
+        repository_url: https://upload.pypi.org/legacy/
+        attestations: false
+
+

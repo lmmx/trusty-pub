@@ -1,0 +1,22 @@
+name: sync branches to main
+
+on:
+  push:
+    branches:
+      - main
+jobs:
+  sync-branch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+
+      - name: Push updates to master
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          repository: scikit-hep/mplhep
+          branch: master
+          force: true

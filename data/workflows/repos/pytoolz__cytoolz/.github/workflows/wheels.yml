@@ -1,0 +1,191 @@
+name: Builid Wheels and Release
+
+on:
+  # pull_request:  # Uncomment to debug wheel building in a PR
+  workflow_dispatch:
+    inputs:
+      upload_dest:
+        type: choice
+        description: Upload wheels to
+        options:
+          - No Upload
+          - PyPI
+          - Test PyPI
+  push:
+    branches:
+      - master
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    name: Build wheels for ${{ matrix.os }}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash -l {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux-intel
+            runs-on: ubuntu-latest
+            archs: auto64 auto32
+          - os: linux-arm
+            runs-on: ubuntu-24.04-arm
+            archs: auto64 auto32
+          - os: linux-qemu-ppc64le
+            runs-on: ubuntu-latest
+            archs: ppc64le
+          - os: linux-qemu-s390x
+            runs-on: ubuntu-latest
+            archs: s390x
+          - os: linux-qemu-riscv64
+            runs-on: ubuntu-latest
+            archs: riscv64
+          - os: windows-intel
+            runs-on: windows-latest
+            archs: auto64 auto32
+          - os: windows-arm
+            runs-on: windows-11-arm
+            archs: auto64 auto32
+          - os: macos-intel
+            # macos-15-intel is the last x86_64 runner
+            runs-on: macos-15-intel
+            archs: auto
+          - os: macos-arm
+            # macos-14+ (including latest) are ARM64 runners
+            runs-on: macos-latest
+            archs: auto universal2
+          - os: ios
+            runs-on: macos-latest
+            platform: ios
+            archs: all
+          - os: pyodide
+            # pyodide is not yet supported by PyPI, but let's make sure we can build for it
+            runs-on: ubuntu-latest
+            platform: pyodide
+            archs: all
+
+    steps:
+      - name: Setup QEMU
+        if: ${{ startsWith(matrix.os, 'linux-qemu') }}
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392  # v3
+        with:
+          platforms: all
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+        with:
+          python-version: "3.x"
+      - name: Build wheels
+        uses: pypa/cibuildwheel@9c00cb4f6b517705a3794b22395aedc36257242c  # v3.2.1
+        env:
+          CIBW_PLATFORM: ${{ matrix.platform || 'auto' }}
+          CIBW_ARCHS: ${{ matrix.archs || 'auto' }}
+          CIBW_BUILD: "cp* pp*"
+          CIBW_ENABLE: "cpython-freethreading pypy"
+          CIBW_TEST_SKIP: "*-ios_*"
+      - name: List wheels
+        run: |
+          ls -al wheelhouse/
+      - name: Upload wheels
+        if: matrix.platform != 'pyodide'  # pyodide is not yet supported by PyPI
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          retention-days: 7
+
+  sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+        with:
+          python-version: "3.9"
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+      - name: Build sdist
+        run: python -m build --sdist
+      - name: Upload sdist
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  upload-to-test-pypi:
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    if: github.repository == 'pytoolz/cytoolz' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' && github.event.inputs.upload_dest == 'Test PyPI')
+
+    environment:
+      name: test-pypi
+      url: https://test.pypi.org/p/cytoolz
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5.0.0
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+      - name: Publish to Test-PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          print-hash: true
+          verbose: true
+
+  upload-to-pypi:
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    if: github.repository == 'pytoolz/cytoolz' && startsWith(github.ref, 'refs/tags/') && (github.event_name != 'workflow_dispatch' || github.event.inputs.upload_dest == 'PyPI')
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cytoolz
+    permissions:
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5.0.0
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+      - name: List artifacts
+        run: |
+          ls -al dist/
+      - name: Generate artifact attestation for sdist and wheels
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3.0.0
+        with:
+          subject-path: "dist/cytoolz-*"
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
+        with:
+          attestations: true
+          print-hash: true
+          verbose: true

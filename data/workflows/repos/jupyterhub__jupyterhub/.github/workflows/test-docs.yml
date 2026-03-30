@@ -1,0 +1,125 @@
+# This is a GitHub workflow defining a set of jobs with a set of steps.
+# ref: https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions
+#
+# This workflow validates the REST API definition and runs the pytest tests in
+# the docs/ folder. This workflow does not build the documentation. That is
+# instead tested via ReadTheDocs (https://readthedocs.org/projects/jupyterhub/).
+#
+name: Test docs
+
+# The tests defined in docs/ are currently influenced by changes to _version.py
+# and scopes.py.
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "jupyterhub/_version.py"
+      - "jupyterhub/scopes.py"
+      - ".github/workflows/test-docs.yml"
+  push:
+    paths:
+      - "docs/**"
+      - "jupyterhub/_version.py"
+      - "jupyterhub/scopes.py"
+      - ".github/workflows/test-docs.yml"
+    branches-ignore:
+      - "dependabot/**"
+      - "pre-commit-ci-update-config"
+    tags:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # UTF-8 content may be interpreted as ascii and causes errors without this.
+  LANG: C.UTF-8
+  PYTEST_ADDOPTS: "--verbose --color=yes"
+
+jobs:
+  validate-rest-api-definition:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Validate REST API definition
+        run: |
+          npx @redocly/cli@2.20 lint
+
+  test-docs:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+          # make rediraffecheckdiff requires git history to compare current
+          # commit with the main branch and previous releases.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            docs/requirements.txt
+
+      - name: Install requirements
+        run: |
+          pip install -e . -r docs/requirements.txt pytest
+
+      - name: pytest docs/
+        run: |
+          pytest docs/
+
+      # readthedocs doesn't halt on warnings,
+      # so raise any warnings here
+      - name: build docs
+        run: |
+          cd docs
+          make html
+
+      # Output broken and permanently redirected links in a readable format
+      - name: check links
+        uses: manics/action-sphinx-linkcheck-summary@main
+        with:
+          docs-dir: docs
+          build-dir: docs/_build
+
+      # make rediraffecheckdiff compares files for different changesets
+      # these diff targets aren't always available
+      # - compare with base ref (usually 'main', always on 'origin') for pull requests
+      # - only compare with tags when running against jupyterhub/jupyterhub
+      #   to avoid errors on forks, which often lack tags
+      - name: check redirects for this PR
+        if: github.event_name == 'pull_request'
+        run: |
+          make rediraffecheckdiff
+        env:
+          REDIRAFFE_BRANCH: origin/${{ github.base_ref }}
+        working-directory: docs
+
+      # this should check currently published 'stable' links for redirects
+      - name: check redirects since last release
+        if: github.repository == 'jupyterhub/jupyterhub'
+        run: |
+          export REDIRAFFE_BRANCH=$(git describe --tags --abbrev=0)
+          make rediraffecheckdiff
+        working-directory: docs
+
+      # longer-term redirect check (fixed version) for older links
+      - name: check redirects since 3.0.0
+        if: github.repository == 'jupyterhub/jupyterhub'
+        run: |
+          make rediraffecheckdiff
+        env:
+          REDIRAFFE_BRANCH: "3.0.0"
+        working-directory: docs

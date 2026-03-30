@@ -1,0 +1,114 @@
+name: testing
+
+on:
+  workflow_dispatch: # Allow running on-demand
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  check-enums:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{github.event.pull_request.head.repo.full_name}}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip pip-tools black ruamel.yaml
+          pip install --user --no-deps -e ./emmet-core
+
+      - name: Generate enums and check output
+        id: enums
+        shell: bash -l {0}
+        run: |
+          set -e
+          python emmet-core/dev_scripts/generate_enums.py
+          black emmet-core/emmet/core/*/calc_types/enums.py
+          echo "count=$(git diff --exit-code --quiet HEAD emmet-core/emmet/core/*/calc_types/enums.py || echo "1")" >> $GITHUB_OUTPUT
+          echo "files=$(git ls-files --exclude-standard --others emmet-core/emmet/core/*/calc_types/enums.py | wc -l | xargs)" >> $GITHUB_OUTPUT
+
+      - name: Commit & push enums changes
+        shell: bash -l {0}
+        run: |
+          set -e
+          if [[ "${{ steps.enums.outputs.count }}" != "" || "${{ steps.enums.outputs.files }}" != "0" ]]; then
+            git config user.name github-actions
+            git config user.email github-actions@github.com
+            git add emmet-core/emmet/core/*/calc_types/enums.py
+            git commit -m "[automated commit] update calc type enums"
+            git push
+          else
+            echo "No changes detected in enum files."
+          fi
+
+  test:
+    # to-do: add check-enums req after finding solution for pushing to external forks
+    #needs: check-enums
+    strategy:
+      matrix:
+        os: ["ubuntu-latest"]
+        package: ["emmet-core", "emmet-builders", "emmet-api", "emmet-archival", "emmet-cli"]
+        python-version: ["3.11", "3.12"]
+
+    name: ${{ matrix.package }} (${{ matrix.os }}/py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{github.event.pull_request.head.repo.full_name}}
+          fetch-depth: 0
+
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+          channels: conda-forge
+
+      - name: Install Python dependencies
+        shell: bash -l {0}
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          python${{ matrix.python-version }} -m pip install --upgrade pip pip-tools
+          python${{ matrix.python-version }} -m pip install --user `grep numpy ${{ matrix.package }}/requirements/${{ matrix.os }}_py${{ matrix.python-version }}_extras.txt`
+          python${{ matrix.python-version }} -m pip install --user -r ${{ matrix.package }}/requirements/${{ matrix.os }}_py${{ matrix.python-version }}_extras.txt
+
+      - name: Install editable emmet-core if needed
+        shell: bash -l {0}
+        if: matrix.package != 'emmet-core'
+        run: python${{ matrix.python-version }} -m pip install --user --no-deps ./emmet-core
+
+      - name: Install ${{ matrix.package }}
+        shell: bash -l {0}
+        run: python${{ matrix.python-version }} -m pip install --user --no-deps -e ./${{ matrix.package }}
+
+      - name: Lint with mypy
+        shell: bash -l {0}
+        if: matrix.python-version == 3.11
+        run: python${{ matrix.python-version }} -m mypy --config-file .mypy.ini ${{ matrix.package }}/emmet
+
+      - name: Test with pytest
+        if: always() # run tests even if linting failed
+        shell: bash -l {0}
+        env:
+          EMMET_USE_EMMET_MODELS: true
+        run: python${{ matrix.python-version }} -m pytest -n auto --cov=emmet --cov-report=xml ${{ matrix.package }}/tests
+
+      - uses: codecov/codecov-action@v5.5.2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml

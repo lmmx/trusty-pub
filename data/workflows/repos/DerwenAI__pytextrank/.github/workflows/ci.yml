@@ -1,0 +1,39 @@
+name: CI
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+#  pre-commit:
+#    name: Run pre-commit
+#    runs-on: ubuntu-latest
+#    steps:
+#    - uses: actions/checkout@v3
+#    - uses: actions/setup-python@v3
+#    - uses: pre-commit/action@v3.0.0
+  
+  test:
+    name: Tests for Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.7', '3.8', '3.9', '3.10']
+      fail-fast: false
+#    needs: pre-commit
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          spacy download en_core_web_sm
+          pip install pre-commit pytest
+
+      - name: Run tests
+        run: |
+          pytest

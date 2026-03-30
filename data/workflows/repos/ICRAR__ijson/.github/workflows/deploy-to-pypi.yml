@@ -1,0 +1,159 @@
+name: Build distributions and upload to PyPI
+
+# Build on every branch push, tag push, and pull request change:
+on:
+  push:
+  pull_request:
+  schedule:
+  # 00:00 UTC every Saturday, don't bother anyone
+  - cron: '0 0 * * 6'
+
+jobs:
+
+  calculate_wheels_to_build:
+    name: Calculate OS/archs to build wheels on
+    runs-on: ubuntu-latest
+    env:
+      BUILD_TYPE: ${{ (startsWith(github.event.ref, 'refs/tags/v') || startsWith(github.event.ref, 'refs/heads/fullci_') || github.event.schedule == '0 0 * * 6') && 'FULL' || 'BASE' }}
+      ARCHS_LINUX_INTEL_BASE: '["x86_64"]'
+      ARCHS_LINUX_INTEL_FULL: '["x86_64", "i686"]'
+      ARCHS_LINUX_ARM_BASE: '["aarch64"]'
+      ARCHS_LINUX_ARM_FULL: '["aarch64"]'
+      ARCHS_MACOS_BASE: '["x86_64"]'
+      ARCHS_MACOS_FULL: '["x86_64", "arm64", "universal2"]'
+      ARCHS_WINDOWS_BASE: '["AMD64"]'
+      ARCHS_WINDOWS_FULL: '["AMD64", "x86"]'
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Calculate strategy matrix
+        shell: python
+        id: set-matrix
+        run: |
+          import json
+          import os
+
+          combinations = (
+              ("ubuntu-24.04", "ARCHS_LINUX_INTEL"),
+              ("ubuntu-24.04-arm", "ARCHS_LINUX_ARM"),
+              ("macos-14", "ARCHS_MACOS"),
+              ("windows-2025", "ARCHS_WINDOWS"),
+          )
+          build_type = os.getenv("BUILD_TYPE")
+          includes = [
+            {"os": os_name, "arch": arch}
+            for os_name, archs_envvar in combinations
+            for arch in json.loads(os.getenv(f'{archs_envvar}_{build_type}'))
+          ]
+          matrix = {"include": includes}
+          with open(os.getenv("GITHUB_OUTPUT"), "at") as github_output:
+            github_output.write(f'matrix={json.dumps(matrix)}')
+          print(f"Calculated matrix strategy:\n{json.dumps(matrix, indent=2)}")
+
+  build_wheels:
+    name: Build wheels for ${{ matrix.os }} / ${{matrix.arch}}
+    needs: calculate_wheels_to_build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix: ${{ fromJson(needs.calculate_wheels_to_build.outputs.matrix) }}
+    env:
+      CIBW_ARCHS: ${{ matrix.arch }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.0
+        with:
+          output-dir: wheelhouse
+        env:
+          CIBW_BEFORE_ALL: "bash -c 'cd \"{project}\"; sh .github/tools/install_yajl.sh'"
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_ENVIRONMENT_MACOS: "IJSON_EMBED_YAJL=1"
+          CIBW_ENVIRONMENT_WINDOWS: "IJSON_EMBED_YAJL=1"
+          CIBW_BEFORE_TEST: pip install -r test-requirements.txt
+          CIBW_TEST_COMMAND: "bash -c 'cd \"{project}\"; pytest -vv'"
+          # Our C extension made PyPy < 7.3.13 crash (a bug on their end)
+          # it doesn't make sense to build wheels for platforms not supported
+          # not supported by that version
+          CIBW_SKIP: pp{39}*
+          CIBW_ENABLE: pypy cpython-freethreading
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: '3.13'
+
+      - name: Install build
+        run: pip install build
+
+      - name: Build sdist
+        run: python -m build -s
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source-dist
+          path: dist/*.tar.gz
+
+  test_sdist:
+    name: Check source distribution is usable
+    needs: [build_sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        name: Install Python
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: source-dist
+
+      - name: Extract source distribution
+        run: tar xvf ijson*.tar.gz && rm ijson*.tar.gz
+
+      - name: Install source distribution
+        run: pip install ./ijson*
+
+      - name: Install test dependencies
+        run: pip install pytest cffi
+
+      - name: Run source distribution tests
+        run: cd ijson* && pytest
+
+  merge_artifacts:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v7
+        with:
+          name: all-artifacts
+
+  upload_pypi:
+    needs: [merge_artifacts]
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: all-artifacts
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@master
+        with:
+          user: __token__
+          password: ${{ secrets.pypi_password }}

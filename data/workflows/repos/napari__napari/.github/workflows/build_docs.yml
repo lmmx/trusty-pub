@@ -1,0 +1,29 @@
+name: Build PR Docs
+
+on:
+  push:
+    branches:
+      - docs
+    tags:
+      - 'v*'
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - '.github/workflows/build_docs.yml'
+      - 'resources/constraints/*docs*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_docs:
+    uses: napari/shared-workflows/.github/workflows/build_docs.yml@main
+    secrets: inherit
+    with:
+      main-repo: ${{ github.repository }}
+      main-ref: ${{ github.sha }}
+      docs-repo: napari/docs
+      docs-ref: main
+      make_target: "html"

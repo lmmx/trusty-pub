@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        python:
+          - "3.8"
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+        django:
+          - "3.2.23"
+          - "4.2.9"
+          - "5.0.1"
+        drf:
+          - "no"
+          - "3.14.0"
+        exclude:
+          - python: "3.8"
+            django: "5.0.1"
+          - python: "3.9"
+            django: "5.0.1"
+          - python: "3.12"
+            django: "3.2.23"
+
+    name: "Python ${{ matrix.python }} - Django ${{ matrix.django }} - DRF ${{ matrix.drf }}"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Dependencies
+        run: |
+          pip install -r ci/requirements.txt
+          pip install --upgrade "Django==${{ matrix.django }}"
+          if [[ "$DRF_VERSION" != "no" ]]; then pip install --upgrade djangorestframework==${DRF_VERSION}; fi
+        env:
+          DRF_VERSION: ${{ matrix.drf }}
+      - name: Run Tests
+        run: python runtests.py

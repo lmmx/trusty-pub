@@ -1,0 +1,24 @@
+name: publish rc version
+
+on:
+  workflow_dispatch:
+    inputs:
+      tagName:
+        description: "Tag Name (e.g., 1.0.0-rc1)"
+        required: true
+      commitSha:
+        description: "Commit Sha to build the package (e.g. 32a0afd7)"
+        required: false
+        default: ""
+
+jobs:
+  publish-rc:
+    uses: benbenbang/types-confluent-kafka/.github/workflows/publishrc.yml@main
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    with:
+      tagName: ${{ github.event.inputs.tagName }}
+      commitSha: ${{ github.event.inputs.commitSha }}
+    secrets: inherit

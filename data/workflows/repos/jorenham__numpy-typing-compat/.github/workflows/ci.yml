@@ -1,0 +1,68 @@
+name: CI
+permissions: read-all
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: dprint
+        uses: dprint/check@v2.3
+
+      - name: ruff check
+        uses: astral-sh/ruff-action@v3.6.1
+        with:
+          args: "check --preview --output-format=github"
+
+      - name: ruff
+        uses: astral-sh/ruff-action@v3.6.1
+        with:
+          args: "format --preview --check --diff"
+
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: astral-sh/setup-uv@v7.3.0
+        with:
+          activate-environment: true
+          cache-dependency-glob: build.py.lock
+
+      - name: install dependencies
+        run: uv export --script build.py | uv pip sync -
+
+      - name: ty
+        run: uvx ty check
+
+      - name: basedpyright
+        run: uvx basedpyright
+
+      - name: mypy
+        run: uvx --with jinja2 mypy --strict .
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: astral-sh/setup-uv@v7.3.0
+        with:
+          cache-dependency-glob: build.py.lock
+
+      - name: build
+        run: uv run build.py

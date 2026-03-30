@@ -1,0 +1,81 @@
+---
+name: "CI"
+on: # yamllint disable
+  workflow_call:
+    inputs:
+      runs-on:
+        description: "The OS to run the job on"
+        required: false
+        default: "ubuntu-latest"
+        type: string
+      all-tests:
+        description: "Test all versions of Nautobot and Python"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  changelog:
+    # Disable for develop branch
+    # Disable for main branch
+    # Disable for LTM branches
+    # Disable for Next branches
+    # Disable for Release branches
+    # Disable for manual CI runs
+    # Disable for scheduled CI runs
+    if: >
+      (github.head_ref != 'develop')
+      && (github.head_ref != 'main')
+      && (!startsWith(github.head_ref, 'ltm'))
+      && (!startsWith(github.head_ref, 'next'))
+      && (!startsWith(github.head_ref, 'release'))
+      && (github.event_name != 'workflow_dispatch')
+      && (github.event_name != 'schedule')
+    runs-on: "${{ inputs.runs-on }}"
+    steps:
+      - name: "Check out repository code"
+        uses: "actions/checkout@v4"
+        with:
+          fetch-depth: "0"
+      - name: "Setup environment"
+        uses: "networktocode/gh-action-setup-poetry-environment@v6"
+      - name: "Check for changelog entry"
+        run: |
+          git fetch --no-tags origin +refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}
+          poetry run towncrier check --compare-with origin/${{ github.base_ref }}
+  tests_partial:
+    # Only run the tests for a subset of versions of Nautobot and Python
+    if: ${{ inputs.all-tests == false }}
+    uses: ./.github/workflows/tests.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.12"
+        nautobot-version:
+          - "3.0"
+    with:
+      runs-on: "${{ inputs.runs-on }}"
+      python-version: "${{ matrix.python-version }}"
+      nautobot-version: "${{ matrix.nautobot-version }}"
+  tests_full:
+    # Run the tests for all supported versions of Nautobot and Python
+    if: ${{ inputs.all-tests == true }}
+    uses: ./.github/workflows/tests.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+        nautobot-version:
+          - "2.4"
+          - "stable"
+          - "3.0"
+    with:
+      runs-on: "${{ inputs.runs-on }}"
+      python-version: "${{ matrix.python-version }}"
+      nautobot-version: "${{ matrix.nautobot-version }}"

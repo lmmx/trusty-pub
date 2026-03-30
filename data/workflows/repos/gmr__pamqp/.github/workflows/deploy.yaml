@@ -1,0 +1,22 @@
+name: Deployment
+on:
+  push:
+    branches-ignore: ["*"]
+    tags: ["*"]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && github.repository == 'gmr/pamqp'
+    container: python:3.10-alpine
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v1
+      - name: Install wheel
+        run: pip3 install wheel
+      - name: Build package
+        run: python3 setup.py sdist bdist_wheel
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_PASSWORD }}

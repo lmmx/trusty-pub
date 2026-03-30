@@ -1,0 +1,157 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types:
+      - published
+  schedule:
+    - cron: "0 0 * * 0"
+
+
+jobs:
+  build-devcontainer:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout (GitHub)
+        uses: actions/checkout@v6
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and run Dev Container task
+        uses: devcontainers/ci@v0.3
+        with:
+          imageName: ghcr.io/systemrdl/peakrdl-markdown/devcontainer
+          cacheFrom: ghcr.io/systemrdl/peakrdl-markdown/devcontainer
+          push: always
+
+  test:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version:
+          - "3.7"
+          - "3.8"
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Poetry
+        run: pipx install poetry
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "poetry"
+
+      - name: Install dependencies
+        run: poetry install --only main,test
+
+      - name: Test
+        run: poetry run pytest test/ --cov=peakrdl_markdown --cov-report=term --cov-report=xml:output/coverage/cov.xml --cov-report=html:output/coverage/html
+
+      - name: Coveralls
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "repo_token: ${GITHUB_TOKEN}" > .coveralls.yml
+          poetry run coveralls --service=github
+
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tool:
+          - "black --check --diff"
+          - "isort --check --diff"
+          - "mypy"
+          - "pydocstyle"
+          - "ruff check"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Poetry
+        run: pipx install poetry
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "poetry"
+      - name: Install dependencies
+        run: poetry install --only main,lint
+      - name: Run formatter
+        run: poetry run ${{ matrix.tool }} src/ test/
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: "Dependency Review"
+        uses: actions/dependency-review-action@v4
+        with:
+          allow-ghsas: GHSA-jfmj-5v4g-7637
+
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Poetry
+        run: pipx install poetry
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "poetry"
+      - name: Install dependencies
+        run: poetry install --only main,doc
+      - name: Build docs
+        run: poetry run make -C docs/ html
+      - name: Upload the built documentation
+        uses: actions/upload-artifact@v5
+        with:
+          name: documentation
+          path: docs/_build/
+
+  build-publish:
+    needs:
+      - build-docs
+      - lint
+      - test
+    if: github.event_name == 'release'
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Poetry
+        run: pipx install poetry
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "poetry"
+      - name: Build the package
+        run: poetry build
+      - name: Upload the built package
+        uses: actions/upload-artifact@v5
+        with:
+          name: package
+          path: dist/*
+      - name: Publish the package
+        run: |
+          poetry config http-basic.pypi __token__ ${{ secrets.PYPI_PASSWORD }}
+          poetry publish --skip-existing

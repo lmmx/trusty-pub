@@ -1,0 +1,24 @@
+name: Docs
+on:
+  push:
+    branches: [main]
+
+jobs:
+  docs:
+    name: Deploy docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Install a specific version of uv.
+          version: "0.6.9"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Deploy docs
+        run: uv run mkdocs gh-deploy --force

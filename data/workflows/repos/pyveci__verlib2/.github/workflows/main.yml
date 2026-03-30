@@ -1,0 +1,89 @@
+---
+name: Tests
+
+on:
+  pull_request: ~
+  push:
+    branches: [ main ]
+
+  # Allow job to be triggered manually.
+  workflow_dispatch:
+
+# Cancel in-progress jobs when pushing to the same branch.
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+
+  tests:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-22.04"]
+        python-version: [
+          "3.7",
+          "3.8",
+          "3.9",
+          "3.10",
+          "3.11",
+          "3.12",
+          "3.13",
+          "3.14",
+        ]
+
+    env:
+      OS: ${{ matrix.os }}
+      PYTHON: ${{ matrix.python-version }}
+
+    name: Python ${{ matrix.python-version }} on OS ${{ matrix.os }}
+    steps:
+
+    - name: Acquire sources
+      uses: actions/checkout@v6
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        architecture: x64
+        cache: 'pip'
+        cache-dependency-path: 'pyproject.toml'
+
+    - name: Set up project (Python 3.6)
+      if: matrix.python-version == '3.6' || matrix.python-version == 'pypy-3.6'
+      run: |
+        # Install requirements for testing.
+        pip install --requirement requirements-test.txt
+
+    - name: Set up project (Python 3.7+)
+      if: matrix.python-version != '3.6' && matrix.python-version != 'pypy-3.6'
+      run: |
+        # `setuptools 0.64.0` adds support for editable install hooks (PEP 660).
+        # https://github.com/pypa/setuptools/blob/main/CHANGES.rst#v6400
+        pip install "setuptools>=64" --upgrade
+
+        # Install package in editable mode.
+        pip install --use-pep517 --prefer-binary --editable=.[develop,test]
+
+    - name: Check code style
+      if: matrix.python-version != '3.6' && matrix.python-version != 'pypy-3.6'
+      run: |
+        poe lint
+
+    - name: Run software tests
+      run: |
+        poe test
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      with:
+        files: ./coverage.xml
+        flags: unittests
+        env_vars: OS,PYTHON
+        name: codecov-umbrella
+        fail_ci_if_error: true

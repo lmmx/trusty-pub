@@ -1,0 +1,71 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  test:
+    name: Test (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+    container:
+      image: python:${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@master
+        with:
+          fetch-depth: 0
+      - name: Commit Linter
+        uses: wagoid/commitlint-github-action@v5
+      - id: install
+        name: Install requirements
+        run: |
+          pip install clinner pip poetry --upgrade
+          python make install
+      - id: black
+        name: Code format checking
+        run: python make black --check .
+      - id: isort
+        name: Imports order checking
+        run: python make isort --check .
+      - id: ruff
+        name: Code lint
+        run: python make ruff .
+      - id: tests
+        name: Tests
+        run: python make test
+  release:
+    needs: test
+    name: Release a new version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@master
+      - name: Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+      - id: install
+        name: Install requirements
+        run: |
+          pip install clinner pip poetry --upgrade
+          python make install
+      - id: semantic
+        name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v3
+        with:
+          extra_plugins: |
+            semantic-release-gitmoji@1.5.0
+            @semantic-release/changelog
+            @semantic-release/exec
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+      - name: New release published
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: |
+          echo "New version: ${{ steps.semantic.outputs.new_release_version }}"

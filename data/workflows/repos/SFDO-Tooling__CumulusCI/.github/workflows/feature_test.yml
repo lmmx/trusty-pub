@@ -1,0 +1,136 @@
+name: Feature Test
+
+on:
+    workflow_dispatch:
+    pull_request:
+        types: [opened, synchronize, reopened] # Default
+    push:
+        branches:
+            - main
+
+jobs:
+    lint:
+        name: Lint
+        if: ${{ contains(fromJSON('["workflow_dispatch", "pull_request"]'), github.event_name) }}
+        uses: SFDO-Tooling/.github/.github/workflows/pre-commit.yml@main
+    docs:
+        name: Build Docs
+        if: ${{ github.event_name == 'pull_request' }}
+        runs-on: SFDO-Tooling-Ubuntu
+        steps:
+            - name: "Checkout"
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 1
+            - name: Set up Python 3.11
+              id: py
+              uses: actions/setup-python@v4
+              with:
+                  python-version: 3.11
+            - name: Set up uv
+              uses: SFDO-Tooling/setup-uv@main
+              with:
+                  version: "0.8.4"
+                  enable-cache: true
+            - name: Install dependencies
+              run: uv sync --group docs
+            - name: Build Docs
+              run: |
+                  cd docs
+                  uv run sphinx-build -b html . ./_build
+
+    unit_tests:
+        name: "Unit tests: ${{ matrix.os }}-${{ matrix.python-version }}"
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [macos-latest, SFDO-Tooling-Ubuntu, SFDO-Tooling-Windows]
+                python-version: ["3.11", "3.12", "3.13"]
+        steps:
+            - uses: actions/checkout@v4
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: "${{ matrix.python-version }}"
+            - name: Set up uv
+              uses: SFDO-Tooling/setup-uv@main
+              with:
+                  version: "0.8.4"
+                  enable-cache: true
+            - name: Install dependencies
+              run: uv sync -p ${{ matrix.python-version }}
+            - name: Run Pytest
+              run: uv run pytest --cov-report= --cov=cumulusci
+
+    unit_tests_opt_deps:
+        name: "Unit tests with optional dependencies: ${{ matrix.os }}-${{ matrix.python-version }}"
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [macos-latest, SFDO-Tooling-Ubuntu, SFDO-Tooling-Windows]
+                python-version: ["3.11", "3.12", "3.13"]
+        steps:
+            - uses: actions/checkout@v4
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: "${{ matrix.python-version }}"
+            - name: Set up uv
+              uses: SFDO-Tooling/setup-uv@main
+              with:
+                  version: "0.8.4"
+                  enable-cache: true
+            - name: Install dependencies
+              run: uv sync --all-extras -p ${{ matrix.python-version }}
+            - name: Run Pytest
+              run: uv run pytest --cov-report= --cov=cumulusci
+
+    robot_api:
+        name: "Robot: No browser"
+        runs-on: SFDO-Tooling-Ubuntu
+        steps:
+            - uses: actions/checkout@v4
+            - name: Set up Python 3.11
+              uses: actions/setup-python@v4
+              with:
+                  python-version: 3.11
+            - name: Set up uv
+              uses: SFDO-Tooling/setup-uv@main
+              with:
+                  version: "0.8.4"
+                  enable-cache: true
+            - name: Install dependencies
+              run: uv sync -p 3.11
+            - name: Install sfdx
+              run: |
+                  mkdir sfdx
+                  wget -qO- https://developer.salesforce.com/media/salesforce-cli/sf/channels/stable/sf-linux-x64.tar.xz | tar xJ -C sfdx --strip-components 1
+                  echo $(realpath sfdx/bin) >> $GITHUB_PATH
+            - name: Authenticate Dev Hub
+              run: |
+                  sf plugins --core
+                  echo $SFDX_HUB_KEY_BASE64 | base64 --decode > sfdx.key
+                  sf org login jwt --client-id $SFDX_CLIENT_ID --jwt-key-file sfdx.key --username $SFDX_HUB_USERNAME --setdefaultdevhubusername -a hub
+              env:
+                  SFDX_HUB_KEY_BASE64: ${{ secrets.SFDX_HUB_KEY_BASE64 }}
+                  SFDX_CLIENT_ID: ${{ secrets.SFDX_CLIENT_ID }}
+                  SFDX_HUB_USERNAME: ${{ secrets.SFDX_HUB_USERNAME }}
+            - name: Run robot tests
+              run: |
+                  uv run cci task run robot \
+                    --org dev \
+                    -o name "CumulusCI" \
+                    -o suites cumulusci/robotframework/tests \
+                    -o include no-browser
+            - name: Delete scratch org
+              if: always()
+              run: |
+                  uv run cci org scratch_delete dev
+            - name: Store robot results
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: robot
+                  path: robot/CumulusCI/results

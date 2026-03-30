@@ -1,0 +1,26 @@
+name: Build & Deploy Docs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-docs:
+    uses: ./.github/workflows/build-docs.yml
+    secrets: inherit
+
+  deploy-docs:
+    needs: [build-docs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
+      - name: Deploy
+        uses: JamesIves/github-pages-deploy-action@v4.6.4
+        with:
+          repository-name: dstackai/dstackai.github.io
+          branch: gh-pages
+          token: ${{ secrets.GH_TOKEN }}
+          folder: site

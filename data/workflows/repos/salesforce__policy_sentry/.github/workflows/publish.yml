@@ -1,0 +1,107 @@
+# .github/workflows/publish.yml
+
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          activate-environment: true
+      - run: uv sync --frozen
+
+      - run: just build-package
+      - run: just type-check
+      - run: just unit-tests
+      - run: just integration-tests
+
+  publish-package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          activate-environment: true
+      - run: uv sync --frozen
+
+      - name: prepare python package
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git fetch --tags
+          git pull origin master
+
+      - run: just build-package
+      - run: just validate-sdist
+      - run: just validate-wheel
+
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          password: ${{ secrets.PYPI_PASSWORD }}
+
+  update-brew:
+    needs: publish-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version-file: '.python-version'
+      - name: publish brew
+        run: |
+          sleep 5m
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          pip install homebrew-pypi-poet
+          pip install policy_sentry -U
+          git fetch origin
+          git checkout --track origin/master
+          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)")
+          echo "latest tag: $latest_tag"
+          git pull origin "$latest_tag"
+          poet -f policy_sentry > HomebrewFormula/policy_sentry.rb
+          git add .
+          git commit -m "update brew formula" policy_sentry/bin/cli.py HomebrewFormula/policy_sentry.rb || echo "No brew changes to commit"
+          git push -u origin master
+
+  bump-version:
+    needs: update-brew
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: master
+
+      - name: Bump version
+        run: |
+          version_file="policy_sentry/bin/version.py"
+
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git fetch --tags
+          git pull origin master
+          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)")
+          echo "latest tag: $latest_tag"
+          new_tag=$(echo "$latest_tag" | awk -F. -v a="$1" -v b="$2" -v c="$3" '{printf("%d.%d.%d", $1+a, $2+b , $3+1)}')
+          echo "new tag: $new_tag"
+
+          printf "# pylint: disable=missing-module-docstring\n__version__ = \"%s\"\n""" "$new_tag" > $version_file
+
+          git commit -m "Bump to ${new_tag}"  $version_file || echo "No changes to commit"
+          git push origin

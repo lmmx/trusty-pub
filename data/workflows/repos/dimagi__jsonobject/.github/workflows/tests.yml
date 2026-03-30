@@ -1,0 +1,53 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: jsonobject tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Read Python versions from pyproject.toml
+      id: read-versions
+      # produces output like: python_versions=[ "3.9", "3.10", "3.11", "3.12" ]
+      run: >-
+        echo "python_versions=$(
+        grep -oP '(?<=Language :: Python :: )\d\.\d+' pyproject.toml
+        | jq --raw-input .
+        | jq --slurp .
+        | tr '\n' ' '
+        )" >> $GITHUB_OUTPUT
+    outputs:
+      python_versions: ${{ steps.read-versions.outputs.python_versions }}
+
+  build:
+    needs: [configure]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(needs.configure.outputs.python_versions) }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -e .
+    - name: Run tests
+      run: |
+        python -m unittest
+    - name: Test cython files
+      run: |
+        scripts/install_cython.sh
+        scripts/test_cython_files.sh

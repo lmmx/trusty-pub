@@ -1,0 +1,58 @@
+name: test-neo42-py35+
+
+on:
+  push:
+    branches: [ master ]
+    paths-ignore: ['docs/**']
+  pull_request:
+    branches: [ master ]
+    paths-ignore: ['docs/**']
+
+jobs:
+  test:
+
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version: ["3.5", "3.6", "3.7", "3.8", "3.9"]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - uses: actions/setup-java@v1
+      with:
+        java-version: '8.0.x'
+        java-package: jdk
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip wheel
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Perform legal checks
+      run: bin/check-legal
+
+    - name: Perform installation check
+      run: bin/check-install
+
+    - name: Run tests
+      run: bin/test -v -x
+      env:
+        NEO4J_VERSION: '4.2'
+
+    - name: Set up Python for coverage
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.12
+    - name: Create lcov coverage report
+      run: |
+        pip install coverage
+        coverage lcov --rcfile="test/.coveragerc"
+    - name: Upload coverage
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        path-to-lcov: coverage.lcov

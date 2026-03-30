@@ -1,0 +1,97 @@
+name: api
+run-name: Zabbix API integration test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**api.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**api.py'
+  workflow_dispatch:
+
+env:
+  ZABBIX_BRANCH: master
+  CONFIG_PATH: .github/configs/
+  SYNC_FILE: integration_api_test.py
+  ASYNC_FILE: integration_aioapi_test.py
+
+jobs:
+  integration:
+    name: Integration test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: |
+          sudo apt update && sudo apt install -y git sudo gcc make automake pkg-config postgresql-16 libpostgresql-ocaml-dev libxml2-dev libpcre3-dev libevent-dev apache2 libapache2-mod-php php8.3-pgsql php8.3-bcmath php8.3-xml php8.3-gd php8.3-ldap php8.3-mbstring libzip-dev
+      - name: Build from sources
+        run: |
+          WORKDIR=$(pwd)
+          cd /tmp/
+          git -c advice.detachedHead=false clone https://git.zabbix.com/scm/zbx/zabbix.git --branch ${{ env.ZABBIX_BRANCH }} --depth 1 --single-branch /tmp/zabbix-branch
+          cd /tmp/zabbix-branch
+          ./bootstrap.sh
+          ./configure --enable-server --with-postgresql
+          sudo make dbschema_postgresql
+          echo -e "CacheUpdateFrequency=1\n" >> ./conf/zabbix_server.conf
+          cd ui
+          sudo rm /var/www/html/index.html
+          sudo cp -a . /var/www/html/
+          sudo cp $WORKDIR/${{ env.CONFIG_PATH }}/zabbix.conf.php /var/www/html/conf/
+          sudo cp $WORKDIR/${{ env.CONFIG_PATH }}/pg_hba.conf /etc/postgresql/16/main/pg_hba.conf
+          sudo chown -R www-data:www-data /var/www/html/
+          sudo sed -i "s/post_max_size = 8M/post_max_size = 16M/g" /etc/php/8.3/apache2/php.ini
+          sudo sed -i "s/max_execution_time = 30/max_execution_time = 300/g" /etc/php/8.3/apache2/php.ini
+          sudo sed -i "s/max_input_time = 60/max_input_time = 300/g" /etc/php/8.3/apache2/php.ini
+          sudo locale-gen en_US.UTF-8
+          sudo update-locale
+      - name: Prepare environment
+        run: |
+          sudo addgroup --system --quiet zabbix
+          sudo adduser --quiet --system --disabled-login --ingroup zabbix --home /var/lib/zabbix --no-create-home zabbix
+          sudo mkdir -p /var/run/postgresql/16-main.pg_stat_tmp
+          sudo touch /var/run/postgresql/16-main.pg_stat_tmp/global.tmp
+          sudo chmod 0777 /var/run/postgresql/16-main.pg_stat_tmp/global.tmp
+          (sudo -u postgres /usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main -c config_file=/etc/postgresql/16/main/postgresql.conf)&
+          sleep 1
+          cd /tmp/zabbix-branch/database/postgresql
+          sudo -u postgres createuser zabbix
+          sudo -u postgres createdb -O zabbix -E Unicode -T template0 zabbix
+          cat schema.sql | sudo -u zabbix psql zabbix
+          cat images.sql | sudo -u zabbix psql zabbix
+          cat data.sql | sudo -u zabbix psql zabbix
+          sudo apache2ctl start
+      - name: Install python3
+        run: |
+          sudo apt-get install -y python3 python3-pip python-is-python3
+          pip install -r ./requirements.txt
+      - name: Wait for Zabbix API
+        run: |
+          python ./.github/scripts/wait_instance_zabbix.py
+      - name: Print Zabbix version
+        continue-on-error: true
+        run: |
+          grep -Po "(?<=Changes for ).*$" /tmp/zabbix-branch/ChangeLog 2>/dev/null | head -n1
+      - name: Integration synchronous test
+        continue-on-error: true
+        run: |
+          python ./.github/scripts/$SYNC_FILE 2>/tmp/integration_sync.log >/dev/null
+      - name: Integration asynchronous test
+        continue-on-error: true
+        run: |
+          python ./.github/scripts/$ASYNC_FILE 2>/tmp/integration_async.log >/dev/null
+      - name: Send report
+        env:
+          TBOT_TOKEN: ${{ secrets.TBOT_TOKEN }}
+          TBOT_CHAT: ${{ vars.TBOT_CHAT }}
+          SUBJECT: Zabbix API integration test FAIL
+        run: |
+          err=0
+          tail -n1 /tmp/integration_sync.log | grep "OK" 1>/dev/null || tail /tmp/integration_sync.log | python ./.github/scripts/telegram_msg.py 2>/dev/null | err=1
+          tail -n1 /tmp/integration_async.log | grep "OK" 1>/dev/null || tail /tmp/integration_async.log | python ./.github/scripts/telegram_msg.py 2>/dev/null | err=1
+          if [ "$err" = 1 ]; then exit 1; fi
+

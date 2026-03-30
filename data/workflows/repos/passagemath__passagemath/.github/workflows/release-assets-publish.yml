@@ -1,0 +1,53 @@
+name: Publish to Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag'
+        required: true
+      run-id:
+        description: 'Workflow run id'
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      run-id:
+        type: string
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release_dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.inputs.run-id || inputs.run-id || github.run_id }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.inputs.run-id || inputs.run-id || github.run_id }}
+
+      - run: |
+          gh release upload -R ${{ github.repository }} ${{ inputs.tag }} dist/* --clobber
+          status=0
+          for a in upstream/*; do
+              gh release upload -R ${{ github.repository }} ${{ inputs.tag }} $a || gh release upload -R ${{ github.repository }} ${{ inputs.tag }} $a --clobber || status=1
+              sleep 5
+          done
+          exit $status
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+    permissions:
+      contents: write

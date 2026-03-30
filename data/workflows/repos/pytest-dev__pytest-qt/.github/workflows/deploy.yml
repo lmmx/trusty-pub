@@ -1,0 +1,44 @@
+name: deploy
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and Check Package
+        uses: hynek/build-and-inspect-python-package@v2.15
+
+  deploy:
+    needs: [package]
+
+    if: github.repository == 'pytest-dev/pytest-qt'
+
+    runs-on: ubuntu-latest
+    environment: deploy
+
+    permissions:
+      id-token: write  # For PyPI trusted publishers.
+      contents: write  # For release.
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Download Package
+      uses: actions/download-artifact@v8
+      with:
+        name: Packages
+        path: dist
+
+    - name: Publish package to PyPI
+      uses: pypa/gh-action-pypi-publish@v1.13.0
+
+    - name: GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/*

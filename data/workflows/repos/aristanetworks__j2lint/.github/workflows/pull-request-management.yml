@@ -1,0 +1,64 @@
+---
+name: Code Testing
+"on":
+  push:
+    branches:
+      - devel
+  pull_request:
+
+jobs:
+  lint:
+    name: Run pylint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install tox tox-gh-actions
+      - name: "Run lint"
+        run: tox -e lint
+  type:
+    name: Run pyright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install tox tox-gh-actions
+      - name: "Run pyright"
+        run: tox -e type
+  tox:
+    name: Run pytest for supported Python versions
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install dependencies
+        run: pip install tox tox-gh-actions
+      - name: "Run tox for ${{ matrix.python }}"
+        run: tox
+      - name: Upload coverage from pytest
+        # Coverage only runs as part of 3.11.
+        if: |
+          matrix.python == '3.11'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-coverage
+          path: ${{ github.workspace }}/coverage.xml
+  codecov:
+    name: Upload coverage to codecov
+    needs: [tox]
+    if: github.repository == 'aristanetworks/j2lint'
+    uses: ./.github/workflows/codecov.yml

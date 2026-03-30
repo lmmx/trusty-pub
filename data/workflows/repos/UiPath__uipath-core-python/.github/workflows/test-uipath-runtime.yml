@@ -1,0 +1,55 @@
+name: Test UiPath Runtime
+
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened, labeled ]
+
+jobs:
+  test-uipath-runtime:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [ "3.11", "3.12", "3.13" ]
+        os: [ ubuntu-latest, windows-latest ]
+
+    permissions:
+      contents: read
+
+    # Only run if PR has the test:uipath-runtime label
+    if: contains(github.event.pull_request.labels.*.name, 'test:uipath-runtime')
+
+    steps:
+      - name: Checkout uipath-core-python
+        uses: actions/checkout@v4
+        with:
+          path: 'uipath-core-python'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build uipath-core package
+        working-directory: uipath-core-python
+        run: uv build
+
+      - name: Checkout uipath-runtime-python
+        uses: actions/checkout@v4
+        with:
+          repository: 'UiPath/uipath-runtime-python'
+          path: 'uipath-runtime-python'
+
+      - name: Update uipath-core version
+        shell: bash
+        working-directory: uipath-runtime-python
+        run: uv add ../uipath-core-python/dist/*.whl --dev
+
+      - name: Run uipath tests
+        working-directory: uipath-runtime-python
+        run: |
+          uv sync --all-extras
+          uv run pytest
+

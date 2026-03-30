@@ -1,0 +1,30 @@
+name: "Check docs and links"
+on:
+- pull_request
+- push
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    # - uses: ammaraskar/sphinx-action@master
+    # Using fork of sphinx-action to support python version > 3.9
+    # As sphinx-action not updated the sphinx docker image it uses
+    - uses: erpcya/sphinx-action@feature/#update-sphinx-base-image
+      with:
+        docs-folder: "docs/"
+        pre-build-command: |
+          pip3 install --upgrade pip
+          sphinx-apidoc -f grafanalib -o docs/api
+          python3 setup.py install --user
+        build-command: "make html"
+
+    - name: Link Checker
+      id: lc
+      uses: lycheeverse/lychee-action@v1.10.0
+      with:
+        args: --verbose **/*.html
+    - name: Fail if there were link errors
+      run: exit ${{ steps.lc.outputs.exit_code }}

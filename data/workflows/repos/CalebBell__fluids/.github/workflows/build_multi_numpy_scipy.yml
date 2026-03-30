@@ -1,0 +1,52 @@
+name: Build-Test-Multi-Scipy-Numpy
+on:
+  push:
+    branches: [release]
+  pull_request:
+    branches: [master, release]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/release' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        numpy: ['2.0.1']
+        scipy: ['1.14.0']
+        python-version: ['3.10']
+        os: [ubuntu-latest]
+        architecture: ['x64']
+        include:
+          - numpy: '1.24.4'
+            scipy: '1.9.3'
+            python-version: '3.10'
+          - numpy: '1.24.4'
+            scipy: '1.12.0'
+            python-version: '3.9'
+          - numpy: '1.26.4'
+            scipy: '1.10.1'
+            python-version: '3.9'
+          - numpy: '1.26.4'
+            scipy: '1.12.0'
+            python-version: '3.9'
+          - numpy: '1.26.4'
+            scipy: '1.14.0'
+            python-version: '3.10'
+          - numpy: '2.0.1'
+            scipy: '1.14.0'
+            python-version: '3.10'
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: "pyproject.toml"
+    - name: Install Just
+      uses: extractions/setup-just@v2
+    - name: Run tests with specific Python/NumPy/SciPy versions
+      run: just test-multi-single ${{ matrix.python-version }} ${{ matrix.numpy }} ${{ matrix.scipy }}

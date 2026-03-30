@@ -1,0 +1,84 @@
+[files]
+extend-exclude = ["*.eps", "pyomo/tpl/"]
+
+[default.extend-words]
+# Ignore IDAES
+IDAES = "IDAES"
+idaes = "idaes"
+# Ignore datas
+Datas = "Datas"
+datas = "datas"
+# Ignore ND
+ND = "ND"
+nd = "nd"
+# Ignore INOUT
+inout = "inout"
+INOUT= "INOUT"
+# Ignore MAYBEE from examples
+MAYBEE = "MAYBEE"
+# Ignore conext for constraint-external
+conext = "conext"
+# Ignore AFE (affine expression) from MOSEK vernacular
+afe = "afe"
+# Ignore Fo from PyNumero tests
+Fo = "Fo"
+# Ignore ba from contrib
+ba = "ba"
+# Ignore complimentarity from interior_point
+complimentarity = "complimentarity"
+# Ignore from "number of inputs" from core
+nin = "nin"
+# sisser CUTEr instance
+sisser = "sisser"
+# LAF
+LAF = "LAF"
+# caf
+caf = "caf"
+# WRONLY
+WRONLY = "WRONLY"
+# Ignore the name Hax
+Hax = "Hax"
+# Ignore dout (short for dual output in SAS solvers)
+dout = "dout"
+# Big Sur
+Sur = "Sur"
+# contrib package named mis and the acronym whence the name comes
+mis = "mis"
+MIS = "MIS"
+# Ignore the shorthand ans for answer
+ans = "ans"
+# Ignore the keyword arange
+arange = "arange"
+# Ignore IIS
+IIS = "IIS"
+iis = "iis"
+# Ignore PN
+PN = "PN"
+# Ignore hd
+hd = "hd"
+# Ignore opf
+opf = "opf"
+# Ignore FRE
+FRE = "FRE"
+# Ignore MCH
+MCH = "MCH"
+# Ignore RO
+ro = "ro"
+RO = "RO"
+# Ignore EOF - end of file
+EOF = "EOF"
+# Ignore lst as shorthand for list
+lst = "lst"
+# Abbreviation of gamma (used in stochpdegas1_automatic.py)
+gam = "gam"
+# Regex search term from contrib/solver/solvers/ipopt
+ond = "ond"
+# GAMS_writer
+PATHC = "PATHC"
+# Bimap - tries to correct to Bitmap
+Bimap = "Bimap"
+# cmo - tries to correct to com
+cmo = "cmo"
+# Substituters
+Substituters = "Substituters"
+# AS NEEDED: Add More Words Below

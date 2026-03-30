@@ -1,0 +1,42 @@
+name: build
+run-name: Build package
+
+on:
+  workflow_call:
+    inputs:
+      upload:
+        type: boolean
+        required: false
+        default: false
+        description: Upload build artifacts
+      ref:
+        type: string
+        description: Tag to build
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.9.1
+        with:
+          pixi-version: v0.59.0
+          cache: true
+
+      - name: Build package
+        run: |
+          eval "$(pixi shell-hook)"
+          HATCH_BUILD_HOOKS_ENABLE=true hatch build
+
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+        if: ${{ inputs.upload }}

@@ -1,0 +1,159 @@
+name: sdl
+permissions: read-all
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - release_v*
+  pull_request:
+
+jobs:
+  bandit:
+    name: Bandit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.10.14
+      - name: Install bandit
+        run: pip install bandit[toml]==1.9.2
+      - name: Run bandit
+        run: bandit -c pyproject.toml -r .
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          lfs: true
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@38697555549f1db7851b81482ff19f1fa5c4fedc # v4.34.1
+        with:
+          languages: python
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@38697555549f1db7851b81482ff19f1fa5c4fedc # v4.34.1
+        with:
+          category: "/language:python"
+
+      # pdf reports always empty for pull_request
+      - name: Generate Security Report
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: rsdmike/github-security-report-action@a149b24539044c92786ec39af8ba38c93496495d # v3.0.4
+        with:
+          template: report
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Rename Report
+        shell: bash
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          DATE=$(date +"%Y-%m-%d")
+          REF_NAME="${{ github.ref_name }}"
+          mv "report.pdf" "codeql_nncf_report_${DATE}_${REF_NAME//\//-}_${{ github.sha }}.pdf"
+      - name: Upload CodeQL Artifacts
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f #v7.0.0
+        with:
+          name: codeql-scan-results
+          path: "./codeql*.pdf"
+
+  trivy:
+    name: Trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Skip trivy for PRs to avoid blocking merge PRs by found vulnerabilities in requirements
+    if: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run trivy
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: "fs"
+          scan-ref: .
+          scanners: "misconfig,license,vuln"
+          format: template
+          template: "@.github/scripts/trivy_html.tpl"
+          output: trivy_report.html
+          cache: false
+          hide-progress: true
+          exit-code: 1
+      - name: Rename Report
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          DATE=$(date +"%Y-%m-%d")
+          REF_NAME="${{ github.ref_name }}"
+          mv "trivy_report.html" "trivy_report_${DATE}_${REF_NAME//\//-}_${{ github.sha }}.html"
+      - name: Upload Scan Results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f #v7.0.0
+        with:
+          name: trivy-report
+          path: "./trivy_report*.html"
+          retention-days: 30
+
+  antivirus:
+    name: Antivirus
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          lfs: true
+      - name: Get changed files
+        if: ${{ github.event_name == 'pull_request' }}
+        id: changed-files
+        uses: tj-actions/changed-files@22103cc46bda19c2b464ffe86db46df6922fd323 # v47.0.5
+      - name: Run ClamAV scan
+        id: run-clamav
+        uses: docker://clamav/clamav:stable
+        with:
+          entrypoint: sh
+          args: |
+            -cx "
+            # Update virus definitions
+            freshclam --quiet
+
+            # Run scan based on scope
+            if [ '${{ github.event_name == 'pull_request' }}' = 'true' ] && [ -n '${{ steps.changed-files.outputs.all_changed_files }}' ]; then
+              echo 'Running ClamAV on changed files'
+              SCAN_ARGS='${{ steps.changed-files.outputs.all_changed_files }}'
+            else
+              echo 'Running ClamAV on all files'
+              SCAN_ARGS='-r'
+            fi
+
+            # Run scan and capture output
+            clamscan $SCAN_ARGS > clamav_report.txt
+            "
+      - name: Print Scan Results
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: cat clamav_report.txt
+      - name: Rename Report
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          DATE=$(date +"%Y-%m-%d")
+          REF_NAME="${{ github.ref_name }}"
+          mv "clamav_report.txt" "clamav_report_${DATE}_${REF_NAME//\//-}_${{ github.sha }}.txt"
+      - name: Upload Scan Results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f #v7.0.0
+        with:
+          name: clamav-report
+          path: "./clamav_report*.txt"
+          retention-days: 30

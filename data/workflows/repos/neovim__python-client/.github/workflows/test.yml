@@ -1,0 +1,164 @@
+name: ci
+on:
+  push:
+  pull_request:
+    branches:
+      - 'master'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.repository_owner == 'neovim' && github.sha || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
+      with:
+        cache: 'pip'
+        python-version: 3.11
+    - name: install dependencies
+      run: python3 -m pip install tox tox-gh-actions
+    - name: checkqa
+      run: tox run -e checkqa,docs
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [
+          # NOTE: don't forget updating tox.ini
+          { python-version: '3.14', neovim-version: 'nightly' },
+          { python-version: '3.13', neovim-version: 'nightly' },
+          { python-version: '3.12', neovim-version: 'nightly' },
+          { python-version: '3.12', neovim-version: 'stable' },
+          { python-version: '3.11' },
+          { python-version: '3.10' },
+        ]
+        os: ['ubuntu', 'macos', 'windows']
+
+    name:
+      test (python ${{ matrix.config.python-version }},
+            ${{ matrix.config.neovim-version || 'nightly' }},
+            ${{ matrix.os }}-${{ matrix.config[matrix.os] || 'latest' }})
+    runs-on: ${{ matrix.os }}-${{ matrix.config[matrix.os] || 'latest' }}
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
+      with:
+        cache: 'pip'
+        python-version: ${{ matrix.config.python-version }}
+
+    - name: install neovim (Linux/macOS)
+      if: runner.os != 'Windows'
+      run: |
+        set -eu -o pipefail
+
+        NVIM_OS="$(echo "$RUNNER_OS" | tr '[:upper:]' '[:lower:]')"
+        if ! [ "$NVIM_OS" = "linux" ] && ! [ "$NVIM_OS" = "macos" ]; then
+          echo "RUNNER_OS=${RUNNER_OS} not supported"; exit 1;
+        fi
+
+        NVIM_NAME="nvim-${NVIM_OS}-x86_64"
+        curl -LO "https://github.com/neovim/neovim/releases/download/${{ matrix.config.neovim-version || 'nightly' }}/${NVIM_NAME}.tar.gz"
+        tar xzf "${NVIM_NAME}.tar.gz"
+        echo "RUNNER_OS = $RUNNER_OS"
+        "$NVIM_NAME/bin/nvim" --version
+
+        # update $PATH for later steps
+        echo "$(pwd)/$NVIM_NAME/bin" >> "$GITHUB_PATH"
+
+    - name: install neovim (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        curl -LO "https://github.com/neovim/neovim/releases/download/${{ matrix.config.neovim-version || 'nightly' }}/nvim-win64.zip"
+        unzip nvim-win64.zip
+        nvim-win64/bin/nvim --version
+
+        # update $PATH for later steps
+        echo "$(pwd)/nvim-win64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: install dependencies
+      run: |
+        python3 -m pip install -U pip
+        python3 -m pip install tox tox-gh-actions
+
+    - name: check neovim
+      run: |
+        python3 -m pip install -e .   # install pynvim
+        nvim --headless --clean -c 'checkhealth | %+print | q'
+
+    - name: test with tox
+      run: |
+        echo $PATH
+        which nvim
+        which -a python3
+        python3 --version
+        tox run
+
+  test-upstream:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - python-version: '3.12'
+        os: ['ubuntu', 'macos', 'windows']
+
+    name:
+      test-upstream (python ${{ matrix.config.python-version }},
+            ${{ matrix.os }}-${{ matrix.config[matrix.os] || 'latest' }})
+    runs-on: ${{ matrix.os }}-${{ matrix.config[matrix.os] || 'latest' }}
+
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
+      with:
+        cache: 'pip'
+        python-version: ${{ matrix.config.python-version }}
+
+    - name: install pynvim
+      run: |
+        ./scripts/disable_log_statements.sh # Make pynvim in release-ready state
+        python3 -m pip install -e .
+
+    - name: clone nvim
+      run: |
+        git clone --depth=1 https://github.com/neovim/neovim.git neovim-repo
+
+    - name: install build deps (Windows)
+      if: runner.os == 'Windows'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: unzip
+        pacboy: >-
+          cmake:p make:p gcc:p diffutils:p libiconv:p
+        release: false
+
+    - name: build nvim (Windows)
+      if: runner.os == 'Windows'
+      shell: msys2 {0}
+      working-directory: neovim-repo
+      run: mingw32-make VERBOSE=1
+
+    - name: build nvim (Linux/macOS)
+      if: runner.os != 'Windows'
+      working-directory: neovim-repo
+      run: make
+
+    - name: test-upstream (Windows)
+      if: runner.os == 'Windows'
+      shell: msys2 {0}
+      working-directory: neovim-repo
+      run: |
+        mingw32-make VERBOSE=1 oldtest TEST_FILE=test_python3.vim
+        mingw32-make VERBOSE=1 functionaltest TEST_FILE=./test/functional/provider/python3_spec.lua
+
+    - name: test-upstream (Linux/macOS)
+      if: runner.os != 'Windows'
+      working-directory: neovim-repo
+      run: |
+        make oldtest TEST_FILE=test_python3.vim
+        make functionaltest TEST_FILE=./test/functional/provider/python3_spec.lua

@@ -1,0 +1,16 @@
+name: Coverage
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+    - run: uv run nox --sessions test-3.9
+      env:
+        CODECOV_TOKEN: ${{secrets.CODECOV_TOKEN}}

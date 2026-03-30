@@ -1,0 +1,160 @@
+name: ci-workflow
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+env:
+  THIRD_PARTY_DIR: ${{ github.workspace }}/third
+  CORENLP: ${{ github.workspace }}/third/stanford-corenlp
+  CORENLP_MODELS: ${{ github.workspace }}/third/stanford-corenlp
+  STANFORD_PARSER: ${{ github.workspace }}/third/stanford-parser
+  STANFORD_MODELS: ${{ github.workspace }}/third/stanford-postagger
+  STANFORD_POSTAGGER: ${{ github.workspace }}/third/stanford-postagger
+  SENNA: ${{ github.workspace }}/third/senna
+  PROVER9: ${{ github.workspace }}/third/prover9/bin
+  MEGAM: ${{ github.workspace }}/third/megam
+  MALT_PARSER: ${{ github.workspace }}/third/maltparser
+
+jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"  # or your chosen version
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
+
+  minimal_download_test:
+    name: Minimal NLTK Download Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install regex
+        run: pip install regex
+
+      - name: Set NLTK_DATA environment variable
+        shell: bash
+        run: echo "NLTK_DATA=${{ github.workspace }}/nltk_data" >> $GITHUB_ENV
+
+      - name: Show NLTK_DATA in shell
+        shell: bash
+        run: |
+          echo "NLTK_DATA in shell: $NLTK_DATA"
+
+      - name: Ensure minimal NLTK data for cache
+        shell: bash
+        run: |
+          python -c "import os, nltk; d = os.environ['NLTK_DATA']; import pathlib; pathlib.Path(d).mkdir(parents=True, exist_ok=True); nltk.download('wordnet', download_dir=d)"
+
+  test:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    needs: [pre-commit, minimal_download_test]
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.14t']
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        exclude:
+          - os: windows-latest
+            python-version: '3.14t'  # scikit-learn issue on Py3.14t on Windows
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set NLTK_DATA environment variable
+        shell: bash
+        run: echo "NLTK_DATA=${{ github.workspace }}/nltk_data" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade --requirement requirements-ci.txt
+
+      - name: Ensure minimal NLTK data for cache
+        shell: bash
+        run: |
+          python -c "import os, nltk; d = os.environ['NLTK_DATA']; import pathlib; pathlib.Path(d).mkdir(parents=True, exist_ok=True); nltk.download('wordnet', download_dir=d)"
+
+      - name: Show NLTK_DATA and workspace
+        shell: bash
+        run: |
+          echo "GITHUB_WORKSPACE is: $GITHUB_WORKSPACE"
+          echo "NLTK_DATA is: $NLTK_DATA"
+          python -c "import os; print('Python sees GITHUB_WORKSPACE:', os.environ.get('GITHUB_WORKSPACE')); print('Python sees NLTK_DATA:', os.environ.get('NLTK_DATA'))"
+
+      - name: List contents of NLTK data dir
+        shell: bash
+        run: ls -lR "${{ github.workspace }}/nltk_data" || echo "nltk_data not found"
+
+      - name: Cache nltk data
+        uses: actions/cache@v5
+        id: nltk-data-cache
+        with:
+          path: ${{ github.workspace }}/nltk_data
+          key: nltk_data_${{ runner.os }}_v1
+
+      - name: Download nltk data on cache miss
+        if: steps.nltk-data-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -c "import os; import nltk; from pathlib import Path; path = Path(os.environ['NLTK_DATA']); path.mkdir(parents=True, exist_ok=True); nltk.download('all', download_dir=path)"
+
+      # --- THIRD PARTY TOOLS CACHE SECTION ---
+      - name: Ensure third-party directory exists
+        run: mkdir -p "${{ env.THIRD_PARTY_DIR }}"
+
+      - name: Cache third-party tools
+        uses: actions/cache@v5
+        id: third-party-cache
+        with:
+          path: ${{ env.THIRD_PARTY_DIR }}
+          key: third_${{ runner.os }}_${{ hashFiles('tools/github_actions/third-party.sh') }}_v1
+
+      - name: List contents of third-party dir before download
+        shell: bash
+        run: ls -lR "${{ env.THIRD_PARTY_DIR }}" || echo "third-party dir not found"
+
+      - name: Download third-party data on cache miss
+        if: steps.third-party-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          chmod +x ./tools/github_actions/third-party.sh
+          ./tools/github_actions/third-party.sh
+
+      - name: List contents of third-party dir after download/cache
+        shell: bash
+        run: ls -lR "${{ env.THIRD_PARTY_DIR }}" || echo "third-party dir not found"
+
+      - name: Print NLTK data search paths
+        shell: bash
+        run: python -c "import nltk; print('NLTK data search paths:', nltk.data.path)"
+
+      - name: Run pytest
+        shell: bash
+        run: |
+          pytest --numprocesses auto -rsx --doctest-modules nltk

@@ -1,0 +1,47 @@
+name: Build
+
+on:
+  workflow_call:
+  workflow_dispatch:
+jobs:
+  build:
+    name: Build
+    runs-on:
+      - ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.9", "3.14"] # oldest supported and latest tested
+    env:
+      codegen-python-version: "3.9"
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - name: Set up Python
+        uses: ni/python-actions/setup-python@aa64e60612cb078b0c2ada666becbd70d4817d55 # v0.7.1
+        id: setup-python
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up Poetry
+        uses: ni/python-actions/setup-poetry@aa64e60612cb078b0c2ada666becbd70d4817d55 # v0.7.1
+      - name: Run linters and type checkers
+        uses: ni/python-actions/analyze-project@aa64e60612cb078b0c2ada666becbd70d4817d55 # v0.7.1
+        with:
+          install-args: "--all-extras --with examples"
+      - name: Run Bandit security checks
+        run: poetry run bandit -c pyproject.toml -r generated/nidaqmx
+      - name: Run cspell
+        uses: streetsidesoftware/cspell-action@v8
+        with:
+          incremental_files_only: false
+          check_dot_files: explicit
+      - name: Generate ni-daqmx files
+        if: ${{ runner.os == 'Linux' && matrix.python-version == env.codegen-python-version }}
+        run: |
+          rm -fr generated/nidaqmx
+          poetry run python src/codegen --dest generated/nidaqmx
+      - name: Check for files dirtied by codegen
+        if: ${{ runner.os == 'Linux' && matrix.python-version == env.codegen-python-version }}
+        run: git diff --exit-code

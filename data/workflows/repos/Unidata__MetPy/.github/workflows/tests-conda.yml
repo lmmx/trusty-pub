@@ -1,0 +1,86 @@
+name: Conda Tests
+
+# We don't want pushes (or PRs) to gh-pages to kick anything off
+on:
+  push:
+    branches:
+      - main
+      - '[0-9]+.[0-9]+.x'
+  pull_request:
+    branches:
+      - main
+      - '[0-9]+.[0-9]+.x'
+
+concurrency:
+  group: ${{ github.workflow}}-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  #
+  # Run all tests on Conda on both Windows and macOS
+  #
+  CondaTests:
+    name: ${{ matrix.os }} ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash -l {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.11, 3.14]
+        os: [macOS, Windows]
+        include:
+          - python-version: 3.12
+            os: macOS
+          - python-version: 3.13
+            os: Windows
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: 150
+        fetch-tags: true
+        persist-credentials: false
+
+    - name: Install from Conda
+      uses: ./.github/actions/install-conda
+      with:
+        type: 'test'
+        python-version: ${{ matrix.python-version }}
+        need-cartopy: true
+
+    - name: Run tests
+      uses: ./.github/actions/run-tests
+      with:
+        run-doctests: ${{ runner.os != 'Windows' }}
+        key: conda-${{ matrix.python-version }}-${{ runner.os }}
+
+  codecov:
+    name: CodeCov Upload
+    needs: CondaTests
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+    environment:
+      name: CodeCov
+      deployment: false
+    timeout-minutes: 2
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
+        with:
+          name: Conda
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}

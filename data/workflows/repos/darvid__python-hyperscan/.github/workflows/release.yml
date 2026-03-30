@@ -1,0 +1,204 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check_build:
+    name: Check if build is needed
+    runs-on: ubuntu-latest
+    if: github.repository == 'darvid/python-hyperscan' && !contains(github.event.head_commit.message, 'python-semantic-release')
+    outputs:
+      is_build_needed: ${{ steps.check.outputs.force_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Check for recent build artifacts
+        id: check
+        run: |
+          # For releases, we're always on a merge to main
+          # Check if head commit modified files that would trigger a build
+          # Try to use HEAD^ but fall back gracefully if it fails
+          if git rev-parse HEAD^ &>/dev/null; then
+            CHANGED_FILES=$(git diff --name-only HEAD^ HEAD || echo "")
+          else
+            echo "Cannot find parent commit, assuming no changes"
+            CHANGED_FILES=""
+          fi
+          echo "Changed files:"
+          echo "${CHANGED_FILES}"
+
+          CHANGES=0
+          echo "${CHANGED_FILES}" | grep -c -E '^(src/hyperscan/|README.md|CMakeLists.txt|pyproject.toml|MANIFEST.in|cmake/)' || CHANGES=$?
+
+          if [[ "$CHANGES" -gt 0 ]]; then
+            # The last commit already triggered a build, no need to force
+            echo "force_build=false" >> "$GITHUB_OUTPUT"
+            echo "Last commit already triggered a build"
+          else
+            # The last commit didn't trigger a build, we need to force it
+            echo "force_build=true" >> "$GITHUB_OUTPUT"
+            echo "Last commit didn't trigger a build, forcing build"
+          fi
+
+  check_release:
+    name: Check if release is needed
+    runs-on: ubuntu-latest
+    if: github.repository == 'darvid/python-hyperscan' && !contains(github.event.head_commit.message, 'python-semantic-release')
+    outputs:
+      is_release_needed: ${{steps.release.outputs.released }}
+      release_version: ${{steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Check if release needed with python-semantic-release
+        id: release
+        uses: python-semantic-release/python-semantic-release@v9.10.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          changelog: "false"
+          root_options: "-v --noop"
+          # python-semantic-release displays what it would have
+          # committed if commit is true and noop is set
+          commit: "true"
+
+  build:
+    name: Build source distribution and wheels
+    needs: [check_build, check_release]
+    if: github.repository == 'darvid/python-hyperscan' && !contains(github.event.head_commit.message, 'python-semantic-release') && (needs.check_build.outputs.is_build_needed == 'true' || needs.check_release.outputs.is_release_needed == 'true')
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      actions: write
+    with:
+      force_build: "${{ needs.check_release.outputs.is_release_needed == 'true' || fromJSON(needs.check_build.outputs.is_build_needed) }}"
+
+  release:
+    name: Create release
+    runs-on: ubuntu-22.04
+    concurrency: release
+    needs: [check_build, check_release, build]
+    if: github.repository == 'darvid/python-hyperscan' && !contains(github.event.head_commit.message, 'python-semantic-release') && needs.check_release.outputs.is_release_needed == 'true' && needs.build.outputs.valid_event == 'true' && needs.build.outputs.should_build == 'true'
+    permissions:
+      id-token: write
+      pull-requests: write
+      contents: write
+    env:
+      RELEASE_PR_BRANCH: create-pull-request/patch
+    steps:
+      - name: Checkout python-hyperscan
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: chainguard-dev/actions/setup-gitsign@main
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.1.8
+        if: github.event_name == 'workflow_dispatch' || needs.check_release.outputs.is_release_needed == 'true'
+
+      - name: Prepare dist
+        if: github.event_name == 'workflow_dispatch' || needs.check_release.outputs.is_release_needed == 'true'
+        run: |
+          mkdir dist
+          mv --backup=numbered ./wheel-*/*.whl -t dist/
+          mv --backup=numbered ./sdist/*.tar.gz -t dist/
+          ls -ahl dist/
+          rm -rf dist/*~
+
+      - name: Create release branch
+        if: needs.check_release.outputs.is_release_needed == 'true'
+        run: |
+          # Check if branch exists on remote and delete it if it does
+          if git ls-remote --heads origin "${RELEASE_PR_BRANCH}" | grep -q "${RELEASE_PR_BRANCH}"; then
+            git push origin --delete "${RELEASE_PR_BRANCH}"
+          fi
+          # Create new branch
+          git switch -c "${RELEASE_PR_BRANCH}"
+
+      - name: Install git-cliff
+        if: needs.check_release.outputs.is_release_needed == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: Generate changelog entry
+        if: needs.check_release.outputs.is_release_needed == 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.check_release.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RELEASE_VERSION}" ]]; then
+            echo "Release version was not detected" >&2
+            exit 1
+          fi
+
+          last_release_commit="$(git rev-list HEAD --grep '^Release ' --max-count=1 || true)"
+          if [[ -n "${last_release_commit}" ]]; then
+            if [[ "${last_release_commit}" == "$(git rev-parse HEAD)" ]]; then
+              parent_commit="$(git rev-parse "${last_release_commit}"^ 2>/dev/null || true)"
+              if [[ -n "${parent_commit}" ]]; then
+                range="${parent_commit}..HEAD"
+              else
+                root_commit="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+                range="${root_commit}..HEAD"
+              fi
+            else
+              range="${last_release_commit}..HEAD"
+            fi
+          else
+            root_commit="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            range="${root_commit}..HEAD"
+          fi
+
+          git cliff "${range}" --config cliff.toml --tag "v${RELEASE_VERSION}" --output release-notes.md
+
+          if ! grep -q '^- ' release-notes.md; then
+            echo "No user-facing changes detected; release notes will remain empty."
+          fi
+
+          echo "Generated release notes:"
+          cat release-notes.md
+
+          tmp_file="$(mktemp)"
+          cat release-notes.md CHANGELOG.md > "${tmp_file}"
+          mv "${tmp_file}" CHANGELOG.md
+
+          git add CHANGELOG.md
+          rm release-notes.md
+
+      - name: Semantic release
+        uses: python-semantic-release/python-semantic-release@v9.10.1
+        if: needs.check_release.outputs.is_release_needed == 'true'
+        with:
+          changelog: "false"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          ssh_public_signing_key: ${{ secrets.CI_SSH_PUBLIC_KEY }}
+          ssh_private_signing_key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
+          git_committer_name: github-actions
+          git_committer_email: ${{ secrets.CI_GIT_COMMITTER_EMAIL }}
+          root_options: "-v"
+
+      - name: Create PR
+        if: needs.check_release.outputs.is_release_needed == 'true'
+        run: |
+          gh pr create -B main -H "$RELEASE_PR_BRANCH" \
+            --title "$PR_TITLE" \
+            --body '🤖'
+        env:
+          PR_TITLE: "Release ${{ needs.check_release.outputs.release_version }}"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

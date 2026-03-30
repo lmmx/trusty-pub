@@ -1,0 +1,20 @@
+name: Tests
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    container:
+      # INFO: python 2 is no longer supported in
+      # actions/setup-python, use python docker image instead
+      image: python:${{ matrix.python-version }}
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install requirements (py ${{ matrix.python-version }})
+      run: |
+        pip install -e ".[testing]"
+    - name: Run all tests (py ${{ matrix.python-version }})
+      run: python -m unittest discover

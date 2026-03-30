@@ -1,0 +1,54 @@
+name: Unit-Tests
+
+on: workflow_call
+
+jobs:
+  unit-tests:
+    runs-on: ${{ matrix.platform }}
+
+    strategy:
+      fail-fast: false # Allows for matrix sub-jobs to fail without cancelling the rest
+      matrix:
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.14"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-suffix: "test-ci"
+          activate-environment: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --no-default-groups --group test
+
+      - name: Run pytest
+        shell: bash
+        run: pytest -vv
+
+  # This job is used purely to provide a workflow status, which we can mark as a
+  # required action in branch protection rules. This is a better option than marking
+  # the tox-test jobs manually, since their names change as the supported python
+  # versions change. This job provides an easy single action that can be marked required.
+  tests-done:
+    needs: [unit-tests]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set status based on required jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              exit 1
+            fi
+          done

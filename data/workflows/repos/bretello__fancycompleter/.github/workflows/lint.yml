@@ -1,0 +1,41 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - "master"
+      - "release-*"
+  pull_request:
+    branches:
+      - "master"
+      - "release-*"
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Lint
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup python and uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+      - name: Install nox
+        run: |
+          uv pip install nox
+          nox --version
+
+      - name: Lint
+        run: nox -s lint

@@ -1,0 +1,41 @@
+name: Test pyodide
+
+# Build and test pyodide wheels using cibuildwheel.
+
+on:
+  workflow_dispatch:
+  
+  schedule:
+    - cron: '13 5 * * *'
+
+jobs:
+
+  pyodide:
+    name: pyodide
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 2025-09-05: We don't test with default mupdf because mupdf-1.26.7
+        # does not have the required pyodide rpath changes.
+        args: [
+            # '',
+            '-m "git:--branch master https://github.com/ArtifexSoftware/mupdf"', 
+            '-m "git:--branch 1.27.x https://github.com/ArtifexSoftware/mupdf"',
+            ]
+      fail-fast: false
+    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      
+      - name: pyodide
+        run:
+          python scripts/test.py ${{matrix.args}} --cibw-pyodide 1 cibw
+      
+      # We do not use upload-artifact@v4 because it fails due to us creating
+      # identically-named wheels.
+      #- uses: actions/upload-artifact@v4
+      #  with:
+      #    path: ./wheelhouse/*.whl

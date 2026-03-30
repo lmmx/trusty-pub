@@ -1,0 +1,197 @@
+name: Stable release
+
+on:
+  # Runs when manually triggered from the GitHub UI, with options to specify the type of release.
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Release type
+        required: true
+        type: choice
+        default: auto
+        options:
+          - auto
+          - custom
+          - patch
+          - minor
+          - major
+      custom_version:
+        description: The custom version to bump to (only for "custom" type)
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  code_checks:
+    name: Code checks
+    uses: ./.github/workflows/_check_code.yaml
+
+  release_prepare:
+    name: Release prepare
+    needs: [code_checks]
+    runs-on: ubuntu-latest
+    outputs:
+      version_number: ${{ steps.release_prepare.outputs.version_number }}
+      tag_name: ${{ steps.release_prepare.outputs.tag_name }}
+      changelog: ${{ steps.release_prepare.outputs.changelog }}
+      release_notes: ${{ steps.release_prepare.outputs.release_notes }}
+    steps:
+      - uses: apify/workflows/git-cliff-release@main
+        name: Release prepare
+        id: release_prepare
+        with:
+          release_type: ${{ inputs.release_type }}
+          custom_version: ${{ inputs.custom_version }}
+          existing_changelog_path: CHANGELOG.md
+
+  changelog_update:
+    name: Changelog update
+    needs: [release_prepare]
+    permissions:
+      contents: write
+    uses: apify/workflows/.github/workflows/python_bump_and_update_changelog.yaml@main
+    with:
+      version_number: ${{ needs.release_prepare.outputs.version_number }}
+      changelog: ${{ needs.release_prepare.outputs.changelog }}
+    secrets: inherit
+
+  github_release:
+    name: GitHub release
+    needs: [release_prepare, changelog_update]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release_prepare.outputs.tag_name }}
+          name: ${{ needs.release_prepare.outputs.version_number }}
+          target_commitish: ${{ needs.changelog_update.outputs.changelog_commitish }}
+          body: ${{ needs.release_prepare.outputs.release_notes }}
+
+  pypi_publish:
+    name: PyPI publish
+    needs: [release_prepare, changelog_update]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # Required for OIDC authentication.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/apify
+    steps:
+      - name: Prepare distribution
+        uses: apify/workflows/prepare-pypi-distribution@main
+        with:
+          package_name: apify
+          is_prerelease: ""
+          version_number: ${{ needs.release_prepare.outputs.version_number }}
+          ref: ${{ needs.changelog_update.outputs.changelog_commitish }}
+
+      # Publishes the package to PyPI using PyPA official GitHub action with OIDC authentication.
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  version_docs:
+    name: Version docs
+    needs: [release_prepare, changelog_update, pypi_publish]
+    runs-on: ubuntu-latest
+    outputs:
+      version_docs_commitish: ${{ steps.commit_versioned_docs.outputs.commit_long_sha }}
+    permissions:
+      contents: write
+    env:
+      NODE_VERSION: 22
+      PYTHON_VERSION: 3.14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.APIFY_SERVICE_ACCOUNT_GITHUB_TOKEN }}
+          ref: ${{ needs.changelog_update.outputs.changelog_commitish }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv package manager
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: uv run poe install-dev
+
+      - name: Install website dependencies
+        run: |
+          cd website
+          corepack enable
+          yarn install
+
+      - name: Snapshot the current version
+        run: |
+          cd website
+          VERSION="$(python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('../pyproject.toml').read_text())['project']['version'])")"
+          MAJOR_MINOR="$(echo "$VERSION" | cut -d. -f1-2)"
+          export MAJOR_MINOR
+          # Remove existing version if present (patch releases override)
+          rm -rf "versioned_docs/version-${MAJOR_MINOR}"
+          rm -rf "versioned_sidebars/version-${MAJOR_MINOR}-sidebars.json"
+          jq 'map(select(. != env.MAJOR_MINOR))' versions.json > tmp.json && mv tmp.json versions.json
+          # Build API reference and create version snapshots
+          bash build_api_reference.sh
+          npx docusaurus docs:version "$MAJOR_MINOR"
+          npx docusaurus api:version "$MAJOR_MINOR"
+
+      - name: Commit and push versioned docs
+        id: commit_versioned_docs
+        uses: EndBug/add-and-commit@v10
+        with:
+          add: "website/versioned_docs website/versioned_sidebars website/versions.json"
+          message: "docs: version ${{ needs.release_prepare.outputs.version_number }} docs [skip ci]"
+          default_author: github_actions
+
+  doc_release:
+    name: Doc release
+    needs: [changelog_update, pypi_publish, version_docs]
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/_release_docs.yaml
+    with:
+      # Use the version_docs commit to include both changelog and versioned docs.
+      ref: ${{ needs.version_docs.outputs.version_docs_commitish }}
+    secrets: inherit
+
+  trigger_docker_build:
+    name: Trigger Docker image build
+    needs: [release_prepare, changelog_update]
+    runs-on: ubuntu-latest
+    steps:
+      # Trigger building the Python Docker images in apify/apify-actor-docker repo
+      - name: Trigger Docker image build
+        run: |
+          gh api -X POST "/repos/apify/apify-actor-docker/dispatches" \
+            -F event_type=build-python-images \
+            -F 'client_payload[release_tag]=latest' \
+            -F 'client_payload[apify_version]=${{ needs.release_prepare.outputs.version_number }}'
+        env:
+          GH_TOKEN: ${{ secrets.APIFY_SERVICE_ACCOUNT_GITHUB_TOKEN }}

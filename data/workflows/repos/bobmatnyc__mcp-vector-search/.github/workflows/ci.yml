@@ -1,0 +1,208 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run ruff format check
+        run: uv run ruff format --check src/
+
+      - name: Run ruff lint
+        run: uv run ruff check src/
+
+      - name: Run mypy
+        run: uv run mypy src/mcp_vector_search --ignore-missing-imports
+
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # For PR/push: Only ubuntu-latest + Python 3.11 for fast feedback
+        # For release tags: Full matrix in release job
+        os: [ubuntu-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests
+        run: uv run pytest tests/ -v --cov=src/mcp_vector_search --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v3
+        continue-on-error: true  # Don't fail CI on rate limits
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Build package
+        run: uv build
+
+      - name: Check package
+        run: uv run twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # NOTE: PyPI publishing is done manually via scripts, not CI
+  # Use: uv build && uv publish (with PYPI_TOKEN env var)
+
+  performance:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    # Manual-only: Use workflow_dispatch or run on release tags
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies and package
+        run: |
+          uv sync --dev
+          uv pip install -e .
+
+      - name: Add venv to PATH
+        # Expose the project venv so 'mcp-vector-search' and 'python3' are
+        # available even when the working directory is outside the project tree
+        # (e.g. /tmp/test-project which has no pyproject.toml and therefore
+        # causes 'uv run mcp-vector-search' to fail with "No such file").
+        run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      - name: Run performance tests
+        run: |
+          # Create a test project for benchmarking
+          mkdir -p /tmp/test-project
+          cd /tmp/test-project
+          echo "def hello(): pass" > test.py
+
+          # Initialize and run benchmarks (pipe yes for non-interactive)
+          # Use the CLI directly (venv is in PATH via the step above)
+          echo "Y" | mcp-vector-search init --extensions .py --embedding-model sentence-transformers/all-MiniLM-L6-v2 --no-mcp --no-auto-indexing
+          python3 ${{ github.workspace }}/scripts/search_performance_monitor.py --save
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: /tmp/test-project/.mcp-vector-search/performance_metrics.jsonl
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Test package installation
+        run: |
+          # Create venv and install from wheel
+          uv venv /tmp/test-venv
+          export VIRTUAL_ENV=/tmp/test-venv
+          export PATH="$VIRTUAL_ENV/bin:$PATH"
+          uv pip install dist/*.whl
+
+          # Test CLI is available
+          mcp-vector-search --version
+
+          # Test basic functionality
+          mkdir -p /tmp/integration-test
+          cd /tmp/integration-test
+          echo "def test(): pass" > test.py
+
+          # Initialize project (pipe yes for non-interactive)
+          echo "Y" | mcp-vector-search init --extensions .py --embedding-model sentence-transformers/all-MiniLM-L6-v2 --no-mcp --no-auto-indexing
+
+          # Index and search
+          mcp-vector-search index
+          mcp-vector-search search --limit 5 "function"

@@ -1,0 +1,114 @@
+name: Build, Test and Upload Wheel
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        required: true
+        type: string
+      pre_dev_release:
+        required: true
+        type: boolean
+      pytorch_version:
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  get_release_type:
+    runs-on: ubuntu-latest
+    outputs:
+      type: ${{ steps.get_release_type.outputs.type }}
+    steps:
+      - name: Get Release Type
+        run: |
+          if [[ "${{ inputs.branch }}" == v* ]] && [[ ${{ inputs.pre_dev_release }} == false ]]; then
+            RELEASE_TYPE=official
+          elif [[ "${{ inputs.branch }}" == release/* ]] && [[ ${{ inputs.pre_dev_release }} == true ]]; then
+            RELEASE_TYPE=test
+          else
+            if [[ "${{ github.base_ref }}" == release/* ]]; then
+              RELEASE_TYPE=test
+            else
+              RELEASE_TYPE=nightly
+            fi
+          fi
+          echo "Release Type: $RELEASE_TYPE"
+          echo "type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+        id: get_release_type
+
+  # TODO: enable docs build after migration to sphinx 2
+  build_docs:
+    if: false
+    needs: get_release_type
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          submodules: recursive
+      - name: Install Dependencies
+        run: |
+          echo `python3 --version`
+          python3 -m pip install --upgrade pip
+          python3 -m pip install setuptools
+          python3 -m pip install matplotlib
+          sudo apt-get install -y yarn
+      - name: Install PyTorch & TorchData
+        run: |
+          pip3 install numpy
+          # Add version requirement to PyTorch except nightly release
+          if [[ -z "${{ inputs.pytorch_version }}" ]]; then
+            PYTORCH_VERSION=torch
+          else
+            PYTORCH_VERSION=torch==${{ inputs.pytorch_version }}
+          fi
+
+          PIP_CHANNEL=${{ needs.get_release_type.outputs.type }}
+          if [[ $PIP_CHANNEL == 'official' ]]; then
+            pip3 install "$PYTORCH_VERSION" -f https://download.pytorch.org/whl/torch_stable.html
+          else
+            pip3 install --pre "$PYTORCH_VERSION" --index-url "https://download.pytorch.org/whl/$PIP_CHANNEL/cpu"
+          fi
+
+          pip3 install -r requirements.txt
+          pip3 install .
+      - name: Check env
+        run: echo `which spinx-build`
+      - name: Build the docset
+        run: |
+          cd ./docs
+          sudo apt-get install -y graphviz
+          pip3 install -r requirements.txt
+          make html
+          cd ..
+      - name: Export Target Folder
+        run: |
+          TARGET_FOLDER=${{ inputs.branch }}
+          if [[ $TARGET_FOLDER == release/* ]]; then
+            TARGET_FOLDER=${TARGET_FOLDER:8}
+          elif [[ $TARGET_FOLDER == tags/* ]]; then
+            TARGET_FOLDER=${TARGET_FOLDER:5}
+          elif [[ $TARGET_FOLDER == v* ]] && [[ ${{ inputs.pre_dev_release }} == false ]]; then
+            if [[ $TARGET_FOLDER == v*.*.* ]]; then
+              TARGET_FOLDER=${TARGET_FOLDER%.*}
+            fi
+            TARGET_FOLDER=${TARGET_FOLDER:1}
+          fi
+          echo "value=$TARGET_FOLDER" >> $GITHUB_OUTPUT
+        id: target_folder
+      - name: Deploy
+        uses: JamesIves/github-pages-deploy-action@v4.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gh-pages # The branch the action should deploy to.
+          folder: docs/build/html # The folder the action should deploy.
+          target-folder: ${{ steps.target_folder.outputs.value }} # The destination folder the action should deploy to.

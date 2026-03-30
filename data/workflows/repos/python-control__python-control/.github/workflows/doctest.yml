@@ -1,0 +1,50 @@
+name: Doctest
+
+on: [push, pull_request]
+
+jobs:
+  doctest-linux:
+    # doctest needs to run only on 
+    # latest-greatest platform with full options    
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout python-control
+      uses: actions/checkout@v3
+
+    - name: Setup Conda
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        python-version: 3.12
+        activate-environment: doctest-env
+        environment-file: .github/conda-env/doctest-env.yml
+        miniforge-version: latest
+        channels: conda-forge,defaults
+        channel-priority: strict
+        auto-update-conda: false
+        auto-activate-base: false
+
+    - name: Install full dependencies
+      shell: bash -l {0}
+      run: |
+        mamba install cvxopt pandas slycot 
+
+    - name: Run doctest
+      shell: bash -l {0}
+      working-directory: doc
+      run: |
+        make html
+        make doctest
+
+    - name: Run pytest
+      shell: bash -l {0}
+      working-directory: doc
+      run: |
+        make html
+        PYTHONPATH=../ pytest
+
+    - name: Archive results
+      uses: actions/upload-artifact@v4
+      with:
+        name: doctest-output
+        path: doc/_build/doctest/output.txt

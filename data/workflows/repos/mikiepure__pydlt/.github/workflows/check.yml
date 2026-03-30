@@ -1,0 +1,35 @@
+# This workflow will install Python dependencies and poetry
+# It runs ruff and pytest
+
+name: CI
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install poetry
+        run: pipx install poetry
+      - name: Setup Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python_version }}
+      - name: poetry install
+        run: poetry install
+      - name: Lint with ruff
+        run: poetry run ruff check .
+      - name: Format with ruff
+        run: poetry run ruff format . --check
+      - name: Test with pytest
+        run: poetry run pytest

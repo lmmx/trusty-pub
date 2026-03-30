@@ -1,0 +1,239 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  check_changelog:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'pyup-update-')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for git diff
+
+      - name: Check for CHANGELOG.md entry
+        run: |
+          git fetch --quiet origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }})
+          if ! echo "$CHANGED_FILES" | grep -q 'CHANGELOG.md'; then
+            echo "ERROR: Pull requests must include a corresponding entry in CHANGELOG.md."
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+            exit 1
+          fi
+          echo "✓ CHANGELOG.md entry found"
+
+  check_mturk_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      needs_mturk_tests: ${{ steps.check_files.outputs.mturk_changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: check for mturk changes
+        id: check_files
+        run: |
+          echo "========== check paths of modified files =========="
+          git diff --name-only HEAD^ HEAD > files.txt
+          while IFS= read -r file
+          do
+            echo $file
+            if [[ $file == *mturk.py ]]; then
+              echo "This modified file is MTurk related."
+              echo "mturk_changed=true" >> $GITHUB_OUTPUT
+              break
+            else
+              echo "This modified file is not MTurk related."
+              echo "mturk_changed=false" >> $GITHUB_OUTPUT
+            fi
+          done < files.txt
+
+  build:
+    runs-on: ubuntu-latest
+    needs: check_mturk_changes
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    services:
+      redis:
+        image: redis
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:12
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: dallinger
+          POSTGRES_PASSWORD: dallinger
+          POSTGRES_DB: dallinger
+    steps:
+      - name: Checkout Dallinger repository
+        uses: actions/checkout@v4
+      - name: Install Ubuntu packages
+        run: sudo apt-get --yes install pandoc enchant-2 curl
+      - name: Chromedriver setup
+        uses: nanasess/setup-chromedriver@v2.2.2
+      - name: Install snap packages
+        run: curl https://cli-assets.heroku.com/install.sh | sh
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Yarn
+        run: yarn --frozen-lockfile --ignore-engines
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+      - name: Python Installers
+        run: |
+          pip install --upgrade pip wheel tox
+      - name: Before Tox
+        run: |
+          pip install --upgrade setuptools
+      - name: Run Full Tox
+        env:
+          DATABASE_URL: postgresql://dallinger:dallinger@localhost/dallinger
+          PORT: 5000
+          base_port: 5000
+          threads: 1
+          mturk_worker_id: ${{ secrets.MTURK_WORKER_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          PROLIFIC_RESEARCHER_API_TOKEN: ${{ secrets.PROLIFIC_RESEARCHER_API_TOKEN }}
+        run: |
+          tox ${{ needs.check_mturk_changes.outputs.needs_mturk_tests == 'true' && '-- --mturkfull' || ''}}
+          npm run test --coverage
+        # We want to run Full Tox tests for the two latest Python versions in order to cover possible
+        # issues with code changes that had to be made in order to support a new Python version
+        if: ${{ matrix.python-version == '3.12' || matrix.python-version == '3.13' }}
+      - name: Run Fast Tests Only
+        env:
+          DATABASE_URL: postgresql://dallinger:dallinger@localhost/dallinger
+          PORT: 5000
+          base_port: 5000
+          threads: 1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          tox -e fast
+          npm run test --coverage
+        if: ${{ matrix.python-version == '3.10' || matrix.python-version == '3.11' }}
+      - name: Codecov.io check
+        uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        if: ${{ matrix.python-version == '3.13' }}
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get version
+        id: vars
+        run: echo "version=$(grep __version__\ = dallinger/version.py|sed -e 's/.*= //;s/"//g')" >> $GITHUB_OUTPUT
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx3-${{ hashFiles('Dockerfile', 'requirements.txt', 'constraints.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx3-
+      - name: Build ghcr.io/dallinger/dallinger docker image
+        uses: docker/build-push-action@v5
+        with:
+          push: false
+          load: true
+          target: dallinger
+          tags: ghcr.io/dallinger/dallinger:${{ steps.vars.outputs.version }}
+          cache-from: type=local,mode=max,src=/tmp/.buildx-cache/dallinger
+          cache-to: type=local,mode=max,dest=/tmp/.buildx-cache-new/dallinger
+      - name: Build ghcr.io/dallinger/dallinger-bot docker image
+        uses: docker/build-push-action@v5
+        with:
+          push: false
+          load: true
+          target: dallinger-bot
+          tags: ghcr.io/dallinger/dallinger-bot:${{ steps.vars.outputs.version }}
+          cache-from: type=local,mode=max,src=/tmp/.buildx-cache/dallinger-bot
+          cache-to: type=local,mode=max,dest=/tmp/.buildx-cache-new/dallinger-bot
+      - name: Move docker cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+      - name: Tag built image as latest
+        run: docker tag ghcr.io/dallinger/dallinger:${{ steps.vars.outputs.version }} ghcr.io/dallinger/dallinger
+      - name: Make sure dallinger script entry point is working
+        run: docker run --rm ghcr.io/dallinger/dallinger:${{ steps.vars.outputs.version }} python3 -c "from importlib.metadata import entry_points; tuple(entry_points(group='console_scripts', name='dallinger_heroku_worker'))[0].load()"
+      - name: Make sure dallinger script entry point is working with dallinger source mounted as volume
+        run: docker run -v $PWD/dallinger:/dallinger/dallinger --rm ghcr.io/dallinger/dallinger:${{ steps.vars.outputs.version }} python3 -c "from importlib.metadata import entry_points; tuple(entry_points(group='console_scripts', name='dallinger_heroku_worker'))[0].load()"
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+      - name: Install Ubuntu packages
+        run: sudo apt-get --yes install enchant-2 curl
+      - name: Install and upgrade wheel, pip and tox
+        run: pip install --upgrade pip wheel tox build
+      - name: Chromedriver setup
+        uses: nanasess/setup-chromedriver@v2.2.2
+      - name: Change dallinger version required by bartlett1932 to match current version
+        run: |
+          VERSION=$(grep __version__ dallinger/version.py |sed -e 's/__version__ = "//;s/"//')
+          echo Changing to version ${VERSION}
+          sed -i.orig -e "s/dallinger==.*/dallinger==${VERSION}/" demos/dlgr/demos/bartlett1932/constraints.txt
+      - name: Create dallinger wheel for docker tests
+        run: |
+          # Create a wheel file that will be used in the experiment docker build
+          python -m build --wheel --outdir /tmp/wheels .
+          # Copy the wheel to the demos directory so it can be found during docker build
+          cp /tmp/wheels/dallinger-*.whl demos/dlgr/demos/bartlett1932/ || echo "No wheel found in /tmp/wheels"
+      - name: Run docker tests
+        run: tox -e dockertests
+      - name: Show docker logs
+        if: ${{ always() }}
+        continue-on-error: true
+        run: for container in $(docker ps -a -q); do echo "***** $(docker ps -a|grep $container) *******"; docker logs $container; done
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: pre-commit/action@v3.0.1
