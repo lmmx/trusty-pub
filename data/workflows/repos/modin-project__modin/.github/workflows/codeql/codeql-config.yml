@@ -1,4 +1,0 @@
-name: "Modin CodeQL config"
-
-paths:
-  - modin/** 

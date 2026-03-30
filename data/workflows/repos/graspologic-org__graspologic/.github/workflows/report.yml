@@ -1,7 +1,0 @@
-name: graspologic Reporting
-on:
-  schedule:
-    - cron: "8 16 * * *"  # 8:08am PST
-jobs:
-  build:
-    uses: ./.github/workflows/build.yml

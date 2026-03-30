@@ -1,7 +1,0 @@
-{
-    "timeout": "20s",
-    "retryCount": 5,
-    "aliveStatusCodes": [
-        429
-    ]
-}

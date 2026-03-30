@@ -1,6 +1,0 @@
-{
-  "ignorePatterns": [
-    {"pattern": "../tutorials/.+.ipynb$"},
-    {"pattern": "*github.com/user-attachments*"}
-  ]
-}

@@ -1,9 +1,0 @@
-name: Run test commands
-
-on:
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  pr-check:
-    uses: fizyk/actions-reuse/.github/workflows/shared-pr-check.yml@v4.4.5

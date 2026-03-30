@@ -1,2 +1,0 @@
-ninja
-cmake~=3.29.0

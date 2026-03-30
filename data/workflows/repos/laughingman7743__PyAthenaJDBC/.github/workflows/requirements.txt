@@ -1,4 +1,0 @@
-poetry
-tox
-tox-gh-actions
-awscli

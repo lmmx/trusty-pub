@@ -1,8 +1,0 @@
-name: pr_benchmarks
-
-on:
-  pull_request:
-
-jobs:
-  pr_benchmarks:
-    uses: cvxpy/actions/.github/workflows/pr_benchmarks.yml@main
