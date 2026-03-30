@@ -6,3 +6,6 @@ semvec = { hf_path = "hf://datasets/semvec/pypi-packages/packages_data/*.parquet
 
 [data.workflows]
 default = { source = "repo_urls.parquet", repos_dir = "workflows/repos", packages_dir = "workflows/packages" }
+
+[data.results]
+default = { packages_dir = "workflows/packages", tp_dir = "results/tp", notp_dir = "results/notp", unk_dir = "results/unk" }

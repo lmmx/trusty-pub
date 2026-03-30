@@ -28,3 +28,10 @@ def resolve_workflows(name: str | None = None) -> dict:
     if name is None:
         name = next(iter(sources))
     return sources[name]
+
+
+def resolve_results(name: str | None = None) -> dict:
+    sources = _load_toml()["data"]["results"]
+    if name is None:
+        name = next(iter(sources))
+    return sources[name]

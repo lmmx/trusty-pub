@@ -10,6 +10,7 @@ requires-python = ">=3.14"
 dependencies = [
     "grepow>=0.1.1",
     "polars>=1.39.3",
+    "pyyaml>=6.0.3",
     "tqdm>=4.67.3",
 ]
 
@@ -18,6 +19,7 @@ trusty-pub = "trusty_pub:main"
 tp-refresh-pkgs = "trusty_pub.source_listings:fetch_package_listing"
 tp-repo-urls = "trusty_pub.repo_urls:fetch_repo_urls"
 tp-fetch-workflows = "trusty_pub.fetch_workflows:fetch_workflows"
+tp-classify = "trusty_pub.classify:classify"
 
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]
