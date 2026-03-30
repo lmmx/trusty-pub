@@ -3,6 +3,7 @@ from pathlib import Path
 
 from .defaults import resolve_results
 from .rules import ALL_RULES
+from .rules.pypi_page import prime_cache, reset_cache
 
 _REL_PACKAGES = Path("../../workflows/packages")
 
@@ -10,6 +11,7 @@ _REL_PACKAGES = Path("../../workflows/packages")
 # ---------------------------------------------------------------------------
 # State: read / write symlinks in the three classification dirs
 # ---------------------------------------------------------------------------
+
 
 def _read_dir(directory: Path) -> set[str]:
     """Return package names present as symlinks in a classification dir."""
@@ -36,24 +38,26 @@ def _remove(name: str, directory: Path) -> None:
 # Invariant: a package must never appear in more than one dir
 # ---------------------------------------------------------------------------
 
+
 def _check_invariant(tp: set[str], notp: set[str], unk: set[str]) -> None:
-    pairs = [("tp", "notp", tp & notp), ("tp", "unk", tp & unk), ("notp", "unk", notp & unk)]
+    pairs = [
+        ("tp", "notp", tp & notp),
+        ("tp", "unk", tp & unk),
+        ("notp", "unk", notp & unk),
+    ]
     violations = [(a, b, overlap) for a, b, overlap in pairs if overlap]
     if violations:
-        lines = [
-            f"  {a} ∩ {b}: {sorted(overlap)[:10]}"
-            for a, b, overlap in violations
-        ]
+        lines = [f"  {a} ∩ {b}: {sorted(overlap)[:10]}" for a, b, overlap in violations]
         total = sum(len(o) for _, _, o in violations)
         raise RuntimeError(
-            f"{total} package(s) in multiple classification dirs:\n"
-            + "\n".join(lines)
+            f"{total} package(s) in multiple classification dirs:\n" + "\n".join(lines)
         )
 
 
 # ---------------------------------------------------------------------------
 # Phase 1: seed — ensure every package appears in exactly one dir
 # ---------------------------------------------------------------------------
+
 
 def _seed(
     all_packages: set[str],
@@ -76,6 +80,7 @@ def _seed(
 # ---------------------------------------------------------------------------
 # Phase 2: evaluate — run rules against unk, produce verdicts
 # ---------------------------------------------------------------------------
+
 
 def _evaluate(
     unk: set[str],
@@ -111,6 +116,7 @@ def _evaluate(
 # Phase 3: commit — move symlinks from unk into tp/notp
 # ---------------------------------------------------------------------------
 
+
 def _commit(
     promote_tp: set[str],
     promote_notp: set[str],
@@ -131,6 +137,7 @@ def _commit(
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
+
 
 def classify(
     name: str | None = None,
@@ -170,7 +177,13 @@ def classify(
     unk = _seed(all_packages, tp, notp, unk, unk_dir)
 
     # Phase 2: evaluate all unknowns
+    # Prime the PyPI page cache for the HTTP-based last-resort rule
+    prime_cache(sorted(unk))
+
     promote_tp, promote_notp, still_unk = _evaluate(unk, packages_dir)
+
+    # Clean up for next run
+    reset_cache()
 
     # Phase 3: commit promotions
     _commit(promote_tp, promote_notp, tp_dir, notp_dir, unk_dir)

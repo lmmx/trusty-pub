@@ -163,6 +163,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "grepow" },
+    { name = "httpx" },
     { name = "polars" },
     { name = "pyyaml" },
     { name = "tqdm" },
@@ -171,6 +172,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "grepow", specifier = ">=0.1.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "polars", specifier = ">=1.39.3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "tqdm", specifier = ">=4.67.3" },

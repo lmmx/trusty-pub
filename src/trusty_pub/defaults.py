@@ -35,3 +35,10 @@ def resolve_results(name: str | None = None) -> dict:
     if name is None:
         name = next(iter(sources))
     return sources[name]
+
+
+def resolve_report(name: str | None = None) -> dict:
+    sources = _load_toml()["data"]["report"]
+    if name is None:
+        name = next(iter(sources))
+    return sources[name]

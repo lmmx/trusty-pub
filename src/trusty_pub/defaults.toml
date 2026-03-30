@@ -9,3 +9,6 @@ default = { source = "repo_urls.parquet", repos_dir = "workflows/repos", package
 
 [data.results]
 default = { packages_dir = "workflows/packages", tp_dir = "results/tp", notp_dir = "results/notp", unk_dir = "results/unk" }
+
+[data.report]
+default = { source = "repo_urls.parquet", output = "report.tsv" }
