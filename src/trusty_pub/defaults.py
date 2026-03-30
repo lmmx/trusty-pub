@@ -37,6 +37,13 @@ def resolve_results(name: str | None = None) -> dict:
     return sources[name]
 
 
+def resolve_results_nogithub(name: str | None = None) -> dict:
+    sources = _load_toml()["data"]["results_nogithub"]
+    if name is None:
+        name = next(iter(sources))
+    return sources[name]
+
+
 def resolve_report(name: str | None = None) -> dict:
     sources = _load_toml()["data"]["report"]
     if name is None:

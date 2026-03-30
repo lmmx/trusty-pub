@@ -2,20 +2,30 @@ from pathlib import Path
 
 import polars as pl
 
-from .defaults import resolve_report, resolve_results
+from .defaults import resolve_report, resolve_results, resolve_results_nogithub
 
 
-def _build_verdicts(target: Path, results_meta: dict) -> pl.DataFrame:
-    """Read classification dirs and produce a name→verdict mapping."""
+def _build_verdicts(target: Path, results_meta: dict, ng_meta: dict) -> pl.DataFrame:
+    """Read both classification dir sets and produce a name→verdict mapping."""
     rows = []
+
+    # GitHub-based results (symlinks)
     for verdict in ("tp", "notp", "unk"):
-        key = f"{verdict}_dir"
-        d = target / results_meta[key]
+        d = target / results_meta[f"{verdict}_dir"]
         if not d.exists():
             continue
-        for link in d.iterdir():
-            if link.is_symlink():
-                rows.append({"name": link.name, "verdict": verdict})
+        for entry in d.iterdir():
+            if entry.is_symlink():
+                rows.append({"name": entry.name, "verdict": verdict})
+
+    # No-github results (marker files)
+    for verdict in ("tp", "notp", "unk"):
+        d = target / ng_meta[f"{verdict}_dir"]
+        if not d.exists():
+            continue
+        for entry in d.iterdir():
+            if entry.is_file():
+                rows.append({"name": entry.name, "verdict": verdict})
 
     return pl.DataFrame(rows, schema={"name": pl.Utf8, "verdict": pl.Utf8})
 
@@ -43,6 +53,7 @@ def generate_report(
     target = Path(target)
     report_meta = resolve_report(name)
     results_meta = resolve_results(name)
+    ng_meta = resolve_results_nogithub(name)
 
     source = target / report_meta["source"]
     if not source.exists():
@@ -54,7 +65,7 @@ def generate_report(
         [c for c in _KEEP_COLS if c in pl.read_parquet_schema(source)]
     )
 
-    verdicts = _build_verdicts(target, results_meta)
+    verdicts = _build_verdicts(target, results_meta, ng_meta)
     result = df.join(verdicts, on="name", how="left")
 
     out_path = target / report_meta["output"]

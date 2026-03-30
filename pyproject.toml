@@ -21,6 +21,7 @@ tp-refresh-pkgs = "trusty_pub.source_listings:fetch_package_listing"
 tp-repo-urls = "trusty_pub.repo_urls:fetch_repo_urls"
 tp-fetch-workflows = "trusty_pub.fetch_workflows:fetch_workflows"
 tp-classify = "trusty_pub.classify:classify"
+tp-classify-nogithub = "trusty_pub.classify_nogithub:classify_nogithub"
 tp-report = "trusty_pub.report:generate_report"
 
 [build-system]
