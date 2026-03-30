@@ -66,4 +66,10 @@ def generate_report(
 
     print(f"\nReport written to {out_path} ({result.height} rows)")
 
+    mini_path = out_path.with_stem(out_path.stem + "_mini")
+    result.select("rank", "name", "verdict").sort("rank").write_csv(
+        mini_path, separator="\t"
+    )
+    print(f"Mini report written to {mini_path}")
+
     return out_path
