@@ -21,20 +21,19 @@ from trusty_pub.workflow_parser import all_action_invocations
 
 _ACTION_PREFIX = "pypa/gh-action-pypi-publish"
 
-# Keys in `with:` that indicate token-based auth (not TP)
 _TOKEN_WITH_KEYS = {"user", "password"}
 
 
 def _is_pypa_publish(uses: str) -> bool:
-    """Match any version/ref of pypa/gh-action-pypi-publish."""
-    # uses values look like:
-    #   pypa/gh-action-pypi-publish@release/v1
-    #   pypa/gh-action-pypi-publish@76f52bc...
     return uses.split("@")[0].strip() == _ACTION_PREFIX
 
 
+def _is_testpypi(inv) -> bool:
+    repo_url = inv.with_.get("repository-url", "")
+    return "test.pypi" in repo_url
+
+
 def _classify_invocation(inv) -> str | None:
-    """Classify a single invocation of the pypa publish action."""
     has_id_token = inv.job_permissions.get("id-token") == "write"
     has_token_with = bool(_TOKEN_WITH_KEYS & inv.with_.keys())
 
@@ -43,16 +42,10 @@ def _classify_invocation(inv) -> str | None:
     if has_token_with and not has_id_token:
         return "notp"
 
-    # Both present (weird) or neither → defer
     return None
 
 
 def rule(pkg_name: str, workflow_path: Path) -> str | None:
-    """
-    Scan all workflow files for pypa/gh-action-pypi-publish invocations.
-
-    Returns tp/notp only if all invocations agree. Mixed signals → defer.
-    """
     workflows_dir = workflow_path / ".github" / "workflows"
     invocations = all_action_invocations(
         workflows_dir, prefilter="pypa/gh-action-pypi-publish"
@@ -62,6 +55,8 @@ def rule(pkg_name: str, workflow_path: Path) -> str | None:
 
     for inv in invocations:
         if not _is_pypa_publish(inv.uses):
+            continue
+        if _is_testpypi(inv):
             continue
         v = _classify_invocation(inv)
         if v is not None:
