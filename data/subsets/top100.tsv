@@ -1,0 +1,100 @@
+rank	name	version	summary	uploaded_via	upload_time	filename	recent_7d_downloads	github_url	verdict
+1	boto3	1.42.54	The AWS SDK for Python	twine/5.1.1 CPython/3.9.22	2026-02-20T20:31:54.553834	boto3-1.42.54.tar.gz	6045291	https://github.com/boto/boto3	notp
+2	packaging	26.0	Core utilities for Python packages	twine/6.1.0 CPython/3.13.7	2026-01-21T20:50:39.064191	packaging-26.0.tar.gz	232850789	https://github.com/pypa/packaging	tp
+3	urllib3	2.6.3	HTTP library with thread-safe connection pooling, file post, and more.	twine/6.1.0 CPython/3.13.7	2026-01-07T16:24:43.925891	urllib3-2.6.3.tar.gz	190672277	https://github.com/urllib3/urllib3	tp
+4	setuptools	82.0.0	Easily download, build, install, upgrade, and uninstall Python packages	twine/6.2.0 CPython/3.14.2	2026-02-08T15:08:40.206525	setuptools-82.0.0.tar.gz	215183274	https://github.com/pypa/setuptools	notp
+5	certifi	2026.1.4	Python package for providing Mozilla's CA Bundle.	twine/6.1.0 CPython/3.13.7	2026-01-04T02:42:41.825177	certifi-2026.1.4.tar.gz	220109768	https://github.com/certifi/python-certifi	tp
+6	requests	2.32.5	Python HTTP for Humans.	twine/6.1.0 CPython/3.11.2	2025-08-18T20:46:02.573425	requests-2.32.5.tar.gz	185600741	https://github.com/psf/requests	tp
+7	typing-extensions	4.15.0	Backported and Experimental Type Hints for Python 3.9+	twine/6.1.0 CPython/3.12.9	2025-08-25T13:49:26.313895	typing_extensions-4.15.0.tar.gz	208107954	https://github.com/python/typing_extensions	tp
+8	botocore	1.42.54	Low-level, data-driven core of boto 3.	twine/5.1.1 CPython/3.9.22	2026-02-20T20:31:42.238183	botocore-1.42.54.tar.gz	7954890	https://github.com/boto/botocore	notp
+9	idna	3.11	Internationalized Domain Names in Applications (IDNA)	twine/6.1.0 CPython/3.12.9	2025-10-12T14:55:20.501377	idna-3.11.tar.gz	209673024	https://github.com/kjd/idna	tp
+10	charset-normalizer	3.4.4	The Real First Universal Charset Detector. Open, modern and actively maintained alternative to Chardet.	twine/6.1.0 CPython/3.13.7	2025-10-14T04:42:32.879080	charset_normalizer-3.4.4.tar.gz	212080806	https://github.com/jawah/charset_normalizer	tp
+11	aiobotocore	3.1.3	Async client for aws services using botocore and aiohttp	twine/6.1.0 CPython/3.13.7	2026-02-14T12:11:01.745017	aiobotocore-3.1.3.tar.gz	4681367	https://github.com/aio-libs/aiobotocore	tp
+12	python-dateutil	2.9.0.post0	Extensions to the standard Python datetime module	twine/5.0.0 CPython/3.9.18	2024-03-01T18:36:20.211056	python-dateutil-2.9.0.post0.tar.gz	190268774	https://github.com/dateutil/dateutil	notp
+13	six	1.17.0	Python 2 and 3 compatibility utilities	twine/6.0.1 CPython/3.13.0	2024-12-04T17:35:28.174320	six-1.17.0.tar.gz	180362648	https://github.com/benjaminp/six	notp
+14	cryptography	46.0.5	cryptography is a package which provides cryptographic recipes and primitives to Python developers.	twine/6.1.0 CPython/3.13.7	2026-02-10T19:18:38.255619	cryptography-46.0.5.tar.gz	114446438	https://github.com/pyca/cryptography	tp
+15	grpcio-status	1.78.1	Status proto mapping for gRPC	twine/6.2.0 CPython/3.13.11	2026-02-20T01:21:50.761444	grpcio_status-1.78.1.tar.gz	4039878		notp
+16	cffi	2.0.0	Foreign Function Interface for Python calling C code.	twine/6.2.0 CPython/3.13.5	2025-09-08T23:24:04.541971	cffi-2.0.0.tar.gz	134421829	https://github.com/python-cffi/cffi	notp
+17	numpy	2.4.2	Fundamental package for array computing in Python	twine/6.1.0 CPython/3.13.7	2026-01-31T23:13:10.135768	numpy-2.4.2.tar.gz	46258100	https://github.com/numpy/numpy	tp
+18	pyyaml	6.0.3	YAML parser and emitter for Python	twine/6.2.0 CPython/3.13.7	2025-09-29T20:27:46.049234	PyYAML-6.0.3-cp38-cp38-win_amd64.whl	0	https://github.com/yaml/pyyaml	notp
+19	s3transfer	0.16.0	An Amazon S3 Transfer Manager	twine/5.1.1 CPython/3.9.22	2025-12-01T02:30:59.114005	s3transfer-0.16.0.tar.gz	69431713	https://github.com/boto/s3transfer	notp
+20	pip	26.0.1	The PyPA recommended tool for installing Python packages.	twine/6.1.0 CPython/3.13.7	2026-02-05T02:20:18.702334	pip-26.0.1.tar.gz	106118878	https://github.com/pypa/pip	tp
+21	pycparser	3.0	C parser in Python	uv/0.5.13	2026-01-21T14:26:51.890565	pycparser-3.0.tar.gz	106402319	https://github.com/eliben/pycparser	notp
+22	pluggy	1.6.0	plugin and hook calling mechanisms for python	twine/6.1.0 CPython/3.12.8	2025-05-15T12:30:07.975376	pluggy-1.6.0.tar.gz	111014201		tp
+23	pydantic	1.10.26	Data validation and settings management using python type hints	twine/6.1.0 CPython/3.13.7	2025-12-18T15:47:46.557350	pydantic-1.10.26.tar.gz	4493802	https://github.com/pydantic/pydantic	tp
+24	pygments	2.19.2	Pygments is a syntax highlighting package written in Python.	twine/6.0.1 CPython/3.12.3	2025-06-21T13:39:12.283025	pygments-2.19.2.tar.gz	0	https://github.com/pygments/pygments	notp
+25	s3fs	2026.2.0	Convenient Filesystem interface over S3	twine/6.1.0 CPython/3.12.11	2026-02-05T21:57:57.968589	s3fs-2026.2.0.tar.gz	4471070	https://github.com/fsspec/s3fs	notp
+26	fsspec	2026.2.0	File-system specification	twine/6.1.0 CPython/3.12.11	2026-02-05T21:50:53.743576	fsspec-2026.2.0.tar.gz	28962187	https://github.com/fsspec/filesystem_spec	notp
+27	click	8.3.1	Composable command line interface toolkit	twine/6.1.0 CPython/3.12.9	2025-11-15T20:45:42.706404	click-8.3.1.tar.gz	85732677	https://github.com/pallets/click	tp
+28	protobuf	7.34.0rc2	Protocol Buffers	twine/6.1.0 CPython/3.13.5	2026-02-06T21:00:15.014196	protobuf-7.34.0rc2.tar.gz	126453	https://github.com/protocolbuffers/protobuf	notp
+29	pandas	3.0.1	Powerful data structures for data analysis, time series, and statistics	twine/6.1.0 CPython/3.13.7	2026-02-17T22:20:16.434811	pandas-3.0.1.tar.gz	13653626	https://github.com/pandas-dev/pandas	tp
+30	attrs	25.4.0	Classes Without Boilerplate	twine/6.1.0 CPython/3.13.7	2025-10-06T13:54:44.725223	attrs-25.4.0.tar.gz	88841472	https://github.com/python-attrs/attrs	tp
+31	pydantic-core	2.41.5	Core functionality for Pydantic validation and serialization	uv/0.9.7	2025-11-04T13:43:49.098415	pydantic_core-2.41.5.tar.gz	0	https://github.com/pydantic/pydantic-core	tp
+32	pytest	9.0.2	pytest: simple powerful testing with Python	twine/6.1.0 CPython/3.13.7	2025-12-06T21:30:51.014628	pytest-9.0.2.tar.gz	39263748	https://github.com/pytest-dev/pytest	tp
+33	anyio	4.12.1	High-level concurrency and networking framework on top of asyncio or Trio	twine/6.1.0 CPython/3.13.7	2026-01-06T11:45:21.246706	anyio-4.12.1.tar.gz	82425032	https://github.com/agronholm/anyio	tp
+34	markupsafe	3.0.3	Safely add untrusted strings to HTML/XML markup.	twine/6.1.0 CPython/3.13.7	2025-09-27T18:37:40.426446	markupsafe-3.0.3.tar.gz	0	https://github.com/pallets/markupsafe	tp
+35	h11	0.16.0	A pure-Python, bring-your-own-I/O implementation of HTTP/1.1	twine/6.1.0 CPython/3.11.6	2025-04-24T03:35:25.427659	h11-0.16.0.tar.gz	98960130	https://github.com/python-hyper/h11	notp
+36	iniconfig	2.3.0	brain-dead simple config-ini parsing	twine/6.1.0 CPython/3.13.7	2025-10-18T21:55:43.219048	iniconfig-2.3.0.tar.gz	66538005	https://github.com/pytest-dev/iniconfig	tp
+37	platformdirs	4.9.2	A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`.	twine/6.1.0 CPython/3.13.7	2026-02-16T03:56:10.574965	platformdirs-4.9.2.tar.gz	61336023	https://github.com/tox-dev/platformdirs	tp
+38	jmespath	1.1.0	JSON Matching Expressions	twine/6.2.0 CPython/3.12.3	2026-01-22T16:35:26.279695	jmespath-1.1.0.tar.gz	63040468	https://github.com/jmespath/jmespath.py	notp
+39	wheel	0.46.3	Command line tool for manipulating wheel files	twine/6.1.0 CPython/3.13.7	2026-01-22T12:39:49.136819	wheel-0.46.3.tar.gz	79495589	https://github.com/pypa/wheel	tp
+40	annotated-types	0.7.0	Reusable constraint types to use with typing.Annotated	twine/5.1.0 CPython/3.10.14	2024-05-20T21:33:25.928805	annotated_types-0.7.0.tar.gz	99269861	https://github.com/annotated-types/annotated-types	notp
+41	filelock	3.24.3	A platform independent file lock.	twine/6.1.0 CPython/3.13.7	2026-02-19T00:48:20.543790	filelock-3.24.3.tar.gz	27010553	https://github.com/tox-dev/py-filelock	tp
+42	jinja2	3.1.6	A very fast and expressive template engine.	twine/6.0.1 CPython/3.12.8	2025-03-05T20:05:02.478302	jinja2-3.1.6.tar.gz	0	https://github.com/pallets/jinja	tp
+43	importlib-metadata	8.7.1	Read metadata from Python packages	twine/6.2.0 CPython/3.14.2	2025-12-21T10:00:19.278538	importlib_metadata-8.7.1.tar.gz	50270083	https://github.com/python/importlib_metadata	notp
+44	pathspec	1.0.4	Utility library for gitignore style pattern matching of file paths.	twine/6.1.0 CPython/3.13.7	2026-01-27T03:59:46.938903	pathspec-1.0.4.tar.gz	71515151	https://github.com/cpburnz/python-pathspec	tp
+45	pyjwt	2.11.0	JSON Web Token implementation in Python	twine/6.1.0 CPython/3.13.7	2026-01-30T19:59:55.694646	pyjwt-2.11.0.tar.gz	0	https://github.com/jpadilla/pyjwt	tp
+46	rsa	4.9.1	Pure-Python RSA implementation	twine/6.1.0 CPython/3.12.3	2025-04-16T09:51:18.218643	rsa-4.9.1.tar.gz	55393023	https://github.com/sybrenstuvel/python-rsa	notp
+47	httpx	0.28.1	The next generation HTTP client.	twine/6.0.1 CPython/3.8.18	2024-12-06T15:37:23.222462	httpx-0.28.1.tar.gz	78548082	https://github.com/encode/httpx	notp
+48	zipp	3.23.0	Backport of pathlib-compatible object wrapper for zip files	twine/6.1.0 CPython/3.13.3	2025-06-08T17:06:39.400622	zipp-3.23.0.tar.gz	64812601	https://github.com/jaraco/zipp	notp
+49	pytz	2025.2	World timezone definitions, modern and historical	twine/6.1.0 CPython/3.12.9	2025-03-25T02:25:00.538686	pytz-2025.2.tar.gz	71049206		tp
+50	httpcore	1.0.9	A minimal low-level HTTP client.	twine/6.1.0 CPython/3.8.18	2025-04-24T22:06:22.219726	httpcore-1.0.9.tar.gz	81909042	https://github.com/encode/httpcore	notp
+51	typing-inspection	0.4.2	Runtime typing introspection tools	twine/6.1.0 CPython/3.13.7	2025-10-01T02:14:41.687923	typing_inspection-0.4.2.tar.gz	80614450	https://github.com/pydantic/typing-inspection	tp
+52	pyasn1	0.6.2	Pure-Python implementation of ASN.1 types and DER/BER/CER codecs (X.208)	twine/6.2.0 CPython/3.13.9	2026-01-16T18:04:18.534551	pyasn1-0.6.2.tar.gz	63070437	https://github.com/pyasn1/pyasn1	notp
+53	aiohttp	3.13.3	Async http client/server framework (asyncio)	twine/6.1.0 CPython/3.13.7	2026-01-03T17:33:05.204669	aiohttp-3.13.3.tar.gz	57316190	https://github.com/aio-libs/aiohttp	tp
+54	python-dotenv	1.2.1	Read key-value pairs from a .env file and set them as environment variables	twine/6.1.0 CPython/3.13.7	2025-10-26T15:12:10.434266	python_dotenv-1.2.1.tar.gz	55501544	https://github.com/theskumar/python-dotenv	tp
+55	rich	14.3.3	Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal	poetry/2.3.2 CPython/3.12.11 Darwin/25.2.0	2026-02-19T17:23:13.732467	rich-14.3.3-py3-none-any.whl	15696692	https://github.com/Textualize/rich	notp
+56	multidict	6.7.1	multidict implementation	twine/6.1.0 CPython/3.13.7	2026-01-26T02:46:45.979236	multidict-6.7.1.tar.gz	56762989	https://github.com/aio-libs/multidict	tp
+57	jsonschema	4.26.0	An implementation of JSON Schema validation for Python	twine/6.1.0 CPython/3.13.7	2026-01-07T13:41:07.246891	jsonschema-4.26.0.tar.gz	46105631	https://github.com/python-jsonschema/jsonschema	tp
+58	google-auth	2.49.0.dev0	Google Authentication Library	twine/5.1.1 CPython/3.12.12	2026-01-26T21:44:45.284166	google_auth-2.49.0.dev0.tar.gz	2650733	https://github.com/googleapis/google-auth-library-python	tp
+59	tzdata	2025.3	Provider of IANA time zone data	twine/6.1.0 CPython/3.13.7	2025-12-13T17:45:35.667459	tzdata-2025.3.tar.gz	59461016	https://github.com/python/tzdata	tp
+60	yarl	1.22.0	Yet another URL library	twine/6.1.0 CPython/3.13.7	2025-10-06T14:12:55.963037	yarl-1.22.0.tar.gz	60350701	https://github.com/aio-libs/yarl	tp
+61	colorama	0.4.6	Cross-platform colored terminal text.	twine/4.0.1 CPython/3.10.6	2022-10-25T02:36:22.414799	colorama-0.4.6.tar.gz	71020459	https://github.com/tartley/colorama	notp
+62	tqdm	4.67.3	Fast, Extensible Progress Meter	twine/6.2.0 CPython/3.14.2	2026-02-03T17:35:53.048329	tqdm-4.67.3.tar.gz	53278652	https://github.com/tqdm/tqdm	tp
+63	google-api-core	2.30.0	Google API client core library	twine/6.2.0 CPython/3.11.2	2026-02-18T20:28:11.926576	google_api_core-2.30.0.tar.gz	12191301	https://github.com/googleapis/google-cloud-python	tp
+64	grpcio	1.78.1	HTTP/2-based RPC framework	twine/6.2.0 CPython/3.13.11	2026-02-20T01:16:10.869313	grpcio-1.78.1.tar.gz	21854281	https://github.com/grpc/grpc	notp
+65	tomli	2.4.0	A lil' TOML parser	twine/6.2.0 CPython/3.14.2	2026-01-11T11:22:38.165952	tomli-2.4.0.tar.gz	56458217	https://github.com/hukkin/tomli	notp
+66	awscli	1.44.44	Universal Command Line Environment for AWS.	twine/5.1.1 CPython/3.9.22	2026-02-20T20:31:49.940092	awscli-1.44.44.tar.gz	2355308	https://github.com/aws/aws-cli	notp
+67	virtualenv	20.38.0	Virtual Python Environment builder	twine/6.1.0 CPython/3.13.7	2026-02-19T07:48:02.385397	virtualenv-20.38.0.tar.gz	14281981	https://github.com/pypa/virtualenv	tp
+68	frozenlist	1.8.0	A list-like structure which implements collections.abc.MutableSequence	twine/6.1.0 CPython/3.13.7	2025-10-06T05:38:17.865026	frozenlist-1.8.0.tar.gz	59099270	https://github.com/aio-libs/frozenlist	tp
+69	propcache	0.4.1	Accelerated property cache	twine/6.1.0 CPython/3.13.7	2025-10-08T19:49:02.291919	propcache-0.4.1.tar.gz	62795691	https://github.com/aio-libs/propcache	tp
+70	googleapis-common-protos	1.72.0	Common protobufs used in Google APIs	twine/6.1.0 CPython/3.11.2	2025-11-06T18:29:24.087278	googleapis_common_protos-1.72.0.tar.gz	45392363	https://github.com/googleapis/google-cloud-python	tp
+71	requests-oauthlib	1.4.1	OAuthlib authentication support for Requests.	twine/5.0.0 CPython/3.9.18	2024-03-25T19:31:18.855548	requests-oauthlib-1.4.1.tar.gz	55637	https://github.com/requests/requests-oauthlib	notp
+72	rpds-py	0.30.0	Python bindings to Rust's persistent data structures (rpds)	twine/6.1.0 CPython/3.13.7	2025-11-30T20:24:38.837614	rpds_py-0.30.0.tar.gz	53544809	https://github.com/crate-py/rpds	tp
+73	markdown-it-py	4.0.0	Python port of markdown-it. Markdown parsing, done right!	python-requests/2.32.4	2025-08-11T12:57:52.854757	markdown_it_py-4.0.0.tar.gz	57518433	https://github.com/executablebooks/markdown-it-py	notp
+74	referencing	0.37.0	JSON Referencing + Python	twine/6.1.0 CPython/3.13.7	2025-10-13T15:30:48.871335	referencing-0.37.0.tar.gz	48850017	https://github.com/python-jsonschema/referencing	tp
+75	aiosignal	1.4.0	aiosignal: a list of registered asynchronous callbacks	twine/6.1.0 CPython/3.12.9	2025-07-03T22:54:43.528302	aiosignal-1.4.0.tar.gz	61663789	https://github.com/aio-libs/aiosignal	tp
+76	wrapt	2.1.1	Module for decorators, wrappers and monkey patching.	"uv/0.9.25 {""installer"":{""name"":""uv"",""version"":""0.9.25"",""subcommand"":[""publish""]},""python"":null,""implementation"":{""name"":null,""version"":null},""distro"":{""name"":""macOS"",""version"":null,""id"":null,""libc"":null},""system"":{""name"":null,""release"":null},""cpu"":null,""openssl_version"":null,""setuptools_version"":null,""rustc_version"":null,""ci"":null}"	2026-02-03T02:12:56.077583	wrapt-2.1.1-cp311-cp311-macosx_11_0_arm64.whl	26161111	https://github.com/GrahamDumpleton/wrapt	notp
+77	greenlet	3.3.2	Lightweight in-process concurrent programming	twine/6.1.0 CPython/3.13.7	2026-02-20T21:02:51.526204	greenlet-3.3.2-cp314-cp314t-manylinux_2_24_s390x.manylinux_2_28_s390x.whl	5609162	https://github.com/python-greenlet/greenlet	notp
+78	pillow	12.1.1	Python Imaging Library (fork)	twine/6.1.0 CPython/3.13.7	2026-02-11T04:23:07.146360	pillow-12.1.1.tar.gz	36759887	https://github.com/python-pillow/Pillow	tp
+79	pyasn1-modules	0.4.2	A collection of ASN.1-based protocols modules	twine/6.1.0 CPython/3.13.2	2025-03-28T02:41:22.170129	pyasn1_modules-0.4.2.tar.gz	53547819	https://github.com/pyasn1/pyasn1-modules	notp
+80	sqlalchemy	2.1.0b1	Database Abstraction Library	twine/6.2.0 CPython/3.14.2	2026-01-21T21:19:26.285312	sqlalchemy-2.1.0b1-cp314-cp314-musllinux_1_2_x86_64.whl	0	https://github.com/sqlalchemy/sqlalchemy	notp
+81	mdurl	0.1.2	Markdown URL utilities	twine/4.0.1 CPython/3.7.13	2022-08-14T12:40:10.846281	mdurl-0.1.2.tar.gz	67601974	https://github.com/executablebooks/mdurl	notp
+82	scipy	1.17.0	Fundamental algorithms for scientific computing in Python	twine/6.1.0 CPython/3.11.11	2026-01-10T21:34:23.009514	scipy-1.17.0.tar.gz	20394947	https://github.com/scipy/scipy	notp
+83	jsonschema-specifications	2025.9.1	The JSON Schema meta-schemas and vocabularies, exposed as a Registry	twine/6.1.0 CPython/3.13.7	2025-09-08T01:34:59.186960	jsonschema_specifications-2025.9.1.tar.gz	54742006	https://github.com/python-jsonschema/jsonschema-specifications	tp
+84	pyarrow	23.0.1	Python library for Apache Arrow	twine/6.2.0 CPython/3.13.11	2026-02-16T10:14:12.390820	pyarrow-23.0.1.tar.gz	14619959	https://github.com/apache/arrow	notp
+85	trove-classifiers	2026.1.14.14	Canonical source for classifiers on PyPI (pypi.org).	twine/6.1.0 CPython/3.13.7	2026-01-14T14:54:50.526756	trove_classifiers-2026.1.14.14.tar.gz	65027338	https://github.com/pypa/trove-classifiers	tp
+86	uvicorn	0.41.0	The lightning-fast ASGI server.	twine/6.1.0 CPython/3.13.7	2026-02-16T23:07:24.100327	uvicorn-0.41.0.tar.gz	26454812	https://github.com/sponsors/encode	tp
+87	aiohappyeyeballs	2.6.1	Happy Eyeballs for asyncio	twine/6.1.0 CPython/3.12.9	2025-03-12T01:42:48.764560	aiohappyeyeballs-2.6.1.tar.gz	60978163	https://github.com/aio-libs/aiohappyeyeballs	tp
+88	starlette	0.52.1	The little ASGI library that shines.	twine/6.1.0 CPython/3.13.7	2026-01-18T13:34:11.062588	starlette-0.52.1.tar.gz	31923988	https://github.com/Kludex/starlette	tp
+89	oauthlib	3.3.1	A generic, spec-compliant, thorough implementation of the OAuth request-signing logic	twine/6.1.0 CPython/3.12.9	2025-06-19T22:48:08.269738	oauthlib-3.3.1.tar.gz	49257090	https://github.com/oauthlib/oauthlib	tp
+90	psutil	7.2.2	Cross-platform lib for process and system monitoring.	twine/6.2.0 CPython/3.12.3	2026-01-28T18:15:36.514806	psutil-7.2.2-cp37-abi3-win_arm64.whl	38345942	https://github.com/giampaolo/psutil	notp
+91	pyparsing	3.3.2	pyparsing - Classes and methods to define and execute parsing grammars	twine/6.2.0 CPython/3.12.3	2026-01-21T03:57:59.360367	pyparsing-3.3.2.tar.gz	34774834	https://github.com/pyparsing/pyparsing	notp
+92	fastapi	0.129.0	FastAPI framework, high performance, easy to learn, fast to code, ready for production	"uv/0.10.2 {""installer"":{""name"":""uv"",""version"":""0.10.2"",""subcommand"":[""publish""]},""python"":null,""implementation"":{""name"":null,""version"":null},""distro"":{""name"":""Ubuntu"",""version"":""24.04"",""id"":""noble"",""libc"":null},""system"":{""name"":null,""release"":null},""cpu"":null,""openssl_version"":null,""setuptools_version"":null,""rustc_version"":null,""ci"":true}"	2026-02-12T13:54:54.528557	fastapi-0.129.0-py3-none-any.whl	25958060	https://github.com/fastapi/fastapi	tp
+93	google-genai	1.64.0	GenAI Python SDK	twine/6.2.0 CPython/3.11.2	2026-02-19T02:06:13.950702	google_genai-1.64.0.tar.gz	2667355	https://github.com/googleapis/python-genai	tp
+94	cachetools	7.0.1	Extensible memoizing collections and decorators	twine/6.2.0 CPython/3.12.3	2026-02-10T22:24:05.030345	cachetools-7.0.1.tar.gz	15386196	https://github.com/tkem/cachetools	notp
+95	opentelemetry-proto	1.39.1	OpenTelemetry Python Proto	twine/6.2.0 CPython/3.9.25	2025-12-11T13:32:48.681348	opentelemetry_proto-1.39.1.tar.gz	14301687	https://github.com/open-telemetry/opentelemetry-python	notp
+96	tenacity	9.1.4	Retry code until it succeeds	twine/6.1.0 CPython/3.13.7	2026-02-07T10:45:33.841653	tenacity-9.1.4.tar.gz	28184941	https://github.com/jd/tenacity	tp
+97	et-xmlfile	2.0.0	An implementation of lxml.xmlfile for the standard library	twine/5.1.1 CPython/3.10.15	2024-10-25T17:25:40.039150	et_xmlfile-2.0.0.tar.gz	51476864		notp
+98	openpyxl	3.1.5	A Python library to read/write Excel 2010 xlsx/xlsm files	twine/5.1.0 CPython/3.8.19	2024-06-28T14:03:44.161710	openpyxl-3.1.5.tar.gz	43055258		notp
+99	grpcio-tools	1.78.1	Protobuf code generator for gRPC	twine/6.2.0 CPython/3.13.11	2026-02-20T01:19:44.109934	grpcio_tools-1.78.1.tar.gz	836521	https://github.com/grpc/grpc	notp
