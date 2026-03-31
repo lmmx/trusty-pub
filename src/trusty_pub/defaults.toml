@@ -15,3 +15,6 @@ default = { tp_dir = "results_nogithub/tp", notp_dir = "results_nogithub/notp", 
 
 [data.report]
 default = { source = "repo_urls.parquet", output = "report.tsv" }
+
+[data.analysis]
+default = { report_mini = "report_mini.tsv", parquet = "repo_urls.parquet", downloads = "top-pypi-packages-30-days.csv", output_dir = "analysis" }

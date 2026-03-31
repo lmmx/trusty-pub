@@ -10,6 +10,7 @@ requires-python = ">=3.14"
 dependencies = [
     "grepow>=0.1.1",
     "httpx>=0.28.1",
+    "packaging>=26.0",
     "polars>=1.39.3",
     "pyyaml>=6.0.3",
     "tqdm>=4.67.3",
@@ -23,6 +24,7 @@ tp-fetch-workflows = "trusty_pub.fetch_workflows:fetch_workflows"
 tp-classify = "trusty_pub.classify:classify"
 tp-classify-nogithub = "trusty_pub.classify_nogithub:classify_nogithub"
 tp-report = "trusty_pub.report:generate_report"
+tp-deps = "trusty_pub.deps_analysis:run_analysis"
 
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]
