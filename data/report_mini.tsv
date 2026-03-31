@@ -84,7 +84,7 @@ rank	name	verdict
 83	jsonschema-specifications	tp
 84	pyarrow	notp
 85	trove-classifiers	tp
-86	uvicorn	
+86	uvicorn	tp
 87	aiohappyeyeballs	tp
 88	starlette	tp
 89	oauthlib	tp
@@ -113,7 +113,7 @@ rank	name	verdict
 112	shellingham	tp
 113	more-itertools	notp
 114	langchain	tp
-115	hatchling	
+115	hatchling	tp
 116	requests-toolbelt	notp
 117	exceptiongroup	tp
 118	docutils	notp
@@ -818,7 +818,7 @@ rank	name	verdict
 817	argparse	notp
 818	opencensus-context	notp
 819	oracledb	notp
-820	userpath	
+820	userpath	notp
 821	sentence-transformers	notp
 822	apache-airflow-providers-snowflake	notp
 823	pydeck	notp
@@ -1041,7 +1041,7 @@ rank	name	verdict
 1040	pywavelets	notp
 1041	asynctest	notp
 1042	meson	notp
-1043	hatch-vcs	
+1043	hatch-vcs	notp
 1044	optuna	tp
 1045	memray	notp
 1046	weasel	tp
@@ -1083,7 +1083,7 @@ rank	name	verdict
 1082	pooch	tp
 1083	scp	notp
 1084	ratelimit	notp
-1085	hatch	
+1085	hatch	tp
 1086	chromadb	notp
 1087	valkey-glide-sync	notp
 1088	boolean-py	notp
@@ -1255,7 +1255,7 @@ rank	name	verdict
 1254	apache-airflow-providers-sqlite	notp
 1255	supabase-auth	tp
 1256	smbprotocol	tp
-1257	inputimeout	
+1257	inputimeout	notp
 1258	pep517	tp
 1259	python-on-whales	tp
 1260	c7n	notp
@@ -1314,7 +1314,7 @@ rank	name	verdict
 1313	vcrpy	notp
 1314	prophet	tp
 1315	enum34	notp
-1316	openxlab	
+1316	openxlab	notp
 1317	motor	tp
 1318	drf-spectacular	notp
 1319	certbot-dns-cloudflare	notp
@@ -1527,8 +1527,8 @@ rank	name	verdict
 1526	cssutils	notp
 1527	opentelemetry-propagator-aws-xray	notp
 1528	speechrecognition	notp
-1529	scikit-build-core	
-1530	pinecone-plugin-interface	
+1529	scikit-build-core	tp
+1530	pinecone-plugin-interface	notp
 1531	azure-mgmt-datalake-nspkg	notp
 1532	python3-openid	notp
 1533	allure-python-commons	notp
@@ -1923,7 +1923,7 @@ rank	name	verdict
 1922	pint	tp
 1923	bedrock-agentcore	tp
 1924	priority	notp
-1925	aws-cdk-asset-node-proxy-agent-v6	
+1925	aws-cdk-asset-node-proxy-agent-v6	tp
 1926	s3path	notp
 1927	types-pygments	notp
 1928	k8	notp
@@ -2060,7 +2060,7 @@ rank	name	verdict
 2059	jsonargparse	tp
 2060	cuda-python	tp
 2061	tavily-python	notp
-2062	safety-schemas	
+2062	safety-schemas	notp
 2063	donfig	notp
 2064	puremagic	notp
 2065	google-adk	notp
@@ -2179,7 +2179,7 @@ rank	name	verdict
 2178	pytest-retry	notp
 2179	pytest-aiohttp	notp
 2180	osqp	notp
-2181	sphinxcontrib-httpdomain	
+2181	sphinxcontrib-httpdomain	notp
 2182	leb128	notp
 2183	webargs	tp
 2184	scipy-stubs	tp
@@ -2341,7 +2341,7 @@ rank	name	verdict
 2340	mypy-boto3-lakeformation	notp
 2341	resend	notp
 2342	spdx-tools	notp
-2343	django-allauth	
+2343	django-allauth	notp
 2344	lifelines	notp
 2345	httpx-aiohttp	tp
 2346	testfixtures	tp
@@ -2516,7 +2516,7 @@ rank	name	verdict
 2515	icecream	notp
 2516	mypy-boto3-logs	notp
 2517	types-grpcio	notp
-2518	boa-str	
+2518	boa-str	notp
 2519	litellm-enterprise	tp
 2520	label-studio-sdk	notp
 2521	pyaes	notp
@@ -2743,7 +2743,7 @@ rank	name	verdict
 2742	nats-py	notp
 2743	emmet-api	tp
 2744	nvidia-cudnn-frontend	notp
-2745	coincurve	
+2745	coincurve	tp
 2746	mypy-boto3-sagemaker	notp
 2747	grandalf	notp
 2748	uncertainties	tp
@@ -2983,7 +2983,7 @@ rank	name	verdict
 2982	apache-airflow-providers-dbt-cloud	notp
 2983	pem	tp
 2984	django-axes	notp
-2985	granian	
+2985	granian	tp
 2986	ibm-db	tp
 2987	bubus	tp
 2988	dominate	notp
@@ -3082,7 +3082,7 @@ rank	name	verdict
 3081	click-help-colors	notp
 3082	cross-web	tp
 3083	pcodedmp	notp
-3084	redlock-py	
+3084	redlock-py	notp
 3085	versioningit	notp
 3086	litellm-proxy-extras	tp
 3087	pytest-testmon	notp
@@ -3157,7 +3157,7 @@ rank	name	verdict
 3156	banal	notp
 3157	pyfaidx	notp
 3158	mypy-boto3-organizations	notp
-3159	polling	
+3159	polling	notp
 3160	mypy-boto3-sagemaker-runtime	notp
 3161	glfw	notp
 3162	azure-loganalytics	notp
@@ -3223,7 +3223,7 @@ rank	name	verdict
 3222	elasticsearch-dbapi	notp
 3223	mypy-boto3-quicksight	notp
 3224	aws-cdk-aws-lambda-python-alpha	notp
-3225	python3-xlib	
+3225	python3-xlib	notp
 3226	kagglesdk	notp
 3227	jinja2-cli	tp
 3228	textwrap3	notp
@@ -3266,7 +3266,7 @@ rank	name	verdict
 3265	mypy-boto3-codedeploy	notp
 3266	model-bakery	tp
 3267	mypy-boto3-timestream-write	notp
-3268	requests-sigv4	
+3268	requests-sigv4	notp
 3269	dvc-data	tp
 3270	django-compressor	notp
 3271	drf-nested-routers	notp
@@ -3334,7 +3334,7 @@ rank	name	verdict
 3333	mypy-boto3-grafana	notp
 3334	mypy-boto3-ivs-realtime	notp
 3335	ariadne-codegen	tp
-3336	latex2sympy2-extended	
+3336	latex2sympy2-extended	notp
 3337	mypy-boto3-acm-pca	notp
 3338	mypy-boto3-rds-data	notp
 3339	scmrepo	tp
@@ -3392,7 +3392,7 @@ rank	name	verdict
 3391	types-gevent	notp
 3392	mypy-boto3-datapipeline	notp
 3393	mypy-boto3-iotsecuretunneling	notp
-3394	hypothesis-jsonschema	
+3394	hypothesis-jsonschema	notp
 3395	validate-email	notp
 3396	mypy-boto3-applicationcostprofiler	notp
 3397	mypy-boto3-greengrass	notp
@@ -3818,7 +3818,7 @@ rank	name	verdict
 3817	palettable	notp
 3818	testtools	tp
 3819	camoufox	notp
-3820	sagemaker-schema-inference-artifacts	
+3820	sagemaker-schema-inference-artifacts	notp
 3821	nbsphinx	tp
 3822	dropbox-sign	notp
 3823	django-ses	tp
@@ -4033,7 +4033,7 @@ rank	name	verdict
 4032	mrcfile	notp
 4033	types-humanfriendly	notp
 4034	sparkdantic	notp
-4035	paypalrestsdk	
+4035	paypalrestsdk	notp
 4036	ntlm-auth	notp
 4037	pygls	notp
 4038	django-pgactivity	notp
@@ -4170,7 +4170,7 @@ rank	name	verdict
 4169	formic2	notp
 4170	mkdocs-git-revision-date-plugin	notp
 4171	kopf	tp
-4172	paypal-checkout-serversdk	
+4172	paypal-checkout-serversdk	notp
 4173	keyrings-codeartifact	tp
 4174	wmi	notp
 4175	manhole	notp
@@ -4231,7 +4231,7 @@ rank	name	verdict
 4230	jupyter-server-ydoc	tp
 4231	aioconsole	notp
 4232	apache-airflow-providers-redis	notp
-4233	waiting	
+4233	waiting	notp
 4234	livekit-plugins-deepgram	notp
 4235	stable-baselines3	notp
 4236	pysdl2	notp
@@ -4418,7 +4418,7 @@ rank	name	verdict
 4417	opentelemetry-instrumentation-aiohttp-server	notp
 4418	cyclonedx-bom	tp
 4419	django-htmx	tp
-4420	maison	
+4420	maison	tp
 4421	robotframework-assertion-engine	notp
 4422	logzio-python-handler	notp
 4423	vobject	notp
@@ -4438,7 +4438,7 @@ rank	name	verdict
 4437	torchdiffeq	notp
 4438	yamlfix	notp
 4439	langchain-pinecone	tp
-4440	pandas-ta	
+4440	pandas-ta	notp
 4441	anki-release	notp
 4442	fast-depends	tp
 4443	django-admin-list-filter-dropdown	notp
@@ -4515,7 +4515,7 @@ rank	name	verdict
 4514	rioxarray	notp
 4515	ecos	notp
 4516	uipath	tp
-4517	types-sqlalchemy-utils	
+4517	types-sqlalchemy-utils	notp
 4518	kafka-python-ng	tp
 4519	inotify-simple	tp
 4520	liblinear-multicore	notp
@@ -4627,7 +4627,7 @@ rank	name	verdict
 4626	python-debian	notp
 4627	python-logging-loki	notp
 4628	future-fstrings	notp
-4629	mmhash3	
+4629	mmhash3	notp
 4630	keras-tuner	notp
 4631	pytest-azurepipelines	notp
 4632	traits	notp
@@ -4655,7 +4655,7 @@ rank	name	verdict
 4654	everett	notp
 4655	delta-kernel-rust-sharing-wrapper	notp
 4656	django-localflavor	notp
-4657	sagemaker-data-insights	
+4657	sagemaker-data-insights	notp
 4658	check-manifest	notp
 4659	ntc-templates	notp
 4660	sagemaker-datawrangler	notp
@@ -4814,7 +4814,7 @@ rank	name	verdict
 4813	utils	notp
 4814	construct-typing	tp
 4815	xvfbwrapper	notp
-4816	boto-session-manager	
+4816	boto-session-manager	notp
 4817	cuid	notp
 4818	python-openstackclient	notp
 4819	emails	notp
@@ -4830,7 +4830,7 @@ rank	name	verdict
 4829	django-modeltranslation	notp
 4830	plpygis	notp
 4831	sqlalchemy-adapter	notp
-4832	dbt-vertica	
+4832	dbt-vertica	tp
 4833	sgp4	notp
 4834	wheel-stub	tp
 4835	patchy	tp
@@ -4848,7 +4848,7 @@ rank	name	verdict
 4847	hogql-parser	tp
 4848	types-aiobotocore-dataexchange	notp
 4849	angr	tp
-4850	cmakelang	
+4850	cmakelang	notp
 4851	pyfzf	notp
 4852	fastlite	notp
 4853	warc3-wet	notp
@@ -4978,7 +4978,7 @@ rank	name	verdict
 4977	databricks-feature-store	notp
 4978	pyobjc-framework-coretext	notp
 4979	pyobjc-framework-coreml	notp
-4980	ocspresponder	
+4980	ocspresponder	notp
 4981	osc-lib	notp
 4982	mosaicml-streaming	notp
 4983	asammdf	notp
@@ -5041,7 +5041,7 @@ rank	name	verdict
 5040	pandas-flavor	notp
 5041	prefixdate	tp
 5042	bigquery-schema-generator	notp
-5043	elasticsearch8	
+5043	elasticsearch8	notp
 5044	py-evm	notp
 5045	boto3-stubs-full	notp
 5046	grpc-requests	tp
@@ -5167,7 +5167,7 @@ rank	name	verdict
 5166	libhoney	notp
 5167	jurigged	tp
 5168	taskiq-dependencies	notp
-5169	core-universal	
+5169	core-universal	notp
 5170	fortifyapi	notp
 5171	airbyte	tp
 5172	skyfield	notp
@@ -5220,8 +5220,8 @@ rank	name	verdict
 5219	pytest-reportlog	tp
 5220	findlibs	notp
 5221	pgsanity	notp
-5222	deepface	
-5223	spotinst-agent	
+5222	deepface	notp
+5223	spotinst-agent	notp
 5224	feedfinder2	notp
 5225	cmake-build-extension	tp
 5226	azure-functions-durable	notp
@@ -5482,7 +5482,7 @@ rank	name	verdict
 5481	telnyx	tp
 5482	pytype	notp
 5483	unicorn	notp
-5484	nr-stream	
+5484	nr-stream	notp
 5485	pytest-plus	tp
 5486	bindep	notp
 5487	databricks-openai	tp
@@ -5649,7 +5649,7 @@ rank	name	verdict
 5648	bincopy	notp
 5649	pyobjc-framework-systemconfiguration	notp
 5650	seqeval	notp
-5651	config-parser	
+5651	config-parser	notp
 5652	pyrad	notp
 5653	zope-hookable	tp
 5654	pyobjc-framework-fsevents	notp
@@ -5998,7 +5998,7 @@ rank	name	verdict
 5997	pyobjc-framework-mediaextension	notp
 5998	pygitguardian	notp
 5999	clvm-rs	tp
-6000	bpyutils	
+6000	bpyutils	notp
 6001	chalkpy	notp
 6002	mkdocs-simple-hooks	notp
 6003	types-emoji	notp
@@ -6073,7 +6073,7 @@ rank	name	verdict
 6072	rpm	notp
 6073	molotov	notp
 6074	flameprof	notp
-6075	pyyml	
+6075	pyyml	notp
 6076	ipaddr	notp
 6077	prefect-kubernetes	tp
 6078	visitor	notp
@@ -6160,7 +6160,7 @@ rank	name	verdict
 6159	clu	notp
 6160	pytest-shutil	notp
 6161	swapper	tp
-6162	pycountry-convert	
+6162	pycountry-convert	notp
 6163	pysher	notp
 6164	twofish	notp
 6165	kafka	notp
@@ -6312,7 +6312,7 @@ rank	name	verdict
 6311	django-configurations	notp
 6312	tensorflow-aarch64	notp
 6313	fckitlib	notp
-6314	tinsel	
+6314	tinsel	notp
 6315	pynput-robocorp-fork	notp
 6316	llm-sandbox	notp
 6317	zope-i18nmessageid	tp
@@ -6442,7 +6442,7 @@ rank	name	verdict
 6441	azure-ai-evaluation	notp
 6442	pyvalid	notp
 6443	testcontainers-core	tp
-6444	authentik-client	
+6444	authentik-client	tp
 6445	rfc8785	tp
 6446	nequip	tp
 6447	pytenable	notp
@@ -6659,7 +6659,7 @@ rank	name	verdict
 6658	robotframework-datadriver	notp
 6659	types-pkg-resources	notp
 6660	torchgeo	tp
-6661	ip2location	
+6661	ip2location	notp
 6662	mcpo	notp
 6663	xmldiff	notp
 6664	fasttransform	notp
@@ -6729,7 +6729,7 @@ rank	name	verdict
 6728	crispy-bootstrap4	notp
 6729	mojimoji	tp
 6730	clip-interrogator	notp
-6731	requests-ntlm3	
+6731	requests-ntlm3	notp
 6732	bz2file	notp
 6733	graphiti-core	tp
 6734	podman	tp
@@ -6764,7 +6764,7 @@ rank	name	verdict
 6763	colorzero	notp
 6764	types-aiobotocore-iam	notp
 6765	nvidia-cusolver	notp
-6766	python-sonarqube-api	
+6766	python-sonarqube-api	notp
 6767	slugify	notp
 6768	djoser	notp
 6769	spaces	notp
@@ -6793,7 +6793,7 @@ rank	name	verdict
 6792	ceja	notp
 6793	clickhouse-migrations	notp
 6794	webexteamssdk	tp
-6795	cmake-format	
+6795	cmake-format	notp
 6796	grafeas	tp
 6797	faicons	notp
 6798	scrapy-playwright	notp
@@ -6970,7 +6970,7 @@ rank	name	verdict
 6969	oslo-service	notp
 6970	types-typed-ast	notp
 6971	airflow-exporter	tp
-6972	qpd	
+6972	qpd	notp
 6973	agent-framework	notp
 6974	entsoe-py	notp
 6975	flake8-use-fstring	notp
@@ -7022,7 +7022,7 @@ rank	name	verdict
 7021	keras-hub	notp
 7022	openqasm3	notp
 7023	python-gdcm	notp
-7024	awscli-plugin-s3-proxy	
+7024	awscli-plugin-s3-proxy	notp
 7025	flake8-debugger	notp
 7026	scikeras	notp
 7027	pyparser	notp
@@ -7158,7 +7158,7 @@ rank	name	verdict
 7157	azure-ai-vision-imageanalysis	notp
 7158	hyperscript	tp
 7159	sphinxemoji	notp
-7160	clarifai-protocol	
+7160	clarifai-protocol	notp
 7161	dj-stripe	notp
 7162	tesserocr	notp
 7163	daemonize	notp
@@ -7236,7 +7236,7 @@ rank	name	verdict
 7235	pyjnius	notp
 7236	llama-index-llms-bedrock-converse	notp
 7237	hammock	notp
-7238	json-logic-qubit	
+7238	json-logic-qubit	notp
 7239	app-common-python	notp
 7240	llama-index-llms-openai-like	notp
 7241	python-louvain	notp
@@ -7272,7 +7272,7 @@ rank	name	verdict
 7271	types-aiobotocore-ses	notp
 7272	canonicaljson	notp
 7273	flake8-commas	tp
-7274	junit-xml-2	
+7274	junit-xml-2	notp
 7275	cpuset-py3	notp
 7276	langwatch	notp
 7277	llama-index-llms-langchain	notp
@@ -7444,7 +7444,7 @@ rank	name	verdict
 7443	llama-stack-client	tp
 7444	sphinxcontrib-youtube	notp
 7445	r7insight-python	notp
-7446	grpc-gateway-protoc-gen-openapiv2	
+7446	grpc-gateway-protoc-gen-openapiv2	notp
 7447	netflix-spectator-py	notp
 7448	dagster-datadog	notp
 7449	flask-principal	notp
@@ -7541,7 +7541,7 @@ rank	name	verdict
 7540	awslabs-s3-tables-mcp-server	tp
 7541	dragonmapper	notp
 7542	jsonschema-pydantic-converter	tp
-7543	pymysqllock	
+7543	pymysqllock	notp
 7544	ldfparser	notp
 7545	flake8-rst-docstrings	notp
 7546	uptime	notp
@@ -7561,7 +7561,7 @@ rank	name	verdict
 7560	ydf	notp
 7561	deepdiff6	notp
 7562	poyo	notp
-7563	google-oauth	
+7563	google-oauth	notp
 7564	python-tss-sdk	notp
 7565	srptools	notp
 7566	awslabs-dynamodb-mcp-server	tp
@@ -7580,7 +7580,7 @@ rank	name	verdict
 7579	cybrid-api-id-python	notp
 7580	mo-future	notp
 7581	quandl	notp
-7582	qwen-tts	
+7582	qwen-tts	notp
 7583	sentry-prevent-cli	notp
 7584	abi3audit	tp
 7585	lazr-uri	notp
@@ -7622,7 +7622,7 @@ rank	name	verdict
 7621	aiocron	notp
 7622	localstack-obfuscator	notp
 7623	cyclic	notp
-7624	orion-py-client	
+7624	orion-py-client	notp
 7625	django-templated-mail	notp
 7626	openinference-instrumentation-litellm	notp
 7627	runwayml	notp
@@ -7634,7 +7634,7 @@ rank	name	verdict
 7633	contentful	notp
 7634	mo-imports	notp
 7635	flet-web	tp
-7636	advanced-alchemy	
+7636	advanced-alchemy	tp
 7637	django-rosetta	notp
 7638	exrex	notp
 7639	pytest-md	notp
@@ -7699,7 +7699,7 @@ rank	name	verdict
 7698	oslo-db	notp
 7699	objectpath	notp
 7700	panphon	notp
-7701	retina-face	
+7701	retina-face	notp
 7702	label-studio	notp
 7703	jose	notp
 7704	llama-index-graph-stores-neo4j	notp
@@ -7756,7 +7756,7 @@ rank	name	verdict
 7755	virtualenvwrapper	notp
 7756	rfc3161-client	tp
 7757	whylogs	notp
-7758	spotinst-agent-2	
+7758	spotinst-agent-2	notp
 7759	pulumi-docker-build	notp
 7760	zxing-cpp	tp
 7761	html-for-docx	tp
@@ -7883,7 +7883,7 @@ rank	name	verdict
 7882	matrice-analytics	notp
 7883	nkeys	notp
 7884	astroquery	notp
-7885	torch-complex	
+7885	torch-complex	notp
 7886	sensai-utils	notp
 7887	pykalman	tp
 7888	envparse	notp
@@ -8009,7 +8009,7 @@ rank	name	verdict
 8008	durabletask	notp
 8009	django-push-notifications	notp
 8010	proces	notp
-8011	libify	
+8011	libify	notp
 8012	pytest-xvfb	tp
 8013	click-command-tree	notp
 8014	keystonemiddleware	notp
@@ -8121,7 +8121,7 @@ rank	name	verdict
 8120	sqlite-migrate	notp
 8121	nautobot	notp
 8122	taichi	notp
-8123	py-redis	
+8123	py-redis	notp
 8124	flask-api	notp
 8125	jupyterhub	tp
 8126	mcap-ros2-support	tp
@@ -8129,7 +8129,7 @@ rank	name	verdict
 8128	pytest-helpers-namespace	notp
 8129	nodriver	notp
 8130	clint	notp
-8131	statsd-tags	
+8131	statsd-tags	notp
 8132	aws-cdk-core	notp
 8133	pytest-logger	notp
 8134	py-multibase	notp
@@ -8278,7 +8278,7 @@ rank	name	verdict
 8277	lightstep	notp
 8278	copilotkit	notp
 8279	pylibcudf-cu12	notp
-8280	metal-sdk	
+8280	metal-sdk	notp
 8281	dagster-snowflake-pandas	notp
 8282	djangorestframework-types	notp
 8283	sty	notp
@@ -8442,7 +8442,7 @@ rank	name	verdict
 8441	numpyencoder	notp
 8442	reverse-geocode	notp
 8443	pytest-reporter	notp
-8444	clip-benchmark	
+8444	clip-benchmark	notp
 8445	llama-index-llms-bedrock	notp
 8446	flake8-formatter-junit-xml	notp
 8447	pytest-fixture-config	notp
@@ -8586,7 +8586,7 @@ rank	name	verdict
 8585	awslabs-billing-cost-management-mcp-server	tp
 8586	pygaljs	notp
 8587	pyjanitor	tp
-8588	carelytics	
+8588	carelytics	notp
 8589	cloudsmith-api	notp
 8590	rpy2-robjects	notp
 8591	pynwb	notp
@@ -8772,7 +8772,7 @@ rank	name	verdict
 8771	plyer	notp
 8772	smartypants	notp
 8773	crytic-compile	tp
-8774	lightphe	
+8774	lightphe	notp
 8775	python-hostlist	notp
 8776	pyspelling	tp
 8777	psutil-home-assistant	notp
@@ -8811,15 +8811,15 @@ rank	name	verdict
 8810	devpi-server	notp
 8811	pytest-parametrization	notp
 8812	json-tricks	notp
-8813	lightning-fabric	
+8813	lightning-fabric	notp
 8814	django-fernet-encrypted-fields	notp
 8815	go-task-bin	tp
-8816	lightecc	
+8816	lightecc	notp
 8817	pyro5	notp
 8818	suntime	notp
 8819	click-config-file	notp
 8820	aws-cdk-aws-location-alpha	notp
-8821	getname	
+8821	getname	notp
 8822	doccmd	tp
 8823	unyt	tp
 8824	dlib	notp
@@ -8866,7 +8866,7 @@ rank	name	verdict
 8865	python-datauri	notp
 8866	django-request-logging	notp
 8867	streamlit-avatar	notp
-8868	scim2-models	
+8868	scim2-models	tp
 8869	djangorestframework-datatables	notp
 8870	django-graphql-jwt	notp
 8871	acquire	tp
@@ -8889,7 +8889,7 @@ rank	name	verdict
 8888	woocommerce	notp
 8889	jalali-core	notp
 8890	pyccolo	notp
-8891	pyrtf3	
+8891	pyrtf3	notp
 8892	python-jsonschema-objects	notp
 8893	gh-md-to-html	notp
 8894	aws-cdk-aws-ecr	notp
@@ -8907,7 +8907,7 @@ rank	name	verdict
 8906	types-netaddr	notp
 8907	aws-cdk-aws-applicationautoscaling	notp
 8908	scann	notp
-8909	sqlite3-api	
+8909	sqlite3-api	notp
 8910	percy	notp
 8911	py-cord	notp
 8912	efficientnet-pytorch	notp
@@ -8944,7 +8944,7 @@ rank	name	verdict
 8943	dagster-pagerduty	notp
 8944	ifcfg	notp
 8945	peppercorn	notp
-8946	flask-orjson	
+8946	flask-orjson	tp
 8947	globus-sdk	tp
 8948	django-sql-explorer	tp
 8949	aws-cdk-aws-sqs	notp
@@ -8981,7 +8981,7 @@ rank	name	verdict
 8980	flake8-picky-parentheses	tp
 8981	nucliadb-protos	notp
 8982	sentry-cli	notp
-8983	regscale-python-ssp	
+8983	regscale-python-ssp	notp
 8984	jschon	notp
 8985	cdp-socket	notp
 8986	prodigyopt	tp
@@ -9327,9 +9327,9 @@ rank	name	verdict
 9326	dateformat	notp
 9327	supervisord-dependent-startup	notp
 9328	aws-cdk-aws-sam	notp
-9329	bridgecrew	
+9329	bridgecrew	tp
 9330	trufflehogregexes	notp
-9331	linkedin-api	
+9331	linkedin-api	notp
 9332	spnl	tp
 9333	llmcompressor	notp
 9334	logutils	notp
@@ -9340,7 +9340,7 @@ rank	name	verdict
 9339	rumdl	notp
 9340	streamlit-antd-components	notp
 9341	xradar	notp
-9342	pyfunceble-dev	
+9342	pyfunceble-dev	notp
 9343	truelayer-signing	notp
 9344	sqlalchemy-vertica-python	notp
 9345	mail-parser-reply	notp
@@ -9396,7 +9396,7 @@ rank	name	verdict
 9395	virtme-ng	notp
 9396	pygeos	notp
 9397	acryl-executor	notp
-9398	huggingface	
+9398	huggingface	notp
 9399	django-nine	notp
 9400	strip-markdown	notp
 9401	git-url-parse	notp
@@ -9418,7 +9418,7 @@ rank	name	verdict
 9417	hanziconv	notp
 9418	optimum-intel	notp
 9419	phantom-types	tp
-9420	flask-swagger	
+9420	flask-swagger	notp
 9421	aws-cdk-aws-codebuild	notp
 9422	cachey	notp
 9423	ocifs	notp
@@ -9493,7 +9493,7 @@ rank	name	verdict
 9492	pipx-in-pipx	notp
 9493	pytest-ruff	notp
 9494	osquery	tp
-9495	aot-biomaps	
+9495	aot-biomaps	notp
 9496	sqlalchemy-exasol	notp
 9497	esphome	tp
 9498	aws-cdk-aws-stepfunctions	notp
@@ -9544,7 +9544,7 @@ rank	name	verdict
 9543	craft-parts	tp
 9544	adafruit-blinka	notp
 9545	ripgrepy	notp
-9546	scim2-server	
+9546	scim2-server	tp
 9547	materialyoucolor	tp
 9548	milvus-model	notp
 9549	tensorrt-cu12	notp
@@ -9653,7 +9653,7 @@ rank	name	verdict
 9652	sagemaker-feature-store-pyspark	notp
 9653	opytional	notp
 9654	stats-can	tp
-9655	beaker-py	
+9655	beaker-py	notp
 9656	ssh-import-id	notp
 9657	npe2	notp
 9658	python-vlc	notp
@@ -9865,7 +9865,7 @@ rank	name	verdict
 9864	onnx2torch-py313	notp
 9865	amundsen-databuilder	notp
 9866	abstract-utilities	notp
-9867	pephubclient	
+9867	pephubclient	tp
 9868	update	notp
 9869	pillow-jxl-plugin	notp
 9870	face-alignment	notp
@@ -9874,7 +9874,7 @@ rank	name	verdict
 9873	firebird-base	notp
 9874	fief-client	notp
 9875	pint-pandas	notp
-9876	esp-bool-parser	
+9876	esp-bool-parser	tp
 9877	flake8-async	notp
 9878	yesqa	notp
 9879	metricflow	tp
@@ -9949,7 +9949,7 @@ rank	name	verdict
 9948	sklearndf	notp
 9949	py-memoize	notp
 9950	pymem	notp
-9951	pysingleton	
+9951	pysingleton	notp
 9952	climage	notp
 9953	google-apps-meet	tp
 9954	postgrid-python	notp
@@ -9979,7 +9979,7 @@ rank	name	verdict
 9978	intel-cmplr-lic-rt	notp
 9979	py3rijndael	notp
 9980	blockdiag	notp
-9981	lumigo-core	
+9981	lumigo-core	notp
 9982	ofxparse	notp
 9983	grpcio-channelz	notp
 9984	mozshellutil	notp
@@ -10000,7 +10000,7 @@ rank	name	verdict
 9999	eido	tp
 10000	jupyterlab-code-formatter	tp
 10001	catboost-dev	tp
-10002	flashy	
+10002	flashy	notp
 10003	validate-docbr	notp
 10004	methoddispatch	notp
 10005	flask-pydantic-spec	tp
@@ -10098,7 +10098,7 @@ rank	name	verdict
 10097	pydlt	notp
 10098	tini	notp
 10099	phaxio	notp
-10100	mosaicml-cli	
+10100	mosaicml-cli	notp
 10101	otel-extensions	notp
 10102	azure-ai-language-conversations	notp
 10103	pyevtk	notp
@@ -10127,7 +10127,7 @@ rank	name	verdict
 10126	scikit-learn-intelex	notp
 10127	python-ironicclient	notp
 10128	cycode	tp
-10129	prophecy-libs	
+10129	prophecy-libs	notp
 10130	runtype	notp
 10131	streamlit-ace	notp
 10132	pydap	notp
@@ -10181,7 +10181,7 @@ rank	name	verdict
 10180	izihawa-types	notp
 10181	sphinxcontrib-django	notp
 10182	demisto-py	notp
-10183	codeflash-benchmark	
+10183	codeflash-benchmark	notp
 10184	matplotlib-fontja	tp
 10185	nanto	notp
 10186	aws-durable-execution-sdk-python	tp
@@ -10282,7 +10282,7 @@ rank	name	verdict
 10281	soda-core-bigquery	notp
 10282	scikit-video	notp
 10283	types-grpcio-reflection	notp
-10284	certbot-dns-eurodns	
+10284	certbot-dns-eurodns	notp
 10285	arviz-stats	tp
 10286	greenery	notp
 10287	qwen-omni-utils	notp
@@ -10371,8 +10371,8 @@ rank	name	verdict
 10370	pyexiftool	notp
 10371	edx-drf-extensions	notp
 10372	distinctipy	tp
-10373	langchain-databricks	
-10374	epik8s-tools	
+10373	langchain-databricks	tp
+10374	epik8s-tools	notp
 10375	lit-nlp	notp
 10376	mavproxy	notp
 10377	phoebusgen	notp
@@ -10438,7 +10438,7 @@ rank	name	verdict
 10437	xunitparser	notp
 10438	snc4onnx	notp
 10439	tradingeconomics	notp
-10440	wallet-py3k	
+10440	wallet-py3k	notp
 10441	lycoris-lora	notp
 10442	smg-grpc-proto	notp
 10443	minidump	notp
@@ -10548,7 +10548,7 @@ rank	name	verdict
 10547	shortzy	notp
 10548	documenttemplate	notp
 10549	matplotlib-scalebar	notp
-10550	eventregistry	
+10550	eventregistry	notp
 10551	xblock	notp
 10552	phx-class-registry	notp
 10553	deep-merge	notp
@@ -10762,7 +10762,7 @@ rank	name	verdict
 10761	huaweicloudsdkcore	notp
 10762	geomdl	notp
 10763	citeproc-py	notp
-10764	lightdsa	
+10764	lightdsa	notp
 10765	uv-iso-env	notp
 10766	pipestat	tp
 10767	qiskit-terra	tp
@@ -10772,13 +10772,13 @@ rank	name	verdict
 10771	mintotp	notp
 10772	contexttimer	notp
 10773	arraykit	notp
-10774	bithuman	
+10774	bithuman	notp
 10775	amazon-textract-prettyprinter	notp
 10776	scrapegraphai	notp
 10777	soda-core-redshift	notp
 10778	docx-mailmerge	notp
 10779	launchdarkly-openfeature-server	notp
-10780	momentchi2	
+10780	momentchi2	notp
 10781	ai4ts	notp
 10782	oslash	notp
 10783	edx-django-release-util	notp
@@ -10893,10 +10893,10 @@ rank	name	verdict
 10892	python-cas	notp
 10893	cerbos	tp
 10894	heavyball	tp
-10895	qwen-asr	
+10895	qwen-asr	notp
 10896	hatch-protobuf	tp
 10897	elastic-agent-client	notp
-10898	socketdev	
+10898	socketdev	tp
 10899	intersphinx-registry	tp
 10900	aia	notp
 10901	waxtablet	notp
@@ -10956,7 +10956,7 @@ rank	name	verdict
 10955	interchange	notp
 10956	nassl	notp
 10957	apache-airflow-providers-apprise	notp
-10958	always-updates	
+10958	always-updates	notp
 10959	dotenv-linter	notp
 10960	openrouter	notp
 10961	gridtools-cpp	tp
@@ -10972,7 +10972,7 @@ rank	name	verdict
 10971	nosexcover	notp
 10972	z3c-pt	notp
 10973	baseten-performance-client	tp
-10974	wrapper-tls-requests	
+10974	wrapper-tls-requests	tp
 10975	nemo-text-processing	notp
 10976	edx-api-doc-tools	notp
 10977	zope-contentprovider	notp
@@ -11013,7 +11013,7 @@ rank	name	verdict
 11012	unittest-parametrize	tp
 11013	salesforce-fuelsdk	notp
 11014	cmocean	tp
-11015	s3urls	
+11015	s3urls	notp
 11016	tnefparse	notp
 11017	awsiotpythonsdk	notp
 11018	winrt-windows-devices-bluetooth-advertisement	notp
@@ -11126,8 +11126,8 @@ rank	name	verdict
 11125	wyhash	notp
 11126	hyperleaup	notp
 11127	arn	notp
-11128	haystack-pydoc-tools	
-11129	running-process	
+11128	haystack-pydoc-tools	notp
+11129	running-process	notp
 11130	django-viewflow	notp
 11131	pansi	notp
 11132	django-components	notp
@@ -11138,7 +11138,7 @@ rank	name	verdict
 11137	alibabacloud-vpc20160428	notp
 11138	fastapi-utilities	notp
 11139	edx-submissions	notp
-11140	locales	
+11140	locales	notp
 11141	siphashc	tp
 11142	apache-airflow-providers-apache-pinot	notp
 11143	marvin	tp
@@ -11150,7 +11150,7 @@ rank	name	verdict
 11149	pyspark-data-sources	notp
 11150	cdktf-cdktf-provider-random	notp
 11151	letta	notp
-11152	dependencies	
+11152	dependencies	notp
 11153	apache-airflow-providers-microsoft-psrp	notp
 11154	kekik	notp
 11155	trieve-py-client	notp
@@ -11346,13 +11346,13 @@ rank	name	verdict
 11345	pyopenjtalk	tp
 11346	lerobot	tp
 11347	django-tastypie	notp
-11348	skope-rules	
+11348	skope-rules	notp
 11349	hbreader	notp
 11350	wn	tp
 11351	abstra	notp
 11352	zc-buildout	notp
 11353	qreader	notp
-11354	lunary	
+11354	lunary	notp
 11355	typing-validation	notp
 11356	edx-sga	notp
 11357	yubico-client	notp
@@ -11395,7 +11395,7 @@ rank	name	verdict
 11394	azure-cognitiveservices-knowledge-qnamaker	notp
 11395	snappy-manifolds	notp
 11396	pysodium	tp
-11397	cloudsearch	
+11397	cloudsearch	notp
 11398	scrapinghub	tp
 11399	esp-idf-nvs-partition-gen	notp
 11400	miniopy-async	notp
@@ -11560,7 +11560,7 @@ rank	name	verdict
 11559	gandlf	notp
 11560	tma-authenticator	notp
 11561	mwxml	notp
-11562	para	
+11562	para	notp
 11563	pip2pi	notp
 11564	large-image	notp
 11565	peakutils	notp
@@ -11626,7 +11626,7 @@ rank	name	verdict
 11625	asgi-ratelimit	notp
 11626	cognee	notp
 11627	unipath	notp
-11628	hatch-mypyc	
+11628	hatch-mypyc	notp
 11629	pipablepytorch3d	notp
 11630	linode-api4	tp
 11631	dijkstar	notp
@@ -11691,7 +11691,7 @@ rank	name	verdict
 11690	openfermion	notp
 11691	httpdbg	tp
 11692	metar-taf-parser-mivek	notp
-11693	novu	
+11693	novu	notp
 11694	django-bootstrap-datepicker-plus	tp
 11695	chargehound	notp
 11696	beets	tp
@@ -11745,7 +11745,7 @@ rank	name	verdict
 11744	enterprise-integrated-channels	notp
 11745	geode-numerics	notp
 11746	autogluon-vision	notp
-11747	static	
+11747	static	notp
 11748	pytest-integration-mark	notp
 11749	poetry-plugin-sort	notp
 11750	mkdocs-same-dir	tp
@@ -11890,7 +11890,7 @@ rank	name	verdict
 11889	scc-firewall-manager-sdk	notp
 11890	pep562	notp
 11891	pychromecast	notp
-11892	bunch-py3	
+11892	bunch-py3	notp
 11893	asyncpraw	tp
 11894	crate	notp
 11895	maseya-z3pr	notp
@@ -12019,7 +12019,7 @@ rank	name	verdict
 12018	pydirectinput	notp
 12019	django-heroku	notp
 12020	pybammsolvers	tp
-12021	infisical-python	
+12021	infisical-python	notp
 12022	jsonpath-rust-bindings	notp
 12023	office-word-mcp-server	notp
 12024	django-invitations	notp
@@ -12069,7 +12069,7 @@ rank	name	verdict
 12068	pyais	notp
 12069	assemblyline-service-client	notp
 12070	fastapi-cloudauth	notp
-12071	capsolver	
+12071	capsolver	notp
 12072	os-win	notp
 12073	git-remote-s3	notp
 12074	hana-ml	notp
@@ -12082,7 +12082,7 @@ rank	name	verdict
 12081	deflate-dict	notp
 12082	pytricia	notp
 12083	webexpythonsdk	tp
-12084	pytest-async	
+12084	pytest-async	notp
 12085	types-aiobotocore-codebuild	notp
 12086	pyshadow	notp
 12087	odc-stac	notp
@@ -12162,7 +12162,7 @@ rank	name	verdict
 12161	temp	notp
 12162	duckdb-extensions	tp
 12163	pyicumessageformat	notp
-12164	molecule-multipass	
+12164	molecule-multipass	notp
 12165	pydantic-tes	notp
 12166	isa-rwval	notp
 12167	aeventkit	tp
@@ -12564,7 +12564,7 @@ rank	name	verdict
 12563	gower	notp
 12564	datedelta	notp
 12565	miniwdl	notp
-12566	timeoutcontext	
+12566	timeoutcontext	notp
 12567	bizdays	notp
 12568	hazelcast-python-client	notp
 12569	xarray-spatial	notp
@@ -12611,7 +12611,7 @@ rank	name	verdict
 12610	py-yt-search	tp
 12611	urlpy	notp
 12612	hiddifypanel	notp
-12613	eval-protocol	
+12613	eval-protocol	tp
 12614	pytest-codecov	tp
 12615	presidio-image-redactor	tp
 12616	klein	notp
@@ -12709,7 +12709,7 @@ rank	name	verdict
 12708	pyvertica	notp
 12709	neurokit2	notp
 12710	cuequivariance-ops-cu12	notp
-12711	jhi-databricksenvironment	
+12711	jhi-databricksenvironment	notp
 12712	osc-placement	notp
 12713	etcd-sdk-python	notp
 12714	django-redshift-backend	notp
@@ -12784,7 +12784,7 @@ rank	name	verdict
 12783	translation-finder	tp
 12784	crested	tp
 12785	cpi	notp
-12786	pytest-textual-snapshot	
+12786	pytest-textual-snapshot	notp
 12787	dash-bootstrap-templates	notp
 12788	django-embed-video	notp
 12789	coveo-systools	tp
@@ -12804,7 +12804,7 @@ rank	name	verdict
 12803	pyannotate	notp
 12804	streamlit-tags	notp
 12805	hydra-submitit-launcher	notp
-12806	parameter-expansion-patched	
+12806	parameter-expansion-patched	notp
 12807	types-aiobotocore-dax	notp
 12808	universal-startfile	notp
 12809	ha-ffmpeg	notp
@@ -13023,7 +13023,7 @@ rank	name	verdict
 13022	ultimate-hosts-blacklist-test-launcher	notp
 13023	paddle	tp
 13024	pysparkling	notp
-13025	moose-cli	
+13025	moose-cli	notp
 13026	types-parsimonious	notp
 13027	pyadomd	notp
 13028	pytest-tldr	notp
@@ -13095,9 +13095,9 @@ rank	name	verdict
 13094	iteround	notp
 13095	distogram	notp
 13096	name-matching	notp
-13097	axial-positional-embedding	
+13097	axial-positional-embedding	notp
 13098	mkdocs-include-dir-to-nav	notp
-13099	teradatamodelops	
+13099	teradatamodelops	notp
 13100	blob	notp
 13101	rust-pgn-reader-python-binding	tp
 13102	golicense-classifier	notp
@@ -13108,7 +13108,7 @@ rank	name	verdict
 13107	xunitparserx	notp
 13108	pysolarmanv5	notp
 13109	amazon-appflow-custom-connector-sdk	notp
-13110	reward-kit	
+13110	reward-kit	notp
 13111	glance-store	notp
 13112	ultimate-hosts-blacklist-whitelist	notp
 13113	aiogrpc	notp
@@ -13133,7 +13133,7 @@ rank	name	verdict
 13132	types-aiobotocore-geo-routes	notp
 13133	flake8-pep585	notp
 13134	antimeridian	tp
-13135	flake8-no-unnecessary-fstrings	
+13135	flake8-no-unnecessary-fstrings	notp
 13136	django-sendfile2	notp
 13137	django-plotly-dash	notp
 13138	types-aiobotocore-s3control	notp
@@ -13185,7 +13185,7 @@ rank	name	verdict
 13184	cdk-tweet-queue	tp
 13185	fastapi-injector	tp
 13186	flake8-absolute-import	notp
-13187	aiologger	
+13187	aiologger	notp
 13188	discord-protos	tp
 13189	langflow-base	notp
 13190	python-redux	tp
@@ -13386,7 +13386,7 @@ rank	name	verdict
 13385	types-aiobotocore-codepipeline	notp
 13386	types-aiobotocore-lex-runtime	notp
 13387	types-aiobotocore-memorydb	notp
-13388	os-sys	
+13388	os-sys	notp
 13389	types-aiobotocore-appmesh	notp
 13390	types-aiobotocore-discovery	notp
 13391	types-aiobotocore-comprehendmedical	notp
@@ -13572,7 +13572,7 @@ rank	name	verdict
 13571	types-aiobotocore-pipes	notp
 13572	pafy	notp
 13573	types-aiobotocore-appfabric	notp
-13574	telegram	
+13574	telegram	notp
 13575	types-aiobotocore-cleanrooms	notp
 13576	extractous	tp
 13577	types-aiobotocore-connectcases	notp
@@ -13688,7 +13688,7 @@ rank	name	verdict
 13687	asciimatics	tp
 13688	wakepy	tp
 13689	pytest-jupyter	tp
-13690	markdown-it-reporter	
+13690	markdown-it-reporter	notp
 13691	polars-cloud	tp
 13692	based58	notp
 13693	certificates	tp
@@ -13736,8 +13736,8 @@ rank	name	verdict
 13735	cascadio	tp
 13736	horovod	notp
 13737	passagemath-plantri	notp
-13738	dedupe-variable-datetime	
-13739	memoized-property	
+13738	dedupe-variable-datetime	notp
+13739	memoized-property	notp
 13740	binary-refinery	tp
 13741	snappy	notp
 13742	smdebug	notp
@@ -13776,7 +13776,7 @@ rank	name	verdict
 13775	aimmo	notp
 13776	sphinx-diagrams	notp
 13777	azure-mgmt-hybridkubernetes	notp
-13778	django-memoize	
+13778	django-memoize	notp
 13779	sort-requirements	notp
 13780	blockkit	tp
 13781	maec	notp
@@ -13852,7 +13852,7 @@ rank	name	verdict
 13851	efinance	notp
 13852	scraperapi-sdk	notp
 13853	perception	notp
-13854	sarvamai	
+13854	sarvamai	notp
 13855	credentials	notp
 13856	raiutils	notp
 13857	ansys-api-edb	tp
@@ -13909,7 +13909,7 @@ rank	name	verdict
 13908	invenio-base	notp
 13909	openfisca-france	notp
 13910	duckdb-extension-httpfs	tp
-13911	pulpcore-client	
+13911	pulpcore-client	tp
 13912	azure-communication-rooms	notp
 13913	pipecat-ai-small-webrtc-prebuilt	tp
 13914	tabula	notp
@@ -14009,7 +14009,7 @@ rank	name	verdict
 14008	verifiers	notp
 14009	ez-a-sync	notp
 14010	dazl	notp
-14011	ixnetwork	
+14011	ixnetwork	notp
 14012	theine-core	notp
 14013	dict-recursive-update	notp
 14014	proxyproviders	tp
@@ -14224,7 +14224,7 @@ rank	name	verdict
 14223	paytmchecksum	notp
 14224	botostubs	notp
 14225	common-expression-language	notp
-14226	python-geoip-python3	
+14226	python-geoip-python3	notp
 14227	linuxdoc	notp
 14228	libterraform	notp
 14229	pulumi-pagerduty	notp
@@ -14264,7 +14264,7 @@ rank	name	verdict
 14263	socketlabs-injectionapi	notp
 14264	types-aiobotocore-gameliftstreams	notp
 14265	inform	notp
-14266	pycausalimpact	
+14266	pycausalimpact	notp
 14267	baize	notp
 14268	cloudformation-cli	notp
 14269	types-aiobotocore-workspaces-instances	notp
@@ -14438,7 +14438,7 @@ rank	name	verdict
 14437	supervertaler	notp
 14438	laituri	tp
 14439	robotpy-cppheaderparser	tp
-14440	sqlescapy	
+14440	sqlescapy	notp
 14441	bluesky	tp
 14442	a-bigelow-cdk-eventbridge-partner-processors	notp
 14443	micropipenv	notp
@@ -14461,7 +14461,7 @@ rank	name	verdict
 14460	label-studio-tools	notp
 14461	casbin-async-sqlalchemy-adapter	notp
 14462	onnxtr	notp
-14463	chunkr-ai	
+14463	chunkr-ai	notp
 14464	imia	notp
 14465	recognizers-text-date-time	notp
 14466	deal	notp
@@ -14500,7 +14500,7 @@ rank	name	verdict
 14499	audeer	tp
 14500	fastapi-cognito	notp
 14501	d6tstack	notp
-14502	fake-headers	
+14502	fake-headers	notp
 14503	minorminer	notp
 14504	awslimitchecker	notp
 14505	pwinput	notp
@@ -14533,7 +14533,7 @@ rank	name	verdict
 14532	sqlalchemy-cratedb	notp
 14533	prompthub-py	notp
 14534	large-image-source-test	notp
-14535	meutils	
+14535	meutils	notp
 14536	stac-pydantic	notp
 14537	time-uuid	notp
 14538	pytest-testdox	notp
@@ -14624,7 +14624,7 @@ rank	name	verdict
 14623	specutils	notp
 14624	better-abc	notp
 14625	lnkparse3	notp
-14626	alerta	
+14626	alerta	notp
 14627	hpbandster	notp
 14628	turbojpeg	notp
 14629	sqlalchemy-celery-beat	notp
@@ -14729,7 +14729,7 @@ rank	name	verdict
 14728	openmetadata-managed-apis	notp
 14729	freertos-gdb	notp
 14730	asyauth	notp
-14731	dummy-notebookutils	
+14731	dummy-notebookutils	notp
 14732	strongdm	notp
 14733	gate-api	tp
 14734	coala	notp
@@ -14788,7 +14788,7 @@ rank	name	verdict
 14787	bbox-visualizer	tp
 14788	openfile	notp
 14789	appsignal	notp
-14790	blender-mcp	
+14790	blender-mcp	notp
 14791	opencage	notp
 14792	token-runtime-id	notp
 14793	convoy-python	notp
@@ -14871,7 +14871,7 @@ rank	name	verdict
 14870	dandi	notp
 14871	drf-recaptcha	tp
 14872	blue	notp
-14873	nsj-rest-lib2	
+14873	nsj-rest-lib2	notp
 14874	pocketsphinx	notp
 14875	sentence-splitter	notp
 14876	fit-tool	tp
@@ -14950,13 +14950,13 @@ rank	name	verdict
 14949	crypto-cpp-py	notp
 14950	pygohcl	notp
 14951	sqeleton	notp
-14952	legit-api-client	
+14952	legit-api-client	notp
 14953	cupy-wheel	notp
 14954	cplex	notp
 14955	highered	notp
 14956	impi-rt	notp
 14957	llvm-demangle-fxti	tp
-14958	fastapi-shell	
+14958	fastapi-shell	notp
 14959	pytorchvideo	notp
 14960	py-xbrl	notp
 14961	ecmwflibs	notp
