@@ -1,0 +1,46 @@
+{% if issues %}
+<table class="issue-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Title</th>
+      <th>State</th>
+      <th>Created</th>
+      <th>Keyword</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for issue in issues %}
+    <tr class="{% if issue.number in already_tracked %}already-tracked{% endif %}">
+      <td>
+        <a href="{{ issue.url }}" target="_blank" rel="noopener">
+          {{ issue.number }}
+        </a>
+      </td>
+      <td>{{ issue.title }}</td>
+      <td class="state state-{{ issue.state }}">{{ issue.state }}</td>
+      <td>{{ issue.createdAt[:10] }}</td>
+      <td class="keyword">{{ issue.keyword }}</td>
+      <td>
+        {% if issue.number not in already_tracked %}
+        <form hx-post="/track" hx-target="#detail" hx-swap="innerHTML">
+          <input type="hidden" name="slug" value="{{ slug }}">
+          <input type="hidden" name="number" value="{{ issue.number }}">
+          <input type="hidden" name="url" value="{{ issue.url }}">
+          <input type="hidden" name="title" value="{{ issue.title }}">
+          <input type="hidden" name="state" value="{{ issue.state }}">
+          <input type="hidden" name="keyword" value="{{ issue.keyword }}">
+          <button type="submit" class="track-btn">Track</button>
+        </form>
+        {% else %}
+        <span class="already">tracked</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No issues found matching keywords</p>
+{% endif %}

@@ -13,11 +13,9 @@ To re-run, call the package entrypoint `trusty-pub`.
 
 ## Trusted Publishing detection
 
-We use [grepow][grepow] to pull down the GitHub repos in sparse mode (we only need the
+We use [grepow] to pull down the GitHub repos in sparse mode (we only need the
 `.github/workflows` subdir),
 after having acquired the repo names from package metadata on PyPI.
-
-[grepow]: https://github.com/lmmx/grepow
 
 Then we look for signs of Trusted Publishing:
 
@@ -25,8 +23,9 @@ Then we look for signs of Trusted Publishing:
   is the strongest indicator (required but not sufficient).
 - Either a step that runs `uv publish` or (more commonly) uses the
   `pypa/gh-action-pypi-publish` action.
-  - Example of `uv publish` for the [fastmcp][fastmcp] package
+    - Example of `uv publish` for the [fastmcp] package
 - The presence of username/password credentials for a package upload
   is a sign that Trusted Publishing is **not** being used.
 
 [fastmcp]: https://github.com/PrefectHQ/fastmcp/blob/b1505ba5d7cd90cbd04912f2e88cdd42c57b9e80/.github/workflows/publish.yml#L23
+[grepow]: https://github.com/lmmx/grepow

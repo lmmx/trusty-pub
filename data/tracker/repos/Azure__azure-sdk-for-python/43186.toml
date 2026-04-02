@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-sdk-for-python/issues/43186"
+title = "Release packages using trusted publishing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:40:21Z"

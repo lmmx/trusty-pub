@@ -1,0 +1,11 @@
+{% from "fragments/_macros.html" import search_item, load_more_sentinel %}
+{% if results %}
+<ul class="search-results">
+  {% for row in results %}
+  {{ search_item(row) }}
+  {% endfor %}
+  {{ load_more_sentinel(has_more, next_offset) }}
+</ul>
+{% else %}
+<p class="empty">No matching packages</p>
+{% endif %}

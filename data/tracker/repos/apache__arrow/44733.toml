@@ -1,0 +1,5 @@
+issue_url = "https://github.com/apache/arrow/issues/44733"
+title = "[CI][Python] Investigate trusted publishing for uploading wheels to PyPI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:20:09Z"

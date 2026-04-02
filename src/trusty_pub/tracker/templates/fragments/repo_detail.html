@@ -1,0 +1,47 @@
+{% if flash %}
+<div class="flash">{{ flash }}</div>
+{% endif %}
+
+<div class="repo-header">
+  <h2>{{ slug_to_owner_repo(slug) }}</h2>
+  <a href="{{ github_url }}" target="_blank" rel="noopener">{{ github_url }}</a>
+</div>
+
+<div class="repo-packages">
+  <h3>Packages ({{ packages | length }})</h3>
+  {% for p in packages %}
+  <span class="pkg verdict-{{ p.verdict }}">#{{ p.rank }} {{ p.name }}</span>
+  {% endfor %}
+</div>
+
+{% if tracked %}
+<div class="tracked-section">
+  <h3>Tracked issues</h3>
+  {% for t in tracked %}
+  <div class="tracked-issue">
+    <a href="{{ t.issue_url }}" target="_blank" rel="noopener">
+      #{{ t.number }}
+    </a>
+    <span class="issue-title">{{ t.title }}</span>
+    <span class="state state-{{ t.state }}">{{ t.state }}</span>
+    {% if t.keyword %}
+    <span class="keyword">{{ t.keyword }}</span>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="issue-search">
+  <h3>Search issues</h3>
+  <p class="keywords-note">
+    Keywords: {{ keywords | join(", ") }}
+  </p>
+  <form hx-post="/issues" hx-target="#issue-results" hx-swap="innerHTML"
+        hx-indicator="#issue-spinner">
+    <input type="hidden" name="slug" value="{{ slug }}">
+    <button type="submit">Search for TP issues</button>
+    <span id="issue-spinner" class="htmx-indicator">Searching…</span>
+  </form>
+  <div id="issue-results"></div>
+</div>

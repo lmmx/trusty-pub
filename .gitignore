@@ -9,3 +9,4 @@ data/workflows/
 
 # Virtual environments
 .venv
+site/

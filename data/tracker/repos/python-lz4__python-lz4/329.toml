@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-lz4/python-lz4/issues/329"
+title = "Switch to Trusted Publishing for package upload to PyPI in CI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:09:52Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/contourpy/contourpy/issues/482"
+title = "Upload packages to PyPI using Trusted Publishing in CI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:41:48Z"

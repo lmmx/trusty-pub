@@ -56,3 +56,10 @@ def resolve_analysis(name: str | None = None) -> dict:
     if name is None:
         name = next(iter(sources))
     return sources[name]
+
+
+def resolve_tracker(name: str | None = None) -> dict:
+    sources = _load_toml()["data"]["tracker"]
+    if name is None:
+        name = next(iter(sources))
+    return sources[name]

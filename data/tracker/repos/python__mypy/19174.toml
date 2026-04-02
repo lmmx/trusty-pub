@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python/mypy/issues/19174"
+title = "Make it easier to retry in upload-pypi script"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:43:18Z"

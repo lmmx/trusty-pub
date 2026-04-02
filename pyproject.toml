@@ -3,17 +3,19 @@ name = "trusty-pub"
 version = "0.1.0"
 description = "Indexing support for Trusted Publishing on PyPI"
 readme = "README.md"
-authors = [
-    { name = "Louis Maddox", email = "louismmx@gmail.com" }
-]
+authors = [{ name = "Louis Maddox", email = "louismmx@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = [
-    "grepow>=0.1.1",
-    "httpx>=0.28.1",
-    "packaging>=26.0",
-    "polars>=1.39.3",
-    "pyyaml>=6.0.3",
-    "tqdm>=4.67.3",
+  "fastapi>=0.135.2",
+  "grepow>=0.1.1",
+  "httpx>=0.28.1",
+  "jinja2>=3.1.6",
+  "packaging>=26.0",
+  "polars>=1.39.3",
+  "python-multipart>=0.0.22",
+  "pyyaml>=6.0.3",
+  "tqdm>=4.67.3",
+  "uvicorn>=0.42.0",
 ]
 
 [project.scripts]
@@ -25,7 +27,12 @@ tp-classify = "trusty_pub.classify:classify"
 tp-classify-nogithub = "trusty_pub.classify_nogithub:classify_nogithub"
 tp-report = "trusty_pub.report:generate_report"
 tp-deps = "trusty_pub.deps_analysis:run_analysis"
+tp-tracker = "trusty_pub.tracker:main"
+tp-ss-build = "trusty_pub.tracker:build"
 
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+exclude-newer = "7 days"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/AzureAD/microsoft-authentication-extensions-for-python/issues/148"
+title = "Switch to Trusted Publishing for package upload to PyPI in CI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:09:23Z"
