@@ -3,21 +3,19 @@ name = "trusty-pub"
 version = "0.1.0"
 description = "Indexing support for Trusted Publishing on PyPI"
 readme = "README.md"
-authors = [
-    { name = "Louis Maddox", email = "louismmx@gmail.com" }
-]
+authors = [{ name = "Louis Maddox", email = "louismmx@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.135.2",
-    "grepow>=0.1.1",
-    "httpx>=0.28.1",
-    "jinja2>=3.1.6",
-    "packaging>=26.0",
-    "polars>=1.39.3",
-    "python-multipart>=0.0.22",
-    "pyyaml>=6.0.3",
-    "tqdm>=4.67.3",
-    "uvicorn>=0.42.0",
+  "fastapi>=0.135.2",
+  "grepow>=0.1.1",
+  "httpx>=0.28.1",
+  "jinja2>=3.1.6",
+  "packaging>=26.0",
+  "polars>=1.39.3",
+  "python-multipart>=0.0.22",
+  "pyyaml>=6.0.3",
+  "tqdm>=4.67.3",
+  "uvicorn>=0.42.0",
 ]
 
 [project.scripts]
