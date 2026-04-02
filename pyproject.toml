@@ -35,3 +35,6 @@ tp-ss-build = "trusty_pub.tracker:build"
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+exclude-newer = "7 days"
