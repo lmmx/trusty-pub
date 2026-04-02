@@ -1,28 +1,137 @@
 [
   {
-    "title": "Publishing to PyPI with a Trusted Publisher",
-    "url": "https://docs.pypi.org/trusted-publishers/",
-    "type": "docs",
-    "desc": "Official PyPI documentation on setting up trusted publishing."
-  },
-  {
-    "title": "Trusted Publishers — How and Why",
+    "title": "Introducing Trusted Publishers",
     "url": "https://blog.pypi.org/posts/2023-04-20-introducing-trusted-publishers/",
     "type": "blog",
-    "desc": "PyPI's original announcement and rationale."
+    "desc": "PyPI's original announcement explaining Trusted Publishing and OIDC-based uploads."
   },
   {
-    "title": "LiteLLM supply-chain compromise via leaked PyPI credentials",
-    "url": "https://blog.pypi.org/posts/2025-03-30-litellm-compromise/",
+    "title": "PyPI now supports digital attestations",
+    "url": "https://discuss.python.org/t/pypi-now-supports-digital-attestations/71158",
+    "type": "blog",
+    "desc": "Announcement of PEP 740 attestation support on PyPI, building on Trusted Publishing."
+  },
+  {
+    "title": "New OIDC providers for Trusted Publishing",
+    "url": "https://discuss.python.org/t/new-oidc-providers-for-trusted-publishing/106334",
+    "type": "blog",
+    "desc": "Discussion on expanding Trusted Publishing beyond GitHub Actions to other CI providers."
+  },
+  {
+    "title": "OpenSSF: Trusted Publishers for All Package Repositories",
+    "url": "https://repos.openssf.org/trusted-publishers-for-all-package-repositories.html",
+    "type": "blog",
+    "desc": "OpenSSF report on how Trusted Publishing works and the case for adoption across ecosystems."
+  },
+  {
+    "title": "LiteLLM supply-chain attack via leaked PyPI credentials",
+    "url": "https://futuresearch.ai/blog/litellm-pypi-supply-chain-attack/",
     "type": "incident",
     "packages": ["litellm"],
-    "desc": "Attacker used leaked API token to push malicious releases. Trusted publishing would have prevented this."
+    "desc": "Attacker used leaked API token to push malicious releases. Trusted Publishing would have eliminated the stored credential."
   },
   {
-    "title": "Ultralytics supply-chain attack via compromised GitHub Actions",
-    "url": "https://blog.yossarian.net/2024/12/06/zizmor-ultralytics-injection",
+    "title": "Snyk: Poisoned scanner backdooring LiteLLM",
+    "url": "https://snyk.io/articles/poisoned-security-scanner-backdooring-litellm/",
+    "type": "incident",
+    "packages": ["litellm"],
+    "desc": "Snyk's technical analysis of the LiteLLM compromise and its supply-chain implications."
+  },
+  {
+    "title": "PyPI blog: Ultralytics attack analysis",
+    "url": "https://blog.pypi.org/posts/2024-12-11-ultralytics-attack-analysis/",
     "type": "incident",
     "packages": ["ultralytics"],
-    "desc": "Workflow injection led to malicious PyPI uploads. TP alone wouldn't have prevented this but narrows the attack surface."
+    "desc": "PyPI's post-mortem on the ultralytics compromise via GitHub Actions injection, with recommendations including Trusted Publishing."
+  },
+  {
+    "title": "Trusted Publishers — PyPI documentation",
+    "url": "https://docs.pypi.org/trusted-publishers/",
+    "type": "docs",
+    "desc": "Official PyPI docs on configuring Trusted Publishing for your project."
+  },
+  {
+    "title": "Adding a Trusted Publisher — PyPI documentation",
+    "url": "https://docs.pypi.org/trusted-publishers/adding-a-publisher/",
+    "type": "docs",
+    "desc": "Step-by-step guide to registering a Trusted Publisher on PyPI."
+  },
+  {
+    "title": "Trusted Publishing internals — PyPI documentation",
+    "url": "https://docs.pypi.org/trusted-publishers/internals/",
+    "type": "docs",
+    "desc": "How Trusted Publishing works under the hood, including how to become an OIDC provider."
+  },
+  {
+    "title": "Trusted Publishing security model — PyPI documentation",
+    "url": "https://docs.pypi.org/trusted-publishers/security-model/",
+    "type": "docs",
+    "desc": "PyPI's explanation of the security properties and threat model for Trusted Publishing."
+  },
+  {
+    "title": "Digital attestations — PyPI documentation",
+    "url": "https://docs.pypi.org/attestations/",
+    "type": "docs",
+    "desc": "Build artifact attestations produced automatically when uploading via Trusted Publishing."
+  },
+  {
+    "title": "Publishing with GitHub Actions CI/CD — Python Packaging Guide",
+    "url": "https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/",
+    "type": "docs",
+    "desc": "The Python Packaging Authority's guide to setting up Trusted Publishing with GitHub Actions."
+  },
+  {
+    "title": "pypa/gh-action-pypi-publish",
+    "url": "https://github.com/pypa/gh-action-pypi-publish",
+    "type": "docs",
+    "desc": "The official PyPA GitHub Action for publishing to PyPI, with built-in Trusted Publishing support."
+  },
+  {
+    "title": "GitHub: Immutable releases",
+    "url": "https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases",
+    "type": "docs",
+    "desc": "GitHub's documentation on immutable releases with automatic attestation generation."
+  },
+  {
+    "title": "Are we PEP 740 yet?",
+    "url": "https://trailofbits.github.io/are-we-pep740-yet/",
+    "type": "howto",
+    "desc": "Trail of Bits tracker showing which top PyPI packages have adopted PEP 740 attestations."
+  },
+  {
+    "title": "zizmor — GitHub Actions security auditor",
+    "url": "https://zizmor.sh",
+    "type": "howto",
+    "desc": "Static analysis tool for finding security issues in GitHub Actions workflows. Catches misconfigurations that Trusted Publishing helps mitigate."
+  },
+  {
+    "title": "black: Switch to Trusted Publishing (PR #4611)",
+    "url": "https://github.com/psf/black/pull/4611",
+    "type": "howto",
+    "desc": "Reference implementation — black's pull request switching to Trusted Publishing, cited by PyPA as an example."
+  },
+  {
+    "title": "tenacity: Release workflow with uv + Trusted Publishing",
+    "url": "https://github.com/jd/tenacity/blob/main/.github/workflows/release.yml",
+    "type": "howto",
+    "desc": "Clean, minimal example of a Trusted Publishing workflow using uv."
+  },
+  {
+    "title": "idna: Deploy workflow with test PyPI + Trusted Publishing",
+    "url": "https://github.com/kjd/idna/blob/master/.github/workflows/deploy.yml",
+    "type": "howto",
+    "desc": "Example workflow that publishes to both test PyPI and production PyPI using Trusted Publishing."
+  },
+  {
+    "title": "Top PyPI Packages by downloads",
+    "url": "https://hugovk.github.io/top-pypi-packages/",
+    "type": "howto",
+    "desc": "Hugo van Kemenade's dataset of the most-downloaded PyPI packages — the basis for Trusty Pub's tracking."
+  },
+  {
+    "title": "RubyGems: Trusted Publishing",
+    "url": "https://guides.rubygems.org/trusted-publishing/",
+    "type": "howto",
+    "desc": "RubyGems' adoption of the same Trusted Publishing model, showing cross-ecosystem momentum."
   }
 ]
