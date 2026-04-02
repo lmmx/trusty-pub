@@ -8,7 +8,7 @@ body {
 }
 
 /* header */
-header { margin-bottom: .75rem; }
+header { position: relative; margin-bottom: .75rem; }
 header h1 {
   font-family: "Fraunces", Georgia, "Times New Roman", serif;
   font-size: 3rem; font-weight: 900;
@@ -17,6 +17,14 @@ header h1 {
   font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 1rem; color: #555; margin-top: .15rem;
 }
+
+.gh-link {
+  position: absolute; top: 10px; right: 10px;
+  display: flex; align-items: center; gap: .35rem;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: .85rem; color: #555;
+}
+.gh-link:hover { color: #0969da; text-decoration: none; }
 
 /* nav tabs */
 nav { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; }
@@ -128,3 +136,11 @@ a:hover { text-decoration: underline; }
   background: #e5e7eb; color: #374151; margin-left: .4rem;
 }
 .res-desc { font-size: .8rem; color: #666; margin-top: .15rem; }
+
+footer {
+  margin-top: 2rem; padding: 1rem 0;
+  border-top: 1px solid #e5e7eb;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: .8rem; color: #888;
+  text-align: center;
+}
