@@ -45,21 +45,12 @@ a:hover { text-decoration: underline; }
 
 /* status badges */
 .badge {
-  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: .75rem; padding: .15rem .5rem; border-radius: 10px;
   font-weight: 500; white-space: nowrap;
-  display: inline-flex; align-items: center; gap: .3rem;
 }
-.badge::before {
-  content: ""; width: 7px; height: 7px; border-radius: 50%;
-  display: inline-block; flex-shrink: 0;
-}
-.badge-tp { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
-.badge-tp::before { background: #22c55e; }
-.badge-notp { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
-.badge-notp::before { background: #ef4444; }
-.badge-unk { background: #fffbeb; color: #a16207; border: 1px solid #fde68a; }
-.badge-unk::before { background: #eab308; }
+.badge-tp { color: #15803d; }
+.badge-notp { color: #b91c1c; }
+.badge-unk { color: #a16207; }
 .tk { color: #065f46; font-weight: 700; font-size: .9rem; }
 
 /* zebra rows */
