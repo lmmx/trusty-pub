@@ -1,0 +1,28 @@
+[
+  {
+    "title": "Publishing to PyPI with a Trusted Publisher",
+    "url": "https://docs.pypi.org/trusted-publishers/",
+    "type": "docs",
+    "desc": "Official PyPI documentation on setting up trusted publishing."
+  },
+  {
+    "title": "Trusted Publishers — How and Why",
+    "url": "https://blog.pypi.org/posts/2023-04-20-introducing-trusted-publishers/",
+    "type": "blog",
+    "desc": "PyPI's original announcement and rationale."
+  },
+  {
+    "title": "LiteLLM supply-chain compromise via leaked PyPI credentials",
+    "url": "https://blog.pypi.org/posts/2025-03-30-litellm-compromise/",
+    "type": "incident",
+    "packages": ["litellm"],
+    "desc": "Attacker used leaked API token to push malicious releases. Trusted publishing would have prevented this."
+  },
+  {
+    "title": "Ultralytics supply-chain attack via compromised GitHub Actions",
+    "url": "https://blog.yossarian.net/2024/12/06/zizmor-ultralytics-injection",
+    "type": "incident",
+    "packages": ["ultralytics"],
+    "desc": "Workflow injection led to malicious PyPI uploads. TP alone wouldn't have prevented this but narrows the attack surface."
+  }
+]

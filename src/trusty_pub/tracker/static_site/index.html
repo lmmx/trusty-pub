@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trusty Pub</title>
+  <link href="https://unpkg.com/gridjs/dist/theme/mermaid.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🛡️ Trusty Pub</h1>
+    <p class="subtitle">Trusted Publishing Tracker for Python Packages</p>
+  </header>
+
+  <nav>
+    <button class="tab active" data-tab="tracker">Tracker</button>
+    <button class="tab" data-tab="resources">Resources</button>
+  </nav>
+
+  <!-- TRACKER TAB -->
+  <section id="tab-tracker">
+    <div id="stats"></div>
+    <div class="filters">
+      <label><input type="checkbox" id="show-tp" checked> 🟢 Trusted</label>
+      <label><input type="checkbox" id="show-notp" checked> 🔴 Missing</label>
+      <label><input type="checkbox" id="tracked-only"> Tracked only</label>
+    </div>
+    <div id="table"></div>
+    <div id="detail"></div>
+  </section>
+
+  <!-- RESOURCES TAB -->
+  <section id="tab-resources" hidden>
+    <div id="resources"></div>
+  </section>
+
+  <script src="https://unpkg.com/gridjs/dist/gridjs.umd.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

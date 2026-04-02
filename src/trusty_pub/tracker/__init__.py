@@ -16,3 +16,9 @@ def main(
     app = create_app(Path(target))
     webbrowser.open(f"http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def build(target: str = "./data", out: str = "./site") -> None:
+    from .build_static import build as _build
+
+    _build(Path(target), Path(out))
