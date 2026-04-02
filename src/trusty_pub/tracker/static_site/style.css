@@ -89,7 +89,7 @@ a:hover { text-decoration: underline; }
 
 .gridjs-td:first-child,
 .gridjs-th:first-child {
-  min-width: 70px;
+  min-width: 100px;
   text-align: right;
 }
 
