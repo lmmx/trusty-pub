@@ -3,8 +3,8 @@ revision = 3
 requires-python = ">=3.14"
 
 [options]
-exclude-newer = "2026-03-29T15:30:35.60188881Z"
-exclude-newer-span = "P3D"
+exclude-newer = "2026-03-26T12:07:12.116133056Z"
+exclude-newer-span = "P7D"
 
 [[package]]
 name = "annotated-doc"
