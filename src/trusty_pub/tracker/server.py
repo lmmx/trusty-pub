@@ -31,6 +31,25 @@ def create_app(target: Path) -> FastAPI:
 
     templates.env.globals["slug_to_owner_repo"] = _slug_to_owner_repo
 
+    def _repo_context(slug: str, **extra) -> dict:
+        return {
+            "slug": slug,
+            "packages": store.get_repo_packages(slug),
+            "tracked": store.read_tracked(slug),
+            "github_url": store.github_url_for_slug(slug),
+            "keywords": store.keywords,
+            **extra,
+        }
+
+    def _repo_detail_response(request: Request, slug: str, flash: str | None = None):
+        ctx = _repo_context(slug, flash=flash) if flash else _repo_context(slug)
+        response = templates.TemplateResponse(
+            request, "fragments/repo_detail.html", ctx
+        )
+        if flash:
+            response.headers["HX-Trigger"] = "trackUpdate"
+        return response
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         gh_ok = await check_gh_auth()
@@ -74,19 +93,7 @@ def create_app(target: Path) -> FastAPI:
         packages = store.get_repo_packages(slug)
         if not packages:
             return HTMLResponse("<p>Unknown repo</p>", status_code=404)
-        tracked = store.read_tracked(slug)
-        github_url = store.github_url_for_slug(slug)
-        return templates.TemplateResponse(
-            request,
-            "fragments/repo_detail.html",
-            {
-                "slug": slug,
-                "packages": packages,
-                "tracked": tracked,
-                "github_url": github_url,
-                "keywords": store.keywords,
-            },
-        )
+        return _repo_detail_response(request, slug)
 
     @app.post("/issues", response_class=HTMLResponse)
     async def search_issues(request: Request, slug: str = Form(...)):
@@ -121,24 +128,7 @@ def create_app(target: Path) -> FastAPI:
             store.write_tracked(slug, number, url, title, state, keyword)
         except ValueError as exc:
             return HTMLResponse(f"<p class='error'>{exc}</p>", status_code=400)
-
-        packages = store.get_repo_packages(slug)
-        tracked = store.read_tracked(slug)
-        github_url = store.github_url_for_slug(slug)
-        response = templates.TemplateResponse(
-            request,
-            "fragments/repo_detail.html",
-            {
-                "slug": slug,
-                "packages": packages,
-                "tracked": tracked,
-                "github_url": github_url,
-                "keywords": store.keywords,
-                "flash": f"Tracked #{number}",
-            },
-        )
-        response.headers["HX-Trigger"] = "trackUpdate"
-        return response
+        return _repo_detail_response(request, slug, flash=f"Tracked #{number}")
 
     @app.post("/paste", response_class=HTMLResponse)
     async def paste_url(request: Request, url: str = Form(...)):
@@ -175,23 +165,9 @@ def create_app(target: Path) -> FastAPI:
             issue["title"],
             issue["state"],
         )
-
-        tracked = store.read_tracked(slug)
-        github_url = store.github_url_for_slug(slug)
-        response = templates.TemplateResponse(
-            request,
-            "fragments/repo_detail.html",
-            {
-                "slug": slug,
-                "packages": packages,
-                "tracked": tracked,
-                "github_url": github_url,
-                "keywords": store.keywords,
-                "flash": f"Tracked #{issue['number']}",
-            },
+        return _repo_detail_response(
+            request, slug, flash=f"Tracked #{issue['number']}"
         )
-        response.headers["HX-Trigger"] = "trackUpdate"
-        return response
 
     @app.get("/status", response_class=HTMLResponse)
     async def status(request: Request):

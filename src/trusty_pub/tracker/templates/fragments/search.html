@@ -1,26 +1,10 @@
+{% from "fragments/_macros.html" import search_item, load_more_sentinel %}
 {% if results %}
 <ul class="search-results">
   {% for row in results %}
-  <li hx-get="/repo/{{ row.slug }}" hx-target="#detail" hx-swap="innerHTML"
-      hx-on:click="document.querySelector('input[name=q]').value = '{{ row.name }}';"
-      class="search-result {% if not row.slug %}disabled{% endif %}">
-    <span class="rank">#{{ row.rank }}</span>
-    <span class="name">{{ row.name }}</span>
-    {% if row.is_tracked %}
-    <span class="tracked-badge" title="Tracked">&#10003;</span>
-    {% endif %}
-    <span class="verdict verdict-{{ row.verdict }}">{{ row.verdict }}</span>
-  </li>
+  {{ search_item(row) }}
   {% endfor %}
-  {% if has_more %}
-  <li class="sentinel"
-      hx-get="/search?offset={{ next_offset }}"
-      hx-trigger="intersect"
-      hx-swap="outerHTML"
-      hx-include="#search-input, .search-filter">
-    Loading more…
-  </li>
-  {% endif %}
+  {{ load_more_sentinel(has_more, next_offset) }}
 </ul>
 {% else %}
 <p class="empty">No matching packages</p>
