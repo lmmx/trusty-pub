@@ -10,31 +10,31 @@ body {
 /* header */
 header { margin-bottom: .75rem; }
 header h1 {
-  font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
-  font-size: 2rem; font-weight: normal;
+  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-size: 3rem; font-weight: 900;
 }
 .subtitle {
-  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: .9rem; color: #555; margin-top: .15rem;
+  font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 1rem; color: #555; margin-top: .15rem;
 }
 
 /* nav tabs */
 nav { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; }
 .tab {
-  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   padding: .45rem 1rem; font-size: .9rem; cursor: pointer;
   border: none; background: none; color: #555;
   border-bottom: 2px solid transparent; margin-bottom: -2px;
 }
-.tab.active { color: #0969da; border-bottom-color: #0969da; font-weight: 600; }
+.tab.active { color: #0969da; border-bottom-color: #0969da; font-weight: 700; }
 
 /* filters */
 #stats {
-  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: .85rem; color: #555; margin-bottom: .5rem;
 }
 .filters {
-  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   display: flex; gap: 1rem; margin-bottom: .75rem; font-size: .85rem; color: #555;
 }
 .filters label { display: flex; align-items: center; gap: .3rem; cursor: pointer; }
@@ -45,29 +45,66 @@ a:hover { text-decoration: underline; }
 
 /* status badges */
 .badge {
-  font-size: .75rem; padding: .15rem .5rem; border-radius: 10px;
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: .85rem; padding: .15rem .5rem; border-radius: 10px;
   font-weight: 500; white-space: nowrap;
 }
-.badge-tp { color: #15803d; }
+.badge-tp {
+  color: #15803d;
+  position: relative;
+  padding-left: 1.4rem;
+}
+
+.badge-tp::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: .95rem;
+  height: .95rem;
+  background-color: #15803d;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.5 14.4-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.5 14.4-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z'/%3E%3C/svg%3E");
+  mask-size: contain;
+  -webkit-mask-size: contain;
+}
+
+.badge-notp {
+  padding-left: 1.4rem;
+}
 .badge-notp { color: #b91c1c; }
 .badge-unk { color: #a16207; }
 .tk { color: #065f46; font-weight: 700; font-size: .9rem; }
 
-/* zebra rows */
-.gridjs-tr:nth-child(even) { background: #f9fafb; }
+/* package names in table */
+.gridjs-td:nth-child(2) {
+  font-family: "Inconsolata", monospace;
+  font-weight: 500;
+}
+
+.gridjs-td {
+  padding: 6px 24px !important;
+}
+
+.gridjs-td:first-child,
+.gridjs-th:first-child {
+  min-width: 70px;
+  text-align: right;
+}
 
 /* detail panel */
 #detail { margin-top: 1rem; }
 #detail h2 {
-  font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
-  font-size: 1.3rem; font-weight: normal; margin-bottom: .25rem;
+  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-size: 1.3rem; font-weight: 700; margin-bottom: .25rem;
 }
 .issue {
   display: flex; gap: .5rem; align-items: center;
   padding: .3rem 0; font-size: .9rem;
 }
 .issue .st {
-  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: .75rem; padding: .1rem .4rem; border-radius: 3px; font-weight: 600;
 }
 .st-OPEN, .st-open { background: #d1fae5; color: #065f46; }
@@ -78,7 +115,7 @@ a:hover { text-decoration: underline; }
 .res-section { margin-bottom: 1.5rem; }
 .res-section h2 {
   font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
-  font-size: 1.3rem; font-weight: normal; margin-bottom: .5rem; color: #333;
+  font-size: 1.6rem; font-weight: 700; margin-bottom: .2rem; color: #333;
 }
 .res-item {
   padding: .4rem 0; font-size: .9rem;
@@ -86,7 +123,7 @@ a:hover { text-decoration: underline; }
 }
 .res-item:last-child { border-bottom: none; }
 .res-tag {
-  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: .7rem; padding: .1rem .35rem; border-radius: 3px;
   background: #e5e7eb; color: #374151; margin-left: .4rem;
 }

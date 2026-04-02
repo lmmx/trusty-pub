@@ -98,11 +98,22 @@ function refresh() {
 
 function stats() {
   const f = filtered();
-  const tr = ALL.filter((p) => p.issues.length > 0);
-  const ni = tr.reduce((n, p) => n + p.issues.length, 0);
+
+  const repoIssues = new Map();
+  for (const p of ALL) {
+    if (p.gh && p.issues.length > 0 && !repoIssues.has(p.gh)) {
+      repoIssues.set(p.gh, p.issues);
+    }
+  }
+  const ni = [...repoIssues.values()].reduce((n, iss) => n + iss.length, 0);
+  const covered = ALL.filter(p => p.issues.length > 0).length;
+  const tp = ALL.filter(p => p.verdict === "tp").length;
+  const notp = ALL.filter(p => p.verdict === "notp").length;
+
   $("#stats").textContent =
-    `${tr.length} repos tracked · ${ni} issues · ` +
-    `${f.length} shown of ${ALL.length} packages`;
+    `${ni} issues tracked in ${repoIssues.size} repos · ` +
+    `${covered} packages covered of ${ALL.length} total ` +
+    `(${tp} trusted, ${notp} missing)`;
 }
 
 function showDetail(name) {
