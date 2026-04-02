@@ -1,0 +1,2 @@
+rebuild:
+   tp-ss-build

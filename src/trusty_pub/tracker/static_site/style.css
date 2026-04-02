@@ -1,19 +1,27 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Inter Tight", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   max-width: 920px; margin: 0 auto; padding: 1.5rem;
   color: #1a1a1a; background: #fafafa;
+  font-size: 15px; line-height: 1.6;
 }
 
 /* header */
 header { margin-bottom: .75rem; }
-header h1 { font-size: 1.5rem; }
-.subtitle { font-size: .9rem; color: #555; margin-top: .15rem; }
+header h1 {
+  font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
+  font-size: 2rem; font-weight: normal;
+}
+.subtitle {
+  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: .9rem; color: #555; margin-top: .15rem;
+}
 
 /* nav tabs */
 nav { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; }
 .tab {
+  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   padding: .45rem 1rem; font-size: .9rem; cursor: pointer;
   border: none; background: none; color: #555;
   border-bottom: 2px solid transparent; margin-bottom: -2px;
@@ -21,8 +29,14 @@ nav { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 2px solid 
 .tab.active { color: #0969da; border-bottom-color: #0969da; font-weight: 600; }
 
 /* filters */
-#stats { font-size: .85rem; color: #555; margin-bottom: .5rem; }
-.filters { display: flex; gap: 1rem; margin-bottom: .75rem; font-size: .85rem; color: #555; }
+#stats {
+  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: .85rem; color: #555; margin-bottom: .5rem;
+}
+.filters {
+  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display: flex; gap: 1rem; margin-bottom: .75rem; font-size: .85rem; color: #555;
+}
 .filters label { display: flex; align-items: center; gap: .3rem; cursor: pointer; }
 
 /* links */
@@ -31,12 +45,12 @@ a:hover { text-decoration: underline; }
 
 /* status badges */
 .badge {
-  font-size: .75rem; padding: .1rem .45rem; border-radius: 3px;
-  font-weight: 600; text-transform: uppercase; white-space: nowrap;
+  font-size: .75rem; padding: .15rem .5rem; border-radius: 10px;
+  font-weight: 500; white-space: nowrap;
 }
-.badge-tp  { background: #d1fae5; color: #065f46; }
-.badge-notp { background: #fee2e2; color: #991b1b; }
-.badge-unk { background: #fef3c7; color: #92400e; }
+.badge-tp { color: #15803d; }
+.badge-notp { color: #b91c1c; }
+.badge-unk { color: #a16207; }
 .tk { color: #065f46; font-weight: 700; font-size: .9rem; }
 
 /* zebra rows */
@@ -44,12 +58,16 @@ a:hover { text-decoration: underline; }
 
 /* detail panel */
 #detail { margin-top: 1rem; }
-#detail h2 { font-size: 1.1rem; margin-bottom: .25rem; }
+#detail h2 {
+  font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
+  font-size: 1.3rem; font-weight: normal; margin-bottom: .25rem;
+}
 .issue {
   display: flex; gap: .5rem; align-items: center;
   padding: .3rem 0; font-size: .9rem;
 }
 .issue .st {
+  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: .75rem; padding: .1rem .4rem; border-radius: 3px; font-weight: 600;
 }
 .st-OPEN, .st-open { background: #d1fae5; color: #065f46; }
@@ -58,13 +76,17 @@ a:hover { text-decoration: underline; }
 
 /* resources */
 .res-section { margin-bottom: 1.5rem; }
-.res-section h2 { font-size: 1.1rem; margin-bottom: .5rem; color: #333; }
+.res-section h2 {
+  font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
+  font-size: 1.3rem; font-weight: normal; margin-bottom: .5rem; color: #333;
+}
 .res-item {
   padding: .4rem 0; font-size: .9rem;
   border-bottom: 1px solid #f0f0f0;
 }
 .res-item:last-child { border-bottom: none; }
 .res-tag {
+  font-family: "Cabin Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: .7rem; padding: .1rem .35rem; border-radius: 3px;
   background: #e5e7eb; color: #374151; margin-left: .4rem;
 }
