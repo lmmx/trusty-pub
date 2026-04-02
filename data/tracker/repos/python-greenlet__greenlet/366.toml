@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-greenlet/greenlet/issues/366"
+title = "Publishing to PyPI: Update from tokens to Trusted Publishers"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:38:51Z"

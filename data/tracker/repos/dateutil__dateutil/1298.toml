@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dateutil/dateutil/issues/1298"
+title = "Switch to trusted publishing for PyPI/TestPyPI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:00:45Z"

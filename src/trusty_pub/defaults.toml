@@ -18,3 +18,6 @@ default = { source = "repo_urls.parquet", output = "report.tsv" }
 
 [data.analysis]
 default = { report_mini = "report_mini.tsv", parquet = "repo_urls.parquet", downloads = "top-pypi-packages-30-days.csv", output_dir = "analysis" }
+
+[data.tracker]
+default = { source = "repo_urls.parquet", report = "report_mini.tsv", repos_dir = "tracker/repos", packages_dir = "tracker/packages", keywords = ["trusted publishing", "trusted publisher", "OIDC publish"] }

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Python-Markdown/markdown/issues/1560"
+title = "Switch to trusted publishing for package upload to PyPI in CI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:46:16Z"

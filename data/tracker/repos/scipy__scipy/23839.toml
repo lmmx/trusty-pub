@@ -1,0 +1,5 @@
+issue_url = "https://github.com/scipy/scipy/issues/23839"
+title = "Wheels for next release"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T15:39:31Z"

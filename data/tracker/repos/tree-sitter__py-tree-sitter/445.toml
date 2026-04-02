@@ -1,0 +1,5 @@
+issue_url = "https://github.com/tree-sitter/py-tree-sitter/issues/445"
+title = "Switch to Trusted Publishing for package upload to PyPI in CI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:02:16Z"

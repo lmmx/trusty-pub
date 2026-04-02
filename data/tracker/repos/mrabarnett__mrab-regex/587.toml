@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mrabarnett/mrab-regex/issues/587"
+title = "Switch to trusted publishing for package upload to PyPI in CI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T16:09:09Z"

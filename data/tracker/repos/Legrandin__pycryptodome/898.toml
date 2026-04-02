@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Legrandin/pycryptodome/issues/898"
+title = "Implement PyPI Trusted Publisher"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-01T17:13:12Z"
