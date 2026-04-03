@@ -3,3 +3,6 @@
 <span class="stat">{{ status.packages_covered }} packages covered</span>
 <span class="stat-dim">of {{ status.total_packages }} total
   ({{ status.total_notp }} non-TP)</span>
+{% if status.pending_issues is defined and status.pending_issues > 0 %}
+<span class="stat pending-stat">{{ status.pending_issues }} pending in {{ status.pending_repos }} repos</span>
+{% endif %}

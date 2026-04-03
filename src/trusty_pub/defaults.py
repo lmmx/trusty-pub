@@ -63,3 +63,10 @@ def resolve_tracker(name: str | None = None) -> dict:
     if name is None:
         name = next(iter(sources))
     return sources[name]
+
+
+def resolve_bulk_search(name: str | None = None) -> dict:
+    sources = _load_toml()["data"]["bulk_search"]
+    if name is None:
+        name = next(iter(sources))
+    return sources[name]

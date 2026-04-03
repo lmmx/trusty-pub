@@ -72,6 +72,7 @@ class TrackerStore:
         self.meta = resolve_tracker(name)
         self.repos_dir = target / self.meta["repos_dir"]
         self.packages_dir = target / self.meta["packages_dir"]
+        self.pending_dir = target / self.meta["pending_dir"]
         self.keywords: list[str] = self.meta["keywords"]
         self._load_sources()
 
@@ -224,6 +225,148 @@ class TrackerStore:
             for d in self.repos_dir.iterdir()
             if d.is_dir() and any(d.glob("*.toml"))
         }
+
+    # -- pending / triage -----------------------------------------------------
+
+    def read_pending(self, slug: str) -> list[dict]:
+        """Read all pending issues for a given repo slug."""
+        if not _valid_slug(slug):
+            return []
+        repo_dir = self.pending_dir / slug
+        if not repo_dir.exists():
+            return []
+        pending = []
+        for f in sorted(repo_dir.glob("*.toml")):
+            try:
+                data = tomllib.loads(f.read_text())
+                data["number"] = int(f.stem)
+                pending.append(data)
+            except (ValueError, tomllib.TOMLDecodeError):
+                continue
+        return pending
+
+    def list_pending_repos(
+        self,
+        limit: int = 40,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Return pending repos with their issues and package info."""
+        if not self.pending_dir.exists():
+            return []
+
+        repos = []
+        for d in sorted(self.pending_dir.iterdir()):
+            if not d.is_dir():
+                continue
+            toml_files = list(d.glob("*.toml"))
+            if not toml_files:
+                continue
+            slug = d.name
+            owner_repo = _slug_to_owner_repo(slug)
+            if not owner_repo:
+                continue
+
+            issues = []
+            for f in sorted(toml_files):
+                try:
+                    data = tomllib.loads(f.read_text())
+                    data["number"] = int(f.stem)
+                    issues.append(data)
+                except (ValueError, tomllib.TOMLDecodeError):
+                    continue
+
+            packages = self.get_repo_packages(slug)
+            repos.append({
+                "slug": slug,
+                "owner_repo": owner_repo,
+                "issues": issues,
+                "packages": packages,
+                "issue_count": len(issues),
+            })
+
+        return repos[offset : offset + limit]
+
+    def accept_pending(
+        self,
+        slug: str,
+        number: int,
+    ) -> Path:
+        """Move a pending issue to tracked (accept it)."""
+        if not _valid_slug(slug):
+            raise ValueError(f"Invalid slug: {slug!r}")
+
+        pending_path = self.pending_dir / slug / f"{number}.toml"
+        if not pending_path.exists():
+            raise ValueError(f"No pending issue #{number} for {slug}")
+
+        data = tomllib.loads(pending_path.read_text())
+
+        # Write as tracked (reusing write_tracked for symlink management)
+        result = self.write_tracked(
+            slug,
+            number,
+            data.get("issue_url", ""),
+            data.get("title", ""),
+            data.get("state", ""),
+            data.get("keyword", ""),
+        )
+
+        # Remove pending file
+        pending_path.unlink()
+        # Clean up empty pending dir
+        parent = pending_path.parent
+        if parent.exists() and not any(parent.glob("*.toml")):
+            parent.rmdir()
+
+        return result
+
+    def dismiss_pending(self, slug: str, number: int) -> None:
+        """Dismiss (delete) a pending issue without tracking it."""
+        if not _valid_slug(slug):
+            raise ValueError(f"Invalid slug: {slug!r}")
+
+        pending_path = self.pending_dir / slug / f"{number}.toml"
+        if not pending_path.exists():
+            raise ValueError(f"No pending issue #{number} for {slug}")
+
+        pending_path.unlink()
+        # Clean up empty pending dir
+        parent = pending_path.parent
+        if parent.exists() and not any(parent.glob("*.toml")):
+            parent.rmdir()
+
+    def dismiss_all_pending(self, slug: str) -> int:
+        """Dismiss all pending issues for a repo. Returns count dismissed."""
+        if not _valid_slug(slug):
+            raise ValueError(f"Invalid slug: {slug!r}")
+
+        repo_dir = self.pending_dir / slug
+        if not repo_dir.exists():
+            return 0
+
+        count = 0
+        for f in list(repo_dir.glob("*.toml")):
+            f.unlink()
+            count += 1
+
+        if repo_dir.exists() and not any(repo_dir.iterdir()):
+            repo_dir.rmdir()
+
+        return count
+
+    def get_pending_status(self) -> dict:
+        """Return summary stats for pending items."""
+        if not self.pending_dir.exists():
+            return {"pending_repos": 0, "pending_issues": 0}
+        repos = [d for d in self.pending_dir.iterdir() if d.is_dir()]
+        pending_repos = 0
+        pending_issues = 0
+        for d in repos:
+            tomls = list(d.glob("*.toml"))
+            if tomls:
+                pending_repos += 1
+                pending_issues += len(tomls)
+        return {"pending_repos": pending_repos, "pending_issues": pending_issues}
 
 
 # ---------------------------------------------------------------------------

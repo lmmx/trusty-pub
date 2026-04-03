@@ -172,8 +172,100 @@ def create_app(target: Path) -> FastAPI:
     @app.get("/status", response_class=HTMLResponse)
     async def status(request: Request):
         s = store.get_status()
+        s.update(store.get_pending_status())
         return templates.TemplateResponse(
             request, "fragments/status.html", {"status": s}
+        )
+
+    # -- triage endpoints -----------------------------------------------------
+
+    @app.get("/triage", response_class=HTMLResponse)
+    async def triage(
+        request: Request,
+        offset: int = Query(0),
+    ):
+        repos = store.list_pending_repos(limit=_PAGE_SIZE, offset=offset)
+        has_more = len(repos) == _PAGE_SIZE
+        next_offset = offset + _PAGE_SIZE
+        return templates.TemplateResponse(
+            request,
+            "fragments/triage.html",
+            {"repos": repos, "has_more": has_more, "next_offset": next_offset},
+        )
+
+    @app.post("/triage/accept", response_class=HTMLResponse)
+    async def triage_accept(
+        request: Request,
+        slug: str = Form(...),
+        number: int = Form(...),
+    ):
+        try:
+            store.accept_pending(slug, number)
+        except ValueError as exc:
+            return HTMLResponse(f"<p class='error'>{exc}</p>", status_code=400)
+        # Return the updated triage row for this repo
+        pending = store.read_pending(slug)
+        if pending:
+            packages = store.get_repo_packages(slug)
+            owner_repo = _slug_to_owner_repo(slug)
+            repo = {
+                "slug": slug,
+                "owner_repo": owner_repo,
+                "issues": pending,
+                "packages": packages,
+                "issue_count": len(pending),
+            }
+            return templates.TemplateResponse(
+                request,
+                "fragments/triage_repo.html",
+                {"repo": repo, "flash": f"Tracked #{number}"},
+            )
+        # No more pending for this repo — remove the card
+        return HTMLResponse(
+            f"<div class='flash'>Tracked #{number} — no more pending for this repo</div>"
+        )
+
+    @app.post("/triage/dismiss", response_class=HTMLResponse)
+    async def triage_dismiss(
+        request: Request,
+        slug: str = Form(...),
+        number: int = Form(...),
+    ):
+        try:
+            store.dismiss_pending(slug, number)
+        except ValueError as exc:
+            return HTMLResponse(f"<p class='error'>{exc}</p>", status_code=400)
+        pending = store.read_pending(slug)
+        if pending:
+            packages = store.get_repo_packages(slug)
+            owner_repo = _slug_to_owner_repo(slug)
+            repo = {
+                "slug": slug,
+                "owner_repo": owner_repo,
+                "issues": pending,
+                "packages": packages,
+                "issue_count": len(pending),
+            }
+            return templates.TemplateResponse(
+                request,
+                "fragments/triage_repo.html",
+                {"repo": repo, "flash": f"Dismissed #{number}"},
+            )
+        return HTMLResponse(
+            f"<div class='flash'>Dismissed #{number} — no more pending for this repo</div>"
+        )
+
+    @app.post("/triage/dismiss-all", response_class=HTMLResponse)
+    async def triage_dismiss_all(
+        request: Request,
+        slug: str = Form(...),
+    ):
+        try:
+            count = store.dismiss_all_pending(slug)
+        except ValueError as exc:
+            return HTMLResponse(f"<p class='error'>{exc}</p>", status_code=400)
+        return HTMLResponse(
+            f"<div class='flash'>Dismissed {count} issue(s) for {slug}</div>"
         )
 
     return app
