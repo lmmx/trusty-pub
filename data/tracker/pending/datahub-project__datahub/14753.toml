@@ -1,0 +1,5 @@
+issue_url = "https://github.com/datahub-project/datahub/issues/14753"
+title = "OIDC authorization doesn't work with PlayCacheSessionStore"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:45Z"

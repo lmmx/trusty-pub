@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dremio/dbt-dremio/issues/276"
+title = "Dremio UI not accessible when configured with OIDC and placed behind apisix ingress controller"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:55Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/bridgecrewio/checkov/issues/7147"
+title = "Error Parsing Terraform file containing colon character"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:24Z"

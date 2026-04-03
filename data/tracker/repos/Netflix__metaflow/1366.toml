@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Netflix/metaflow/issues/1366"
+title = "Move PyPI packaging to Trusted Publishers"
+state = "OPEN"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T12:41:24Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aio-libs/aioftp/issues/171"
+title = "Let's put `aioftp` under the `aio-libs` org on PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:15:43Z"

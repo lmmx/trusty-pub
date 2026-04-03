@@ -1,0 +1,5 @@
+issue_url = "https://github.com/cvat-ai/cvat/issues/1286"
+title = "docker-compose build ERROR -> curl: (60) server certificate verification failed."
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:41Z"

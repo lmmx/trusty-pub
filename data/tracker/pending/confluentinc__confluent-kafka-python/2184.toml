@@ -1,0 +1,5 @@
+issue_url = "https://github.com/confluentinc/confluent-kafka-python/issues/2184"
+title = "Race condition when doing .assign(INVALID_OFFSET) followed by .assign(explicit_offset)"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:38Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-cli/issues/6584"
+title = "IAM: ForAllValues/ForAnyValue array arguments converted to string if array has only one element"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:14Z"

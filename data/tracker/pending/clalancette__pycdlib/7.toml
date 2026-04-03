@@ -1,0 +1,5 @@
+issue_url = "https://github.com/clalancette/pycdlib/issues/7"
+title = "iso image made by pycdlib not working as config drive for cloudinit  "
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:33Z"

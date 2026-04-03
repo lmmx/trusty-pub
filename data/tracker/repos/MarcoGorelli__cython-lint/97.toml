@@ -1,0 +1,5 @@
+issue_url = "https://github.com/MarcoGorelli/cython-lint/issues/97"
+title = "[CI/CD] Update publishing to PyPI w/ tokenless"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T12:39:18Z"

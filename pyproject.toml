@@ -28,6 +28,7 @@ tp-classify-nogithub = "trusty_pub.classify_nogithub:classify_nogithub"
 tp-report = "trusty_pub.report:generate_report"
 tp-deps = "trusty_pub.deps_analysis:run_analysis"
 tp-tracker = "trusty_pub.tracker:main"
+tp-bulk-search = "trusty_pub.bulk_search:bulk_search"
 tp-ss-build = "trusty_pub.tracker:build"
 
 [build-system]

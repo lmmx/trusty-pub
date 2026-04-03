@@ -1,0 +1,5 @@
+issue_url = "https://github.com/django-guardian/django-guardian/issues/833"
+title = "Publish to pypi using a trusted publisher"
+state = "CLOSED"
+keyword = "trusted publisher"
+found_at = "2026-04-03T15:33:51Z"

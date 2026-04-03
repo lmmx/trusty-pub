@@ -1,0 +1,5 @@
+issue_url = "https://github.com/devpi/devpi/issues/932"
+title = "Need help with scaling my devpi instance for CI testing"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:49Z"

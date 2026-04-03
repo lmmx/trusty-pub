@@ -1,0 +1,5 @@
+issue_url = "https://github.com/bids-standard/pybids/issues/359"
+title = "derivatives=True fails silently if there is not dataset_description.json"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:20Z"

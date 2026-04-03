@@ -1,0 +1,5 @@
+issue_url = "https://github.com/element-hq/synapse/issues/17637"
+title = "Error at OIDC initialization - restart in loop"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:59Z"

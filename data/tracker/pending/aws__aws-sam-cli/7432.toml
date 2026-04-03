@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-sam-cli/issues/7432"
+title = "Bug: sam pipeline bootstrap --oidc-provider gitlab with a custom gitlab url creates an identity provider with excessive `/` suffix"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:14Z"

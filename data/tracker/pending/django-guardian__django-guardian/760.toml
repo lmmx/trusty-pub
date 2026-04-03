@@ -1,0 +1,5 @@
+issue_url = "https://github.com/django-guardian/django-guardian/issues/760"
+title = "Add feature to use user_ids, group_ids and object_ids instead of Django model instances"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:51Z"

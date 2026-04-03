@@ -1,0 +1,5 @@
+issue_url = "https://github.com/django-oauth/django-oauth-toolkit/issues/1603"
+title = "OIDC_SERVER_CLASS only uses defaults when as fallback to OAUTH2_SERVER_CLASS"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:51Z"

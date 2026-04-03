@@ -1,0 +1,5 @@
+issue_url = "https://github.com/certifi/python-certifi/issues/26"
+title = "certifi-2015.9.6.1 and 2015.9.6.2 fail verification"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:31Z"

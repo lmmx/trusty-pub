@@ -1,0 +1,5 @@
+issue_url = "https://github.com/django-oauth/django-oauth-toolkit/issues/1099"
+title = "RFC 8414 .well-known/oauth-authorization-server metadata"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:51Z"

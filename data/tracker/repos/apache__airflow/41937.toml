@@ -1,0 +1,5 @@
+issue_url = "https://github.com/apache/airflow/issues/41937"
+title = "Make \"Trusted Publishing\" works for our PyPI releasing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:25:27Z"

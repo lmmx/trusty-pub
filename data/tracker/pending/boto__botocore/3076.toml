@@ -1,0 +1,5 @@
+issue_url = "https://github.com/boto/botocore/issues/3076"
+title = "SSO OIDC client should not attempt to contact AWS metadata"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:23Z"

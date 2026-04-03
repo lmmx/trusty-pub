@@ -1,0 +1,5 @@
+issue_url = "https://github.com/certifi/python-certifi/issues/185"
+title = "long time session ends with \"Could not find a suitable TLS CA certificate bundle\""
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:31Z"

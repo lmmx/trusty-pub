@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dotnet/core/issues/969"
+title = "No IAuthenticationSignOutHandler is configured to handle sign out for the scheme: oidc in .net core with identity server 4"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:54Z"

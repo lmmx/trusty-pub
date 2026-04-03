@@ -1,0 +1,5 @@
+issue_url = "https://github.com/confluentinc/confluent-kafka-python/issues/1690"
+title = "SSL communication and Segment fault issue in version 2.0.2 & above"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:38Z"

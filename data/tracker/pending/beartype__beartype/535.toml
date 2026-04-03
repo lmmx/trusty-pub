@@ -1,0 +1,5 @@
+issue_url = "https://github.com/beartype/beartype/issues/535"
+title = "[CI] Codecov GitHub Action broken by @beartype's protected `main` branch 😑 "
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:18Z"

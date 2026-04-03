@@ -1,0 +1,19 @@
+{% if repos %}
+<div class="triage-list">
+  {% for repo in repos %}
+  <div class="triage-card" id="triage-{{ repo.slug }}">
+    {% include "fragments/triage_repo.html" %}
+  </div>
+  {% endfor %}
+  {% if has_more %}
+  <div hx-get="/triage?offset={{ next_offset }}"
+       hx-trigger="intersect"
+       hx-swap="outerHTML"
+       class="sentinel">
+    Loading more…
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<p class="empty">No pending issues to triage. Run <code>tp-bulk-search</code> to find candidates.</p>
+{% endif %}

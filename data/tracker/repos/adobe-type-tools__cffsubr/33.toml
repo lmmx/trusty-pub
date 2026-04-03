@@ -1,0 +1,5 @@
+issue_url = "https://github.com/adobe-type-tools/cffsubr/issues/33"
+title = "should use Trusted Publishing for PyPI uploads from Github CI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:14:01Z"

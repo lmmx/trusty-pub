@@ -1,0 +1,5 @@
+issue_url = "https://github.com/google/flatbuffers/issues/8732"
+title = "Publish Python package with official action"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:06:21Z"

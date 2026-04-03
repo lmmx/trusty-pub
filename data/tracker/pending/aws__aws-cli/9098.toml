@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-cli/issues/9098"
+title = "Add --use-device-code as an option in config"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:14Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aio-libs/aiobotocore/issues/1116"
+title = "Switch CI/CD to PyPI trusted publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:15:16Z"

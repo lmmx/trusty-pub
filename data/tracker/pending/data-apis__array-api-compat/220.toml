@@ -1,0 +1,5 @@
+issue_url = "https://github.com/data-apis/array-api-compat/issues/220"
+title = "Publish to PyPI CI jobs fails"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:44Z"

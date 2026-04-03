@@ -1,0 +1,5 @@
+issue_url = "https://github.com/activeviam/jdk4py/issues/79"
+title = "Set up PyPI trusted publisher"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T16:13:37Z"

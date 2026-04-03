@@ -1,0 +1,5 @@
+issue_url = "https://github.com/apache/airflow/issues/50005"
+title = "[Proposal]Add support for provenance attestations in Airflow's release workflow (PEP 740)"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:25:24Z"

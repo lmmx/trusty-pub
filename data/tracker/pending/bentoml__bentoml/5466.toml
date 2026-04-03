@@ -1,0 +1,5 @@
+issue_url = "https://github.com/bentoml/BentoML/issues/5466"
+title = "feature: support for pylock.toml"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:19Z"

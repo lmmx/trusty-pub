@@ -1,0 +1,5 @@
+issue_url = "https://github.com/docker/compose/issues/11670"
+title = "[BUG] Stucked at staring up the management container. Infinite Loop"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:53Z"

@@ -20,8 +20,18 @@ default = { source = "repo_urls.parquet", output = "report.tsv" }
 default = { report_mini = "report_mini.tsv", parquet = "repo_urls.parquet", downloads = "top-pypi-packages-30-days.csv", output_dir = "analysis" }
 
 [data.tracker]
-default = { source = "repo_urls.parquet", report = "report_mini.tsv", repos_dir = "tracker/repos", packages_dir = "tracker/packages", keywords = [
+default = { source = "repo_urls.parquet", report = "report_mini.tsv", repos_dir = "tracker/repos", packages_dir = "tracker/packages", pending_dir = "tracker/pending", keywords = [
   "trusted publishing",
   "trusted publisher",
   "OIDC publish",
+] }
+
+[data.bulk_search]
+default = { batch_size = 10, delay_between_batches = 2.0, max_issues_per_repo = 10, concurrency = 15, max_consecutive_errors = 3, primary_keywords = [
+  "trusted publishing",
+], secondary_keywords = [
+  "trusted publisher",
+  "OIDC publish",
+  "OIDC",
+  "pypi trusted",
 ] }

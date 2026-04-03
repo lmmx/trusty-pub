@@ -1,0 +1,5 @@
+issue_url = "https://github.com/confluentinc/confluent-kafka-python/issues/1684"
+title = "Consumers get revoked juste after been assigned for 3 consecutives days every week"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:38Z"

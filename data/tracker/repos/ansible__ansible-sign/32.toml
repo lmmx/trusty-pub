@@ -1,0 +1,5 @@
+issue_url = "https://github.com/ansible/ansible-sign/issues/32"
+title = "Add Sigstore support for signing and verifying content"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:25:00Z"

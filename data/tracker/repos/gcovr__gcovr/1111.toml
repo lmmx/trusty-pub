@@ -1,0 +1,5 @@
+issue_url = "https://github.com/gcovr/gcovr/issues/1111"
+title = "[CI/CD] Use Trusted Publishing when uploading to PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:09:11Z"

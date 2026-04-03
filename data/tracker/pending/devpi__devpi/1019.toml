@@ -1,0 +1,5 @@
+issue_url = "https://github.com/devpi/devpi/issues/1019"
+title = "HTTP error 502 while retrieving a wheel file"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:49Z"

@@ -1,0 +1,63 @@
+{% if flash is defined and flash %}
+<div class="flash">{{ flash }}</div>
+{% endif %}
+
+<div class="triage-repo-header">
+  <h3>
+    <a href="https://github.com/{{ repo.owner_repo }}" target="_blank" rel="noopener">
+      {{ repo.owner_repo }}
+    </a>
+  </h3>
+  {% if repo.packages %}
+  <div class="triage-packages">
+    {% for p in repo.packages %}
+    <span class="pkg verdict-{{ p.verdict }}">#{{ p.rank }} {{ p.name }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<table class="issue-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Title</th>
+      <th>State</th>
+      <th>Keyword</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for issue in repo.issues %}
+    <tr>
+      <td>
+        <a href="{{ issue.issue_url }}" target="_blank" rel="noopener">
+          {{ issue.number }}
+        </a>
+      </td>
+      <td>{{ issue.title }}</td>
+      <td class="state state-{{ issue.state }}">{{ issue.state }}</td>
+      <td class="keyword">{{ issue.keyword }}</td>
+      <td class="triage-actions">
+        <form hx-post="/triage/accept" hx-target="#triage-{{ repo.slug }}" hx-swap="innerHTML">
+          <input type="hidden" name="slug" value="{{ repo.slug }}">
+          <input type="hidden" name="number" value="{{ issue.number }}">
+          <button type="submit" class="track-btn" title="Accept and track">&#10003;</button>
+        </form>
+        <form hx-post="/triage/dismiss" hx-target="#triage-{{ repo.slug }}" hx-swap="innerHTML">
+          <input type="hidden" name="slug" value="{{ repo.slug }}">
+          <input type="hidden" name="number" value="{{ issue.number }}">
+          <button type="submit" class="dismiss-btn" title="Dismiss">&#10007;</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="triage-bulk-actions">
+  <form hx-post="/triage/dismiss-all" hx-target="#triage-{{ repo.slug }}" hx-swap="innerHTML">
+    <input type="hidden" name="slug" value="{{ repo.slug }}">
+    <button type="submit" class="dismiss-all-btn">Dismiss all for this repo</button>
+  </form>
+</div>

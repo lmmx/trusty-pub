@@ -1,0 +1,5 @@
+issue_url = "https://github.com/adrienverge/yamllint/issues/721"
+title = "Publish to PyPI from GHA with PEP 740 digital attestations"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:14:06Z"

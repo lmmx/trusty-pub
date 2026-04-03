@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/chalice/issues/1935"
+title = "Authorization using Azure AD OIDC"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:15Z"

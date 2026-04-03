@@ -1,0 +1,5 @@
+issue_url = "https://github.com/databricks/databricks-sql-python/issues/121"
+title = "OAuth breaks if a bad .netrc file is present"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:44Z"

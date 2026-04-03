@@ -1,0 +1,5 @@
+issue_url = "https://github.com/google/adk-python/issues/2256"
+title = "OIDC flow fails for public clients like Azure AD B2C due to mandatory client_secret using OpenAPIToolset"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T15:34:15Z"

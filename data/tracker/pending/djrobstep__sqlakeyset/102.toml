@@ -1,0 +1,5 @@
+issue_url = "https://github.com/djrobstep/sqlakeyset/issues/102"
+title = "PyPI publication pipeline is broken"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:52Z"

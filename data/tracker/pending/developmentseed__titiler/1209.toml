@@ -1,0 +1,5 @@
+issue_url = "https://github.com/developmentseed/titiler/issues/1209"
+title = "refactor AWS credentials in CI"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:49Z"

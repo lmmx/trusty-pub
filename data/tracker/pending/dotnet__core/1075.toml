@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dotnet/core/issues/1075"
+title = "Infinite Loopback between asp.net core 2.0 controller and login.microsoft.com  inside office addins"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:54Z"

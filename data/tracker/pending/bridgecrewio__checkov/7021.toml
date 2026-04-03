@@ -1,0 +1,5 @@
+issue_url = "https://github.com/bridgecrewio/checkov/issues/7021"
+title = "Azure DevOps entra federated identity & CKV_AZURE_249: \"Ensure Azure GitHub Actions OIDC trust policy is configured securely\""
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:24Z"

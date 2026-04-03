@@ -1,0 +1,5 @@
+issue_url = "https://github.com/daytonaio/daytona/issues/3035"
+title = "Can’t create sandbox files (sandbox.fs.upload_file) after Docker deployment"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:47Z"

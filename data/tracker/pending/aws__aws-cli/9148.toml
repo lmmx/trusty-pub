@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-cli/issues/9148"
+title = "aws sso login: allow to customize ip address for redirect_uri"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:14Z"

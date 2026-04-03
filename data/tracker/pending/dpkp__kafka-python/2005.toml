@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dpkp/kafka-python/issues/2005"
+title = "Keep getting ssl.SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self signed certificate in certificate chain (_ssl.c:1076)"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:54Z"

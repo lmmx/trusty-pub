@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dotnet/core/issues/9671"
+title = "Critical: .NET install domains and URLs are changing"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:54Z"

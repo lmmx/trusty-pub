@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dagger/dagger/issues/8935"
+title = "🐞 secrets created inside module constructor fail on repeated accesses "
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:42Z"

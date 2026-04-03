@@ -1,0 +1,5 @@
+issue_url = "https://github.com/ClickHouse/dbt-clickhouse/issues/592"
+title = "Improving Pypi validations by using a Trusted Publisher"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T12:26:29Z"

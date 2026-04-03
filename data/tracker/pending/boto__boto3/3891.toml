@@ -1,0 +1,5 @@
+issue_url = "https://github.com/boto/boto3/issues/3891"
+title = "SSO auth failure if AWS_DEFAULT_PROFILE != AWS_PROFILE"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:23Z"

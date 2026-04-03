@@ -1,0 +1,5 @@
+issue_url = "https://github.com/awslabs/aws-solutions-constructs/issues/820"
+title = "CloudFront-S3 pattern supports generate config files in s3 based on dynamic output of other resources in stack"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:15Z"

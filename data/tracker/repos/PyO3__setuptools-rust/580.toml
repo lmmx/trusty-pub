@@ -1,0 +1,5 @@
+issue_url = "https://github.com/PyO3/setuptools-rust/issues/580"
+title = "Migrate to trusted publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T15:53:35Z"

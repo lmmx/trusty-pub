@@ -1,0 +1,5 @@
+issue_url = "https://github.com/bridgecrewio/checkov/issues/6190"
+title = "Azure Kubernetes Services - If \"Planned Maintenance\" is used, window duration should be equal or greater than four hours"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:24Z"

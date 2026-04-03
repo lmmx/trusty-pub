@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dapr/docs/issues/4926"
+title = "Pubsub Kafka: Docs for new certificate-based authentication in OIDC flow"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:43Z"

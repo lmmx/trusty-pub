@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-cli/issues/4215"
+title = "Adding --no-verify-ssl option as part of the config file"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:14Z"

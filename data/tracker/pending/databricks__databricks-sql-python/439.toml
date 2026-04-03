@@ -1,0 +1,5 @@
+issue_url = "https://github.com/databricks/databricks-sql-python/issues/439"
+title = "CERTIFICATE_VERIFY_FAILED while connecting to the databricks sql endpoint using python through M2M auth"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:44Z"

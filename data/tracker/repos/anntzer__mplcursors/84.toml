@@ -1,0 +1,5 @@
+issue_url = "https://github.com/anntzer/mplcursors/issues/84"
+title = "Would you consider building binary wheels for the most common platforms and uploading them to pypi?"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:24:21Z"

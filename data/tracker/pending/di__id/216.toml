@@ -1,0 +1,5 @@
+issue_url = "https://github.com/di/id/issues/216"
+title = "User error question: Failure to get valid OIDC token with id with GitLab"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:49Z"
