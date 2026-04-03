@@ -1,5 +1,0 @@
-issue_url = "https://github.com/JuliaPy/pyjulia/issues/317"
-title = "PyJulia seems to fail with Docker julia:latest"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:51Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/cvxopt/cvxopt/issues/12"
+title = "External and untrusted package according to pip/pypi"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:42Z"

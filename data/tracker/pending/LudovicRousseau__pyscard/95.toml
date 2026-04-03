@@ -1,5 +1,0 @@
-issue_url = "https://github.com/LudovicRousseau/pyscard/issues/95"
-title = "Why does hcontext as returned by PCSCContext.getContext() change everytime on windows?"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:55Z"

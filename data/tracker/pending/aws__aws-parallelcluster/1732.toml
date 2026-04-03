@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-parallelcluster/issues/1732"
+title = "compute nodes do not function (unable to submit slurm jobs)"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:14Z"

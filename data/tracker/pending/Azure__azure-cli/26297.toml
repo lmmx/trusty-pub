@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/26297"
-title = "log-analytics workspace creation is failing at mcr.microsoft.com/azure-cli:latest but version 2.47.0 works"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:34Z"

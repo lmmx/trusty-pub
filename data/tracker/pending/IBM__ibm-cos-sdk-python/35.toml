@@ -1,5 +1,0 @@
-issue_url = "https://github.com/IBM/ibm-cos-sdk-python/issues/35"
-title = " ConnectTimeoutError with \"https://s3.private.eu-de.cloud-object-storage.appdomain.cloud/\" on my local device"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:47Z"

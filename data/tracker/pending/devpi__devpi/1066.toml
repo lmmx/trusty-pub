@@ -1,0 +1,5 @@
+issue_url = "https://github.com/devpi/devpi/issues/1066"
+title = "No support twine upload  `No matching distribution`"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:49Z"

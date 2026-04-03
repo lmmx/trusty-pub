@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Arize-ai/phoenix/issues/8418"
-title = "[BUG]: Add proper error message when OIDC scope is missing"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:33Z"

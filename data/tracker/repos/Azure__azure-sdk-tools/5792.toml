@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-sdk-tools/issues/5792"
+title = "Automate OIDC enablement for github actions"
+state = "CLOSED"
+keyword = "OIDC"
+tracked_at = "2026-04-03T15:51:05Z"

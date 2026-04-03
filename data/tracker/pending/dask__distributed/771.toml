@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dask/distributed/issues/771"
+title = "distributed-1.15.0rc1 seems wrongly requiring \"futures\" from a Python-3.6 installation"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:44Z"

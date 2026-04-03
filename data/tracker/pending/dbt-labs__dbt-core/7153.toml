@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dbt-labs/dbt-core/issues/7153"
+title = "[CT-2292] [Bug] HTTPSConnectionPool(host='hub.getdbt.com', port=443): Max retries exceeded with url: /api/v1/index.json (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] "
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:47Z"

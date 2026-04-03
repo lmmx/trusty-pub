@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-cli/issues/9021"
+title = "STS duration seconds ENVIRONMENT Variable"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:14Z"

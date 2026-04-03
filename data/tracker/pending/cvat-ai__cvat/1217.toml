@@ -1,0 +1,5 @@
+issue_url = "https://github.com/cvat-ai/cvat/issues/1217"
+title = "Delegate authentication to OAuth 2.0 / OpenID Connect"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:41Z"

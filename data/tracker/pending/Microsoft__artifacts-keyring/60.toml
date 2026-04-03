@@ -1,5 +1,0 @@
-issue_url = "https://github.com/microsoft/artifacts-keyring/issues/60"
-title = "Is it possible to use artifacts-keyring with a Service Principal?"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:59Z"

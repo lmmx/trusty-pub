@@ -1,0 +1,5 @@
+issue_url = "https://github.com/apify/apify-sdk-python/issues/792"
+title = "Migrate to Apify PyPI organization for package publishing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:25:36Z"

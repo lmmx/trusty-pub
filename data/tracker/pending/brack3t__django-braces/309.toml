@@ -1,0 +1,5 @@
+issue_url = "https://github.com/brack3t/django-braces/issues/309"
+title = "test_outdated_login fails on Django 5.1 - problems with redirect?"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:23Z"

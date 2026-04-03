@@ -1,0 +1,5 @@
+issue_url = "https://github.com/caronc/apprise/issues/1550"
+title = "Matrix: Uses non-compliant `POST /_matrix/client/r0/rooms/{roomId}/send/m.room.message`"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:30Z"

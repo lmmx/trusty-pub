@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/30921"
-title = "Unable to install azure-devops extension - Pip failed with exit status 1"
-state = "OPEN"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:34Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/PyCQA/docformatter/issues/186"
+title = "chore: create GitHub action to automatically perform PyPI and GH releases"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T15:53:28Z"

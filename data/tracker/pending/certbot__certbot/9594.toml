@@ -1,0 +1,5 @@
+issue_url = "https://github.com/certbot/certbot/issues/9594"
+title = "High CPU utilization / long delay during \"Cleaning up challenges\""
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:31Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Chainlit/chainlit/issues/1207"
-title = "Unable to logout when oauth is enabled"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:37Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/databricks/dbt-databricks/issues/1274"
+title = "Error when using mocked databricks oauth profile"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:44Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dpgaspar/Flask-AppBuilder/issues/2195"
+title = "Support Personal Access Tokens in addition to AUTH_TYPE"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:54Z"

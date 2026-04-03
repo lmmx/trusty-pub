@@ -1,0 +1,5 @@
+issue_url = "https://github.com/certbot/josepy/issues/166"
+title = "No support for alg=\"none\" unsecured JWSes?"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:31Z"

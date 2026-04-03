@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/20153"
-title = "`az acr run` fails in Azure Pipelines with Azure CLI 2.30.0: Could not retrieve credential from local cache for service principal"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:34Z"

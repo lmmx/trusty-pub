@@ -1,0 +1,5 @@
+issue_url = "https://github.com/datahub-project/datahub/issues/8369"
+title = "Logout with OIDC not working"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:45Z"

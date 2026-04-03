@@ -1,0 +1,5 @@
+issue_url = "https://github.com/confluentinc/confluent-kafka-python/issues/1633"
+title = "`enable.ssl.certificate.verification` must be a string and not a boolean"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:38Z"

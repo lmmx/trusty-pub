@@ -1,0 +1,5 @@
+issue_url = "https://github.com/brgl/libgpiod/issues/62"
+title = "Publish wheels to pypi"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:34:36Z"

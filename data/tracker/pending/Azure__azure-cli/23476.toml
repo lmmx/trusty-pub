@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/23476"
-title = "CLI | Trusted Launch as Default - New VM from existing disk or image (SIG/ACG/Managed)"
-state = "CLOSED"
-keyword = "trusted publisher"
-found_at = "2026-04-03T13:14:34Z"

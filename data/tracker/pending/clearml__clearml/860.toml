@@ -1,0 +1,5 @@
+issue_url = "https://github.com/clearml/clearml/issues/860"
+title = "[Feature] AssumeRoleWithWebIdentity / OIDC support for accessing S3 buckets"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:34Z"

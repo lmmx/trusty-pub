@@ -1,5 +1,0 @@
-issue_url = "https://github.com/CZ-NIC/pyoidc/issues/834"
-title = "ERROR Wrong authentication method used: client_secret_post != client_secret_basic"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:36Z"

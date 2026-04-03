@@ -1,0 +1,5 @@
+issue_url = "https://github.com/certbot/certbot/issues/10299"
+title = "Email vi Azure Basic Authentication SMTP, deprecated in September. This will break certbot Lin/Win clients."
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:31Z"

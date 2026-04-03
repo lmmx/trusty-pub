@@ -1,0 +1,5 @@
+issue_url = "https://github.com/django-json-api/django-rest-framework-json-api/issues/1228"
+title = "Release 7.0.0 breaks sparse fields request"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:51Z"

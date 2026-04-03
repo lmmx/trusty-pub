@@ -1,5 +1,0 @@
-issue_url = "https://github.com/NVIDIA/TensorRT/issues/3488"
-title = "couldn't install pytorch-quantization "
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:15:01Z"

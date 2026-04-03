@@ -1,5 +1,0 @@
-issue_url = "https://github.com/CZ-NIC/pyoidc/issues/201"
-title = "Consider using longer, more descriptive variable names, especially in examples"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:36Z"

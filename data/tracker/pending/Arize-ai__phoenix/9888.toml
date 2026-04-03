@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Arize-ai/phoenix/issues/9888"
-title = "[ENHANCEMENT]: Adjust the default user role for new OIDC users to be either configurable, or the least-privilege role"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:33Z"

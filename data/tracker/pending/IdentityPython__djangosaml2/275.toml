@@ -1,5 +1,0 @@
-issue_url = "https://github.com/IdentityPython/djangosaml2/issues/275"
-title = "Abandon cookie as session storage for v2.0.0"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:48Z"

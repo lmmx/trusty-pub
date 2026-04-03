@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-cdk-cli/issues/867"
+title = "(hotswap): The bootstrap roles don't contain necessary permissions for hotswapping"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:14Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/equinor/xtgeo/issues/947"
+title = "Update PyPI publish workflow"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:12:24Z"

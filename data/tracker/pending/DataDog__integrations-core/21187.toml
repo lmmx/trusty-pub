@@ -1,5 +1,0 @@
-issue_url = "https://github.com/DataDog/integrations-core/issues/21187"
-title = "[mongo] No support for AKS or GKE workload identity OIDC providers"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:40Z"

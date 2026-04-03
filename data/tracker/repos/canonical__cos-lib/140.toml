@@ -1,0 +1,5 @@
+issue_url = "https://github.com/canonical/cos-lib/issues/140"
+title = "Configuring trusted publishing to PyPi"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:34:39Z"

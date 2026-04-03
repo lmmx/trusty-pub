@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/19305"
-title = "Use the system certificate store instead of certifi"
-state = "OPEN"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:34Z"

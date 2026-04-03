@@ -1,0 +1,5 @@
+issue_url = "https://github.com/elastic/apm-agent-python/issues/1835"
+title = "Switch to trusted publishers on PyPI"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T16:12:48Z"

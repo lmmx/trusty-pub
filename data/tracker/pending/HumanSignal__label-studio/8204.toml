@@ -1,5 +1,0 @@
-issue_url = "https://github.com/HumanSignal/label-studio/issues/8204"
-title = "[bug] YOLOv8 export with local storage produces empty images folder"
-state = "OPEN"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:47Z"

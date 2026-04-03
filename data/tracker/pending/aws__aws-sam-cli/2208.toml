@@ -1,0 +1,5 @@
+issue_url = "https://github.com/aws/aws-sam-cli/issues/2208"
+title = "sam build with UnicodeDecodeError: 'utf-8' codec can't decode byte 0x91 in position 565: invalid start byte"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:14Z"

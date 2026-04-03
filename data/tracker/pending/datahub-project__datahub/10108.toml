@@ -1,0 +1,5 @@
+issue_url = "https://github.com/datahub-project/datahub/issues/10108"
+title = "Cannot assign Admin role for user authen via Keycloak"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:45Z"

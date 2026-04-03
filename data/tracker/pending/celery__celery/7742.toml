@@ -1,0 +1,5 @@
+issue_url = "https://github.com/celery/celery/issues/7742"
+title = "Celery SQS worker ignores configuration parameter worker_prefetch_multiplier"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:30Z"

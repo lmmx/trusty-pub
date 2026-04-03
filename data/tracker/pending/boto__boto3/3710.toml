@@ -1,0 +1,5 @@
+issue_url = "https://github.com/boto/boto3/issues/3710"
+title = "generate_presigned_url for s3 endpoint results in access denied"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:23Z"

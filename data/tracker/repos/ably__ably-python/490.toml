@@ -1,0 +1,5 @@
+issue_url = "https://github.com/ably/ably-python/issues/490"
+title = "Automate releases, use secure publishing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:13:04Z"

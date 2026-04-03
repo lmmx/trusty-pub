@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dapr/docs/issues/3722"
+title = "[1.12] Enhance Kafka pubsub OIDC auth support to support oauthbearer.extensions"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:43Z"

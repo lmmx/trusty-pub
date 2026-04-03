@@ -1,0 +1,5 @@
+issue_url = "https://github.com/bentoml/BentoML/issues/1036"
+title = "Pip args in Dockerfile not exposed via containerize command"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:19Z"

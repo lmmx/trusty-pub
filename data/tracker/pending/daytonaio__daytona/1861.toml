@@ -1,0 +1,5 @@
+issue_url = "https://github.com/daytonaio/daytona/issues/1861"
+title = "We have deployed a Daytona service locally, and when using the sandboxes feature, we found that clicking the jump button does not redirect to the sandbox. The issue is shown in the screenshot above."
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:47Z"

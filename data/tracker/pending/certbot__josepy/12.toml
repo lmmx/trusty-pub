@@ -1,0 +1,5 @@
+issue_url = "https://github.com/certbot/josepy/issues/12"
+title = "AttributeError: 'bytes' object has no attribute 'verifier' , line 123 in jwa.py"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:31Z"

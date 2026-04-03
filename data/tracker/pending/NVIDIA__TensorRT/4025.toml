@@ -1,5 +1,0 @@
-issue_url = "https://github.com/NVIDIA/TensorRT/issues/4025"
-title = "ERROR: No matching distribution found for numpy>=2.0"
-state = "OPEN"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:15:01Z"

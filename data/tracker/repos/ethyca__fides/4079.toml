@@ -1,0 +1,5 @@
+issue_url = "https://github.com/ethyca/fides/issues/4079"
+title = "CI: Migrate PyPI auth from API token to Trusted Publisher"
+state = "OPEN"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T16:12:06Z"

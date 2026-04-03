@@ -1,0 +1,5 @@
+issue_url = "https://github.com/cldf/csvw/issues/43"
+title = "missing db.commit() in src/csvw/db.py"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:34Z"

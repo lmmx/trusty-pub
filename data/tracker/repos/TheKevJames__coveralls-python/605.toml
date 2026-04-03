@@ -1,0 +1,5 @@
+issue_url = "https://github.com/TheKevJames/coveralls-python/issues/605"
+title = "[drive-by][CI/CD] Insecure configuration of Trusted Publishing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T15:59:54Z"

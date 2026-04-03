@@ -1,0 +1,5 @@
+issue_url = "https://github.com/activeloopai/deeplake/issues/2985"
+title = "[FEATURE] Open source the C++ backend and Python package build process"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:13:33Z"

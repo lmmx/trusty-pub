@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/27863"
-title = "Error when executing az aks install-cli on an out-of-the-box Windows Server 2022 VM in Azure"
-state = "OPEN"
-keyword = "trusted publisher"
-found_at = "2026-04-03T13:14:34Z"

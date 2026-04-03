@@ -1,0 +1,5 @@
+issue_url = "https://github.com/benkehoe/aws-sso-util/issues/123"
+title = "SSL: CERTIFICATE_VERIFY_FAILED] when using aws-sso-util on WSL with Zscaler"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:19Z"

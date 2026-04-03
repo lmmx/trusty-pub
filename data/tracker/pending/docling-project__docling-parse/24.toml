@@ -1,0 +1,5 @@
+issue_url = "https://github.com/docling-project/docling-parse/issues/24"
+title = "missing sdist in pypi index"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:53Z"

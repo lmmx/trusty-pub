@@ -1,0 +1,5 @@
+issue_url = "https://github.com/boto/boto3/issues/4004"
+title = "NeptuneData and NeptuneGraph clients are not available, but documentation says they are"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:23Z"

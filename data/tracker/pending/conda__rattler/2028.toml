@@ -1,0 +1,5 @@
+issue_url = "https://github.com/conda/rattler/issues/2028"
+title = "Add OIDC login and interactive login for Artifactory"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:38Z"

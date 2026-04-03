@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Qiskit/qiskit-aer/issues/1959"
+title = "Migrate to PyPI Trusted publishers before Oct 19"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T15:53:52Z"

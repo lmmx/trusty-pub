@@ -1,0 +1,5 @@
+issue_url = "https://github.com/awslabs/mcp/issues/2551"
+title = "RFC: Add kubeconfig/OIDC authentication support for EKS MCP Server"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T15:33:16Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/IBM/ibm-cos-sdk-python/issues/3"
-title = "ibm_boto3 is not exists in Conda repositories"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:47Z"

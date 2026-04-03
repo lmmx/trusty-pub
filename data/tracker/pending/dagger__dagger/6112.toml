@@ -1,0 +1,5 @@
+issue_url = "https://github.com/dagger/dagger/issues/6112"
+title = "Make passing caller environment variables to modules more seamless"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:42Z"

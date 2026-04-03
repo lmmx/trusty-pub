@@ -1,5 +1,0 @@
-issue_url = "https://github.com/IdentityPython/pyjwkest/issues/30"
-title = "TypeError with base64 when using JWS.verify_compact"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:48Z"

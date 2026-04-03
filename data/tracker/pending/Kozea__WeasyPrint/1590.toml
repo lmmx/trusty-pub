@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Kozea/WeasyPrint/issues/1590"
-title = "UserWarning: There are known rendering problems and missing features with cairo < 1.15.4"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:52Z"

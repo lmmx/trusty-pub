@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Nuitka/Nuitka/issues/139"
-title = "Star imports of built-in names are not working as expected"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:15:03Z"

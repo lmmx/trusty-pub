@@ -71,7 +71,7 @@ async def _gh_search_one(owner_repo: str, kw: str, max_issues: int) -> list[dict
         "-R",
         owner_repo,
         "--search",
-        kw,
+        f"repo:{owner_repo} " + kw,
         "--json",
         "number,title,url,state,createdAt",
         "--limit",
@@ -113,7 +113,7 @@ async def _gh_search_issues(
     keywords: list[str],
     max_issues: int = 10,
 ) -> list[dict]:
-    """Search all keywords in a single OR query per repo with proper keyword metadata.
+    """Single parenthesized OR query, properly scoped to the repo.
 
     Raises RateLimitHit if the GitHub CLI indicates rate limiting.
     """
@@ -123,8 +123,8 @@ async def _gh_search_issues(
     if not keywords:
         return []
 
-    # Combine keywords into a single OR query
-    or_query = " OR ".join(keywords)
+    # Parenthesize so gh's implicit repo: qualifier scopes all branches
+    or_query = "(" + " OR ".join(keywords) + ")"
     issues = await _gh_search_one(owner_repo, or_query, max_issues)
 
     seen: dict[int, dict] = {}
@@ -133,21 +133,17 @@ async def _gh_search_issues(
         if issue_number in seen:
             continue
 
-        # Determine which keyword matched (title first, then body)
+        # Best-effort keyword attribution from title
+        matched_kw = keywords[0]
+        title_lower = issue.get("title", "").lower()
         for kw in keywords:
-            kw_lower = kw.lower()
-            title = issue.get("title", "").lower()
-            body = issue.get("body", "").lower()
-            if kw_lower in title or kw_lower in body:
-                issue["keyword"] = kw
+            if kw.lower() in title_lower:
+                matched_kw = kw
                 break
-        else:
-            # fallback if no keyword found
-            issue["keyword"] = keywords[0]
 
+        issue["keyword"] = matched_kw
         seen[issue_number] = issue
 
-    # Return sorted by descending issue number
     return sorted(seen.values(), key=lambda x: x["number"], reverse=True)
 
 

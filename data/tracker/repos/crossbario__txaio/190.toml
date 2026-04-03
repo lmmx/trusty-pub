@@ -1,0 +1,5 @@
+issue_url = "https://github.com/crossbario/txaio/issues/190"
+title = "Use PyPI Trusted Publishers for publishing releases"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T16:35:00Z"

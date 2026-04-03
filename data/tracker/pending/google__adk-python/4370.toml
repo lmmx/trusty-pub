@@ -1,0 +1,5 @@
+issue_url = "https://github.com/google/adk-python/issues/4370"
+title = "# ADK 1.23.0 Bug Report: Incompatibility with Workload Identity Federation + Impersonation"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:34:15Z"

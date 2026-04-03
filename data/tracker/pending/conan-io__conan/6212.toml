@@ -1,0 +1,5 @@
+issue_url = "https://github.com/conan-io/conan/issues/6212"
+title = "[bug] Unable to connect to conan-center=https://conan.bintray.com"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:38Z"

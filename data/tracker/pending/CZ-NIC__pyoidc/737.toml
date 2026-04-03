@@ -1,5 +1,0 @@
-issue_url = "https://github.com/CZ-NIC/pyoidc/issues/737"
-title = "Access token request with \"Authorization: Bearer\" header should not send client_id in body"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:36Z"

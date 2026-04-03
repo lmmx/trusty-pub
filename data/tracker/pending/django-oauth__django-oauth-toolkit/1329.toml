@@ -1,0 +1,5 @@
+issue_url = "https://github.com/django-oauth/django-oauth-toolkit/issues/1329"
+title = "AttributeError at /o/token/: 'User' object has no attribute 'id'"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:51Z"

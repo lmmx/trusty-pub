@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/27872"
-title = "Trusted launch default | az disk create with managed image"
-state = "CLOSED"
-keyword = "trusted publisher"
-found_at = "2026-04-03T13:14:34Z"

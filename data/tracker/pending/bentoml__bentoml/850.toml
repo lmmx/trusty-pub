@@ -1,0 +1,5 @@
+issue_url = "https://github.com/bentoml/BentoML/issues/850"
+title = "Permission issue while build docker image"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:19Z"

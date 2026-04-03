@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Lightning-AI/pytorch-lightning/issues/9871"
-title = "RuntimeError: CUDA error: no kernel image is available for execution on the device"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:54Z"

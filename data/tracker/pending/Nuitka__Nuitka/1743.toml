@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Nuitka/Nuitka/issues/1743"
-title = "telethon.tl.types could not be compiled, it takes a long time, the progress bar is stuck at %14.6"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:15:03Z"

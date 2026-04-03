@@ -1,0 +1,5 @@
+issue_url = "https://github.com/falconry/falcon/issues/2454"
+title = "Use Trusted Publishing to upload dists to PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T16:11:28Z"

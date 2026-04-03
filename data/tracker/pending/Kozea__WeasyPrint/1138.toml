@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Kozea/WeasyPrint/issues/1138"
-title = "OSError: [Errno cairo returned CAIRO_STATUS_WRITE_ERROR: b'error while writing to output stream'] 11"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:52Z"

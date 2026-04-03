@@ -1,0 +1,5 @@
+issue_url = "https://github.com/certbot/certbot/issues/8565"
+title = "certbot corrupts its own configuration"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:31Z"

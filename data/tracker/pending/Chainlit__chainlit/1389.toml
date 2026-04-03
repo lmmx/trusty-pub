@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Chainlit/chainlit/issues/1389"
-title = "Failed to fetch - request has been blocked by CORS policy: Request header field content-type is not allowed by Access-Control-Allow-Headers in preflight response."
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:37Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/10241"
-title = "Enable authentication via environment variables"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:34Z"

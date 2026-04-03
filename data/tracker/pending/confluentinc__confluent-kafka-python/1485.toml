@@ -1,0 +1,5 @@
+issue_url = "https://github.com/confluentinc/confluent-kafka-python/issues/1485"
+title = "oauth token not refreshing"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T15:33:38Z"

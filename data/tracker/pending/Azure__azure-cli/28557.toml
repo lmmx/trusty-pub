@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/28557"
-title = "Make Gen2 + TrustedLaunchSupported as Default options for SIG image definition"
-state = "CLOSED"
-keyword = "trusted publisher"
-found_at = "2026-04-03T13:14:34Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-sdk-tools/issues/3313"
-title = "【Mock-Service-Host】  Unable to authenticate due to incorrect tenant ID format."
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:34Z"

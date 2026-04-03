@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Chainlit/chainlit/issues/1147"
-title = "no user role with Azure AD authentication"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:37Z"

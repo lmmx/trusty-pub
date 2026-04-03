@@ -1,5 +1,0 @@
-issue_url = "https://github.com/microsoft/playwright-python/issues/1977"
-title = "[BUG]run firefox in the github action"
-state = "CLOSED"
-keyword = "pypi trusted"
-found_at = "2026-04-03T13:14:59Z"

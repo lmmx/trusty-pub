@@ -1,5 +1,0 @@
-issue_url = "https://github.com/Azure/azure-cli/issues/26942"
-title = "create federated identity in WSL-ubuntu got invisible char in OIDCURL"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T13:14:34Z"
