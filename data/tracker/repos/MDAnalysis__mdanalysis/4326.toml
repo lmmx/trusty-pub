@@ -1,0 +1,5 @@
+issue_url = "https://github.com/MDAnalysis/mdanalysis/issues/4326"
+title = "Switch everything touching PyPi to OpenID connect"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T12:38:53Z"

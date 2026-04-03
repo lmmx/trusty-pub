@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Kludex/starlette/issues/2721"
+title = "Update pipeline to use PyPI trusted publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T12:37:44Z"

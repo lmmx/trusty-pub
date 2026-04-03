@@ -34,44 +34,67 @@ from .tracker.store import (
 )
 
 
+# ---------------------------------------------------------------------------
+# gh helpers (async / concurrent)
+
+
+async def _gh_search_one(owner_repo: str, kw: str, max_issues: int) -> list[dict]:
+    """Search a single keyword in a repo using the gh CLI."""
+    proc = await asyncio.create_subprocess_exec(
+        "gh",
+        "issue",
+        "list",
+        "-R",
+        owner_repo,
+        "--search",
+        kw,
+        "--json",
+        "number,title,url,state,createdAt",
+        "--limit",
+        str(max_issues),
+        "--state",
+        "all",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode != 0:
+        # Might be a private repo, archived, or rate-limited
+        return []
+    try:
+        return json.loads(stdout)
+    except Exception:
+        return []
+
+
 async def _gh_search_issues(
     owner_repo: str,
     keywords: list[str],
     max_issues: int = 10,
 ) -> list[dict]:
-    """Search a repo's issues for keywords. Returns deduplicated results."""
+    """Concurrent keyword search + dedup.
+
+    Returns a list of issues with keyword annotation, sorted by issue number descending.
+    """
     if not _valid_owner_repo(owner_repo):
         return []
 
+    # Launch all keyword searches concurrently
+    results = await asyncio.gather(
+        *[_gh_search_one(owner_repo, kw, max_issues) for kw in keywords]
+    )
+
     seen: dict[int, dict] = {}
-    for kw in keywords:
-        proc = await asyncio.create_subprocess_exec(
-            "gh",
-            "issue",
-            "list",
-            "-R",
-            owner_repo,
-            "--search",
-            kw,
-            "--json",
-            "number,title,url,state,createdAt",
-            "--limit",
-            str(max_issues),
-            "--state",
-            "all",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            # Might be a private repo, archived, or rate-limited
-            return []
-        for issue in json.loads(stdout):
+    for kw, issues in zip(keywords, results):
+        for issue in issues:
             if issue["number"] not in seen:
                 issue["keyword"] = kw
                 seen[issue["number"]] = issue
 
     return sorted(seen.values(), key=lambda x: x["number"], reverse=True)
+
+
+# ---------------------------------------------------------------------------
 
 
 def _write_pending(
@@ -165,6 +188,9 @@ def _get_untracked_slugs(
     return result
 
 
+# ---------------------------------------------------------------------------
+
+
 async def _run_bulk_search(
     target: Path,
     limit: int | None = None,
@@ -176,9 +202,11 @@ async def _run_bulk_search(
     bulk_meta = resolve_bulk_search()
 
     pending_dir = target / tracker_meta["pending_dir"]
-    batch_size: int = bulk_meta["batch_size"]
-    delay: float = bulk_meta["delay_between_batches"]
     max_issues: int = bulk_meta["max_issues_per_repo"]
+
+    # 🔑 concurrency control
+    concurrency: int = bulk_meta.get("concurrency", 15)
+    sem = asyncio.Semaphore(concurrency)
 
     # Combine primary + secondary keywords for search
     all_keywords: list[str] = (
@@ -190,55 +218,58 @@ async def _run_bulk_search(
         candidates = candidates[:limit]
 
     total = len(candidates)
-    print(f"Bulk searching {total} untracked repos...")
+    print(f"Bulk searching {total} untracked repos (concurrency={concurrency})...")
 
-    repos_searched = 0
-    issues_found = 0
     repos_with_hits = 0
+    issues_found = 0
     errors = 0
 
-    for batch_start in range(0, total, batch_size):
-        batch = candidates[batch_start : batch_start + batch_size]
+    async def process_repo(idx: int, slug: str, owner_repo: str):
+        nonlocal repos_with_hits, issues_found, errors
 
-        for slug, owner_repo in batch:
-            repos_searched += 1
-            prefix = f"[{repos_searched}/{total}]"
+        prefix = f"[{idx}/{total}]"
 
-            # Skip if already pending (for resume mode)
-            if resume and (pending_dir / slug).exists():
-                print(f"{prefix} {owner_repo} — already pending, skipping")
-                continue
+        # Skip if already pending (for resume mode)
+        if resume and (pending_dir / slug).exists():
+            print(f"{prefix} {owner_repo} — already pending, skipping")
+            return
 
+        async with sem:
             try:
                 issues = await _gh_search_issues(
                     owner_repo, all_keywords, max_issues
                 )
             except Exception:
                 errors += 1
-                print(f"{prefix} {owner_repo} — error, skipping")
-                continue
+                print(f"{prefix} {owner_repo} — error")
+                return
 
             if issues:
                 repos_with_hits += 1
                 for issue in issues:
                     _write_pending(pending_dir, slug, issue)
                     issues_found += 1
-                print(
-                    f"{prefix} {owner_repo} — {len(issues)} issue(s) found"
-                )
+                print(f"{prefix} {owner_repo} — {len(issues)} issue(s)")
             else:
                 print(f"{prefix} {owner_repo} — no issues")
 
-        # Respect rate limits between batches
-        if batch_start + batch_size < total:
-            time.sleep(delay)
+    # Launch all repo searches concurrently
+    await asyncio.gather(
+        *[
+            process_repo(i + 1, slug, owner_repo)
+            for i, (slug, owner_repo) in enumerate(candidates)
+        ]
+    )
 
     return {
-        "repos_searched": repos_searched,
+        "repos_searched": total,
         "repos_with_hits": repos_with_hits,
         "issues_found": issues_found,
         "errors": errors,
     }
+
+
+# ---------------------------------------------------------------------------
 
 
 def bulk_search() -> None:
@@ -286,13 +317,11 @@ def bulk_search() -> None:
         )
     )
 
-    print()
-    print("=== Bulk search complete ===")
+    print("\n=== Bulk search complete ===")
     print(f"  Repos searched:  {stats['repos_searched']}")
     print(f"  Repos with hits: {stats['repos_with_hits']}")
     print(f"  Issues found:    {stats['issues_found']}")
-    print(f"  Errors:          {stats['errors']}")
-    print()
+    print(f"  Errors:          {stats['errors']}\n")
     print("Pending issues are in data/tracker/pending/ — use the tracker app to triage.")
 
     sys.exit(0 if stats["errors"] == 0 else 1)

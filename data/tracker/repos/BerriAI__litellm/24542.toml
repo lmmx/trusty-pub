@@ -1,0 +1,5 @@
+issue_url = "https://github.com/BerriAI/litellm/issues/24542"
+title = "[Security] Migrate PyPI publishing to Trusted Publishers (OIDC) to prevent token theft"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T12:25:51Z"
