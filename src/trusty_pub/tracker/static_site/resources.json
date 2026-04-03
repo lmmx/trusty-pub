@@ -24,6 +24,13 @@
     "desc": "OpenSSF report on how Trusted Publishing works and the case for adoption across ecosystems."
   },
   {
+    "title": "PyPI blog: LiteLLM & Telnyx supply-chain attack incident report",
+    "url": "https://blog.pypi.org/posts/2026-04-02-incident-report-litellm-telnyx-supply-chain-attack/",
+    "type": "incident",
+    "packages": ["litellm", "telnyx"],
+    "desc": "Official PyPI incident report covering the LiteLLM and Telnyx compromises, where leaked credentials enabled malicious package uploads. Highlights how Trusted Publishing and short-lived OIDC credentials mitigate this class of attack."
+  },
+  {
     "title": "LiteLLM supply-chain attack via leaked PyPI credentials",
     "url": "https://futuresearch.ai/blog/litellm-pypi-supply-chain-attack/",
     "type": "incident",
