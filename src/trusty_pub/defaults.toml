@@ -27,7 +27,7 @@ default = { source = "repo_urls.parquet", report = "report_mini.tsv", repos_dir 
 ] }
 
 [data.bulk_search]
-default = { batch_size = 10, delay_between_batches = 2.0, max_issues_per_repo = 10, primary_keywords = [
+default = { batch_size = 10, delay_between_batches = 2.0, max_issues_per_repo = 10, concurrency = 15, max_consecutive_errors = 3, primary_keywords = [
   "trusted publishing",
 ], secondary_keywords = [
   "trusted publisher",
