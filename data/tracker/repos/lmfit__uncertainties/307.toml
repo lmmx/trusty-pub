@@ -1,0 +1,5 @@
+issue_url = "https://github.com/lmfit/uncertainties/issues/307"
+title = "pypi publish CI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:59:12Z"

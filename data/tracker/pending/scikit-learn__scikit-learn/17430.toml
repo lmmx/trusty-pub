@@ -1,5 +1,0 @@
-issue_url = "https://github.com/scikit-learn/scikit-learn/issues/17430"
-title = "can't install sklearn=0.21.1 by sudo apt-get install python3-sklearn "
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:44Z"

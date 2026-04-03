@@ -1,5 +1,0 @@
-issue_url = "https://github.com/snok/django-auth-adfs/issues/67"
-title = "Azure AD authentication issue with trusted locations"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:52Z"

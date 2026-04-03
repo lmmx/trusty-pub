@@ -1,5 +1,0 @@
-issue_url = "https://github.com/mage-ai/mage-ai/issues/5717"
-title = "[BUG] Missing logout for OIDC"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:35Z"

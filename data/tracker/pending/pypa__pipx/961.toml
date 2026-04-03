@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/pipx/issues/961"
-title = "Allow pipx to use sytem certificates"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:23Z"

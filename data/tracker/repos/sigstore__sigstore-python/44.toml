@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sigstore/sigstore-python/issues/44"
+title = "CI: Use a discrete deployment environment for releases"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:52:25Z"

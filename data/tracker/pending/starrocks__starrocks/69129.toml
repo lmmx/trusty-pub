@@ -1,5 +1,0 @@
-issue_url = "https://github.com/StarRocks/starrocks/issues/69129"
-title = "JWTAuth token flow is broken in REST Catalog"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:56Z"

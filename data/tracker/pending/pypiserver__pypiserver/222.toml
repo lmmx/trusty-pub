@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypiserver/pypiserver/issues/222"
-title = "Old package gets installed from private pypi server even if I copy new package"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

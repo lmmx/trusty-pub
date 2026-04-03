@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pytorch/audio/issues/3911"
-title = "`UnpicklingError: Weights only load failed. This file can still be loaded` occured on document's code of [tacotron2_pipeline_tutorial.html]"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:29Z"

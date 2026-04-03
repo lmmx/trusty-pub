@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/pipenv/issues/5710"
-title = "Make pipenv respect pip.conf with an optional arugment"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

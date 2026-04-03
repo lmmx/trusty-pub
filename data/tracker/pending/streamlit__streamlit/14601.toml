@@ -1,5 +1,0 @@
-issue_url = "https://github.com/streamlit/streamlit/issues/14601"
-title = "Required String parameter 'redirect_uri' is not present on OIDC logout with AWS cognito"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:57Z"

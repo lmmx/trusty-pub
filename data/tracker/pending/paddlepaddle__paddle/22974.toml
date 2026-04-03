@@ -1,5 +1,0 @@
-issue_url = "https://github.com/PaddlePaddle/Paddle/issues/22974"
-title = "fluid.CUDAPlace(0)报错"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:08Z"

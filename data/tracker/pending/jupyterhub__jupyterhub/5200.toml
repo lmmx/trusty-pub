@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jupyterhub/jupyterhub/issues/5200"
-title = "Extend OAuth provider to OIDC"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:20Z"

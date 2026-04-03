@@ -1,5 +1,0 @@
-issue_url = "https://github.com/rasterio/rasterio/issues/3024"
-title = "Numpy 2 compatibility and the numpy C API"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:34Z"

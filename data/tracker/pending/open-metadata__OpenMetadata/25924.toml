@@ -1,5 +1,0 @@
-issue_url = "https://github.com/open-metadata/OpenMetadata/issues/25924"
-title = "OIDC Keycloak - 404 on callback and 504 on loggedInUser API"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:02Z"

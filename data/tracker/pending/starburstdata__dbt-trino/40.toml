@@ -1,5 +1,0 @@
-issue_url = "https://github.com/starburstdata/dbt-trino/issues/40"
-title = "oidc support for dbt-trino"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:56Z"

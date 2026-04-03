@@ -1,5 +1,0 @@
-issue_url = "https://github.com/llamastack/llama-stack/issues/5272"
-title = "ci: add GCP Workload Identity Federation for Vertex AI in  \n  record-integration-tests workflow"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:32Z"

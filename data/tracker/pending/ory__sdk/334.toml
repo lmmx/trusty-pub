@@ -1,5 +1,0 @@
-issue_url = "https://github.com/ory/sdk/issues/334"
-title = "Getting error in the response of \"createNativeRegistrationFlow\" API : Social Sign In and OpenID Connect are only supported for flows initiated using the Browser endpoint"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:07Z"

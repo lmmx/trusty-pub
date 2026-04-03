@@ -1,5 +1,0 @@
-issue_url = "https://github.com/sphinx-contrib/apidoc/issues/22"
-title = "[CI/CD] Insecure `pypi-publish` setup and other packaging problems"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:53Z"

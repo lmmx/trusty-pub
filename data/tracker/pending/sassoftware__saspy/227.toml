@@ -1,5 +1,0 @@
-issue_url = "https://github.com/sassoftware/saspy/issues/227"
-title = "NameError exceptions due to pandas not being installed as an explicit dependency"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:42Z"

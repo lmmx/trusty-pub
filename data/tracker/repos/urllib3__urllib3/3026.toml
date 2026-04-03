@@ -1,0 +1,5 @@
+issue_url = "https://github.com/urllib3/urllib3/issues/3026"
+title = "CI: Use \"trusted publishing\" to publish to PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:47:07Z"

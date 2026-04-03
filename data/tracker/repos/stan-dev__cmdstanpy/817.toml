@@ -1,0 +1,5 @@
+issue_url = "https://github.com/stan-dev/cmdstanpy/issues/817"
+title = "Update release CI to use OCID publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:50:23Z"

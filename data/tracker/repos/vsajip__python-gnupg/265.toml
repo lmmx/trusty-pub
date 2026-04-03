@@ -1,0 +1,5 @@
+issue_url = "https://github.com/vsajip/python-gnupg/issues/265"
+title = "Add GHA automation for tokenless uploads to PyPI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:45:31Z"

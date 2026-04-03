@@ -1,5 +1,0 @@
-issue_url = "https://github.com/openai/openai-python/issues/2572"
-title = "Add domain filtering options to web_search tool in Responses API"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:02Z"

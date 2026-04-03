@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pgmpy/pgmpy/issues/3032"
-title = "[MNT] Integrate `radon` into `GitHub workflows` as a non-blocking code quality reference"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:12Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pre-commit/pre-commit/issues/730"
-title = "Add support for requirements.txt in python additional_dependencies argument"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:16Z"

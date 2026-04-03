@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-hyper/brotlicffi/issues/209"
+title = "Upgrade PyPI publishing infrastructure"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:54:58Z"

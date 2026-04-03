@@ -1,5 +1,0 @@
-issue_url = "https://github.com/python-poetry/poetry/issues/9042"
-title = "Poetry 1.8.0 does not tolerate new sources in pyproject.toml"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:28Z"

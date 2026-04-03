@@ -1,5 +1,0 @@
-issue_url = "https://github.com/openedx/xblock-lti-consumer/issues/299"
-title = "redirect_uri should be checked against pre-registered list"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:05Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/streamlit/streamlit/issues/12043"
-title = "Option to refresh user info for user authenticated via st.login"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:57Z"

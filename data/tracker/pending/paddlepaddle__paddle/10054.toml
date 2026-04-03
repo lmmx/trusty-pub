@@ -1,5 +1,0 @@
-issue_url = "https://github.com/PaddlePaddle/Paddle/issues/10054"
-title = "MPI上使用before_hook.sh后报错"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:08Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/pipenv/issues/6344"
-title = "Failed to install private package with private dependencies"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

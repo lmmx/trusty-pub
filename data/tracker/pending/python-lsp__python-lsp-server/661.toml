@@ -1,5 +1,0 @@
-issue_url = "https://github.com/python-lsp/python-lsp-server/issues/661"
-title = "Release workflow failing and some warnings when building the package"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:27Z"

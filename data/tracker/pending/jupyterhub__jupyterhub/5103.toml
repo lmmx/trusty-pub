@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jupyterhub/jupyterhub/issues/5103"
-title = "`/user` API  gives `auth_state: None`"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:20Z"

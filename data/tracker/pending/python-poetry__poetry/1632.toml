@@ -1,5 +1,0 @@
-issue_url = "https://github.com/python-poetry/poetry/issues/1632"
-title = "Replacing the URL of a source (e.g. PyPI) at the global level"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:28Z"

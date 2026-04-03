@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pre-commit/pre-commit/issues/1163"
-title = "Getting ERROR: Directory '.' is not installable. Neither 'setup.py' nor 'pyproject.toml' found even if setup.py file available"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:16Z"

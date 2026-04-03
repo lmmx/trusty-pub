@@ -1,5 +1,0 @@
-issue_url = "https://github.com/localstack/localstack/issues/12914"
-title = "bug: Cognito OIDC config JSON is missing end_session_endpoint"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:32Z"

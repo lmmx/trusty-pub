@@ -1,5 +1,0 @@
-issue_url = "https://github.com/skypilot-org/skypilot/issues/5709"
-title = "[helm] Nightly chart is replacing `oauth2-proxy.image` with SkyPilot base image"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:51Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/ory/sdk/issues/418"
-title = "Kratos PHP SDK does not support passkey authentication in `toSession`"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:07Z"

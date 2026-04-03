@@ -1,5 +1,0 @@
-issue_url = "https://github.com/snowballstem/snowball/issues/229"
-title = "KeyError: \"Stemming algorithm 'porter' not found\" on version 3.0.0 of the Python snowballstemmer package"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:52Z"

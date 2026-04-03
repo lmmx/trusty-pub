@@ -1,0 +1,5 @@
+issue_url = "https://github.com/llamastack/llama-stack/issues/4505"
+title = "Migrate Release Process from llama-stack-ops to GitHub Releases with PyPI Auto-Publishing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:59:30Z"

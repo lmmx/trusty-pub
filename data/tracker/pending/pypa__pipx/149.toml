@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/pipx/issues/149"
-title = "Feature request: Option to list available upgrades without performing them"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:23Z"

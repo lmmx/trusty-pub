@@ -1,5 +1,0 @@
-issue_url = "https://github.com/lidatong/dataclasses-json/issues/477"
-title = "[BUG] PyPI release broken due to GH changes to env protection"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:30Z"

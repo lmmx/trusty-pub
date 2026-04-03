@@ -1,5 +1,0 @@
-issue_url = "https://github.com/openai/openai-python/issues/242"
-title = "Can't access gpt-3.5-turbo - AttributeError: module 'openai' has no attribute 'ChatCompletion'"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:02Z"

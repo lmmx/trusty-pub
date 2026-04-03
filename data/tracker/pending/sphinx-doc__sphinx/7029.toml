@@ -1,5 +1,0 @@
-issue_url = "https://github.com/sphinx-doc/sphinx/issues/7029"
-title = "field list becomes <div><dl><dt> & <dt> instead of <table>"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:54Z"

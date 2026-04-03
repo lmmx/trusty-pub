@@ -1,5 +1,0 @@
-issue_url = "https://github.com/open-mmlab/mmcv/issues/821"
-title = "ERROR: Command errored out with exit status 1: python setup.py egg_info Check the logs for full command output."
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:02Z"

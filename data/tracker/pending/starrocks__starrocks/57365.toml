@@ -1,5 +1,0 @@
-issue_url = "https://github.com/StarRocks/starrocks/issues/57365"
-title = "[Enhancement] Add OIDC token expiry validation"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:56Z"

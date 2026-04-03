@@ -1,5 +1,0 @@
-issue_url = "https://github.com/rasterio/rasterio/issues/2591"
-title = "Weird interaction with scipy nightly builds"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:34Z"

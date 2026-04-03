@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jupyterhub/jupyterhub/issues/4255"
-title = "run `auth_state_hook` on login_user"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:20Z"

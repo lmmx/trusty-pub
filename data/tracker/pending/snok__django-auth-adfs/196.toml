@@ -1,5 +1,0 @@
-issue_url = "https://github.com/snok/django-auth-adfs/issues/196"
-title = "access_token_issuer causing issue with on-premise adfs"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:52Z"

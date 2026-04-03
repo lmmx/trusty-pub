@@ -1,5 +1,0 @@
-issue_url = "https://github.com/open-metadata/OpenMetadata/issues/25775"
-title = "OIDC SSO with AWS Cognito fails with 'Redirect URI is required' error (pac4j)"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:02Z"

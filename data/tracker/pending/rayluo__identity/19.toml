@@ -1,5 +1,0 @@
-issue_url = "https://github.com/rayluo/identity/issues/19"
-title = "Django integration is not integrated with Django's authentication framework"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:34Z"

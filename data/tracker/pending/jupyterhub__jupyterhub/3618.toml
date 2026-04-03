@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jupyterhub/jupyterhub/issues/3618"
-title = "tornado.curl_httpclient.CurlError: 599 Empty Reply from Server - with Oauth on some users"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:20Z"

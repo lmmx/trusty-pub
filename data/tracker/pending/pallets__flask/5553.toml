@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pallets/flask/issues/5553"
-title = "Revisit SERVER_NAME's impact on routing and external URL generation"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:09Z"

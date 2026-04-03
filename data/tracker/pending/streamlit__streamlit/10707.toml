@@ -1,5 +1,0 @@
-issue_url = "https://github.com/streamlit/streamlit/issues/10707"
-title = "New client_kwargs entry (acr_values) is not accepted, auth fails in st.login()"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:57Z"

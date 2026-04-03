@@ -1,5 +1,0 @@
-issue_url = "https://github.com/sigstore/sigstore-python/issues/1697"
-title = "Unusual hang after browser OIDC authentication"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:49Z"

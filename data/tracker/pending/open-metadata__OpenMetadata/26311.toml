@@ -1,5 +1,0 @@
-issue_url = "https://github.com/open-metadata/OpenMetadata/issues/26311"
-title = "OIDC callback returns 404 after auth code exchange with Azure AD (confidential client)"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:02Z"

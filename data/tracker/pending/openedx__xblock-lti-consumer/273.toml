@@ -1,5 +1,0 @@
-issue_url = "https://github.com/openedx/xblock-lti-consumer/issues/273"
-title = "Remove XBlock `location` dependencies from LTI 1.3 launches"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:05Z"

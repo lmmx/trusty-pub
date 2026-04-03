@@ -1,5 +1,0 @@
-issue_url = "https://github.com/open-telemetry/opentelemetry-python/issues/3382"
-title = "otel-0.40b release breaks 0.39b installation"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:02Z"

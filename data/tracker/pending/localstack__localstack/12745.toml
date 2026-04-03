@@ -1,5 +1,0 @@
-issue_url = "https://github.com/localstack/localstack/issues/12745"
-title = "bug: Cognito ID token missing nonce claim"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:32Z"

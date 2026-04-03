@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pallets/werkzeug/issues/3142"
-title = "`get_host` should allow empty host"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:09Z"

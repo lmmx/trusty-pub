@@ -1,5 +1,0 @@
-issue_url = "https://github.com/python-poetry/poetry/issues/9185"
-title = "poetry 1.8: Error installing packages from private artifactory repository"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:28Z"

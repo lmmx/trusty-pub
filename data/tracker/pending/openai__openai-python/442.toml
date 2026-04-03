@@ -1,5 +1,0 @@
-issue_url = "https://github.com/openai/openai-python/issues/442"
-title = "Cannot install openai package due to SSL error"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:02Z"

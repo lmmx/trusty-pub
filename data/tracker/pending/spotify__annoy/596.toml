@@ -1,5 +1,0 @@
-issue_url = "https://github.com/spotify/annoy/issues/596"
-title = "Gcc error while Installing in Docker with python:3.8-alpine as base image"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:54Z"

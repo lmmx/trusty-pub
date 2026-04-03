@@ -1,5 +1,0 @@
-issue_url = "https://github.com/openfga/python-sdk/issues/136"
-title = "Use token-endpoint instead of issuer for oauth2 authorization"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:05Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/sphinx-contrib/plantuml/issues/104"
-title = "The default PyPi version explicitly requires sphinx 4.4 only.  The PyPi wheel probably needs updating"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:54Z"

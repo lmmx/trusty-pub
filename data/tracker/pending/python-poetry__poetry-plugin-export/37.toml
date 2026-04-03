@@ -1,5 +1,0 @@
-issue_url = "https://github.com/python-poetry/poetry-plugin-export/issues/37"
-title = "`Poetry export` should use per-package --index-url instead of single --extra-index-url"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:28Z"
