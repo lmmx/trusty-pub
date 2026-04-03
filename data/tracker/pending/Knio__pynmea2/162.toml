@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Knio/pynmea2/issues/162"
+title = "RMC message error in 1.19.0 (but 1.15.0 works fine)"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:14:52Z"

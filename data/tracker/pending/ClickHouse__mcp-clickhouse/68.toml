@@ -1,0 +1,5 @@
+issue_url = "https://github.com/ClickHouse/mcp-clickhouse/issues/68"
+title = "Unauthorized access vulnerability in HTTP/SSE modes"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:37Z"

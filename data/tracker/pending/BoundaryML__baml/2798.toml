@@ -1,0 +1,5 @@
+issue_url = "https://github.com/BoundaryML/baml/issues/2798"
+title = "[bug] Workload Identity Federation (WIF) credentials fail to authenticate for vertex-ai provider"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:35Z"

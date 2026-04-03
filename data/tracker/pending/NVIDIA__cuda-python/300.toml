@@ -1,0 +1,5 @@
+issue_url = "https://github.com/NVIDIA/cuda-python/issues/300"
+title = "Consolidate `DESCRIPTION.rst` and `README.md`"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:15:01Z"

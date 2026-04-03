@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Nuitka/Nuitka/issues/3530"
+title = "Insufficient Error parsing when signing code on macos"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:15:03Z"

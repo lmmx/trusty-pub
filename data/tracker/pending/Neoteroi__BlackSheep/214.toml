@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Neoteroi/BlackSheep/issues/214"
+title = "Add support for Auth Code Flow + PKCE"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:15:02Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Neoteroi/BlackSheep/issues/441"
+title = "refresh_token endpoint should allow anonymous access explicitly"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:15:02Z"

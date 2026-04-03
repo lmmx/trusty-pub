@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-cli/issues/25291"
+title = "Federated Credentials for GitHub fails with CLi 2.42"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:34Z"

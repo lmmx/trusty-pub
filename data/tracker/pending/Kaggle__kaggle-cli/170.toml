@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Kaggle/kaggle-cli/issues/170"
+title = "Cannot \"pip install kaggle\", error saying \"Could not fetch URL, problem confirming the ssl certificate...\""
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:14:51Z"

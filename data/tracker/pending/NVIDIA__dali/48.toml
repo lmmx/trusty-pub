@@ -1,0 +1,5 @@
+issue_url = "https://github.com/NVIDIA/DALI/issues/48"
+title = "ImportError: No module named 'nvidia.dali.backend_impl'"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:15:01Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Arize-ai/phoenix/issues/9481"
+title = "[ENHANCEMENT]: Use OIDC claim to set user role"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:33Z"

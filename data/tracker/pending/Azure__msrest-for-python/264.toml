@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/msrest-for-python/issues/264"
+title = "msrest locks asyncio when getting credentials"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:34Z"

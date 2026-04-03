@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Arize-ai/phoenix/issues/11065"
+title = "[ENHANCEMENT]: Support alternative email claims for OAuth2/OIDC (e.g., preferred_username, upn)"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:33Z"

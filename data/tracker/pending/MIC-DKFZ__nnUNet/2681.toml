@@ -1,0 +1,5 @@
+issue_url = "https://github.com/MIC-DKFZ/nnUNet/issues/2681"
+title = "PyTorch 2.6 has changed the default value of `weights_only` to `True`, breaking the loading of some `nnunetv2` models"
+state = "OPEN"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:14:55Z"

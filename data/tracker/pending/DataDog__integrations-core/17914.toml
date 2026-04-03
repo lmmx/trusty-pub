@@ -1,0 +1,5 @@
+issue_url = "https://github.com/DataDog/integrations-core/issues/17914"
+title = "[BUG] KafkaError{code=_TRANSPORT,val=-195,str=\"Failed to get metadata: Local: Broker transport failure\"}"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:40Z"

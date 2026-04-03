@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-cli/issues/20278"
+title = "`az login` fails: OSError: [WinError 0]"
+state = "OPEN"
+keyword = "OIDC publish"
+found_at = "2026-04-03T13:14:34Z"

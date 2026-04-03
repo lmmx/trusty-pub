@@ -1,0 +1,5 @@
+issue_url = "https://github.com/IdentityPython/pysaml2/issues/912"
+title = "I am looking for a way to perform attribute query from the SP to the IDP not associated with a specific login session"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:48Z"

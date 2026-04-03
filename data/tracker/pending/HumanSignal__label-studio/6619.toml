@@ -1,0 +1,5 @@
+issue_url = "https://github.com/HumanSignal/label-studio/issues/6619"
+title = "CSRF Bug Not Resolved in Latest Release"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:14:47Z"

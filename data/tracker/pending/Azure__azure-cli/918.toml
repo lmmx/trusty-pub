@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-cli/issues/918"
+title = "[component] Error thrown when installing additional command module"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:14:34Z"

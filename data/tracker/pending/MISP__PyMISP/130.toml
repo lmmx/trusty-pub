@@ -1,0 +1,5 @@
+issue_url = "https://github.com/MISP/PyMISP/issues/130"
+title = "Issues with pypi six"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:14:55Z"

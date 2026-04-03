@@ -1,0 +1,5 @@
+issue_url = "https://github.com/OpenMS/OpenMS/issues/6958"
+title = "Warnings during pypi publish in GH Action"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T13:21:04Z"

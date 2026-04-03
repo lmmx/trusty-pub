@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-cli/issues/30594"
+title = "az extension add --name azure-firewall"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:14:34Z"

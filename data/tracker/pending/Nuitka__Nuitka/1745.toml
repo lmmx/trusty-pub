@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Nuitka/Nuitka/issues/1745"
+title = "try/except usage of importlib.metadata/importlib_metadata does not work on 3.7 or lower"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:15:03Z"

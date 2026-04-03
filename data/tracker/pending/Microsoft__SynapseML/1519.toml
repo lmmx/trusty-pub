@@ -1,0 +1,5 @@
+issue_url = "https://github.com/microsoft/SynapseML/issues/1519"
+title = "HealthCareSDK Returns NullPointerException on Synapse Spark"
+state = "CLOSED"
+keyword = "trusted publisher"
+found_at = "2026-04-03T13:15:00Z"

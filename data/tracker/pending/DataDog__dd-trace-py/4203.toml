@@ -1,0 +1,5 @@
+issue_url = "https://github.com/DataDog/dd-trace-py/issues/4203"
+title = "failed to send traces to Datadog Agent"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:39Z"

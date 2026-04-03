@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-cli/issues/28005"
+title = "Trusted Launch as Default - VM/VMSS Deployment with Image URN/ID"
+state = "CLOSED"
+keyword = "trusted publisher"
+found_at = "2026-04-03T13:14:34Z"

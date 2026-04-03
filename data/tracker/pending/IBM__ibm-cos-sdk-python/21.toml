@@ -1,0 +1,5 @@
+issue_url = "https://github.com/IBM/ibm-cos-sdk-python/issues/21"
+title = "README.md client configuration sample out of sync with SoftLayer docs."
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:47Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Nuitka/Nuitka/issues/3752"
+title = "[Regression] pypdfium2 crashes Nuitka 4.0 in standalone mode"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:15:03Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Nuitka/Nuitka/issues/2759"
+title = "Onefile/Standalone Binary ImportError with imp.py and Twofish: No module named '_Twofish'"
+state = "CLOSED"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:15:03Z"

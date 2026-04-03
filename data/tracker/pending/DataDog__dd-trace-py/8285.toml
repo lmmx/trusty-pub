@@ -1,0 +1,5 @@
+issue_url = "https://github.com/DataDog/dd-trace-py/issues/8285"
+title = " Compatibility Issue with pytest 8.0 Collection Changes"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:39Z"

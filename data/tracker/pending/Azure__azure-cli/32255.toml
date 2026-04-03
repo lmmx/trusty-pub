@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-cli/issues/32255"
+title = "az webapp deploy fails with a connection error when using NordVPN"
+state = "CLOSED"
+keyword = "OIDC publish"
+found_at = "2026-04-03T13:14:34Z"

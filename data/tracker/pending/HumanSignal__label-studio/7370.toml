@@ -1,0 +1,5 @@
+issue_url = "https://github.com/HumanSignal/label-studio/issues/7370"
+title = "[CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate"
+state = "OPEN"
+keyword = "pypi trusted"
+found_at = "2026-04-03T13:14:47Z"

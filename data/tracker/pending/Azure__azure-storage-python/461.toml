@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Azure/azure-storage-python/issues/461"
+title = "Irrespective of an assigned role, a service principle has same privileges as an owner "
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:34Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/DataDog/dd-trace-py/issues/7094"
+title = "UnboundLocalError in ddtrace 1.20.2"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:39Z"

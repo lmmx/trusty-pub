@@ -1,0 +1,5 @@
+issue_url = "https://github.com/Chainlit/chainlit/issues/2445"
+title = "Feat req: Logging back in should continue previous task"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T13:14:37Z"
