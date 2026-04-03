@@ -41,13 +41,14 @@ from .tracker.store import (
     _valid_owner_repo,
 )
 
-
 # ---------------------------------------------------------------------------
 # Rate limit handling
 # ---------------------------------------------------------------------------
 
+
 class RateLimitHit(Exception):
     """Raised when a gh CLI call fails due to GitHub API rate limiting."""
+
     pass
 
 
@@ -55,9 +56,8 @@ class RateLimitHit(Exception):
 # gh helpers (async / concurrent)
 # ---------------------------------------------------------------------------
 
-async def _gh_search_one(
-    owner_repo: str, kw: str, max_issues: int
-) -> list[dict]:
+
+async def _gh_search_one(owner_repo: str, kw: str, max_issues: int) -> list[dict]:
     """Search a single keyword in a repo using the gh CLI.
 
     Raises RateLimitHit if stderr indicates rate limiting.
@@ -86,15 +86,18 @@ async def _gh_search_one(
     if proc.returncode != 0:
         err_text = stderr.decode("utf-8", errors="replace").lower()
         # gh CLI surfaces rate limits via several patterns
-        if any(phrase in err_text for phrase in (
-            "rate limit",
-            "api rate",
-            "secondary rate",
-            "abuse detection",
-            "retry-after",
-            "403",
-            "exceeded a secondary",
-        )):
+        if any(
+            phrase in err_text
+            for phrase in (
+                "rate limit",
+                "api rate",
+                "secondary rate",
+                "abuse detection",
+                "retry-after",
+                "403",
+                "exceeded a secondary",
+            )
+        ):
             raise RateLimitHit(err_text.strip())
         # Non-rate-limit failure (private, archived, not found, etc.)
         return []
@@ -110,26 +113,41 @@ async def _gh_search_issues(
     keywords: list[str],
     max_issues: int = 10,
 ) -> list[dict]:
-    """Concurrent keyword search + dedup.
+    """Search all keywords in a single OR query per repo with proper keyword metadata.
 
-    Raises RateLimitHit if any keyword search hits the rate limit.
+    Raises RateLimitHit if the GitHub CLI indicates rate limiting.
     """
     if not _valid_owner_repo(owner_repo):
         return []
 
-    # Launch all keyword searches concurrently
-    results = await asyncio.gather(
-        *[_gh_search_one(owner_repo, kw, max_issues) for kw in keywords],
-        # Let RateLimitHit propagate — don't swallow it
-    )
+    if not keywords:
+        return []
+
+    # Combine keywords into a single OR query
+    or_query = " OR ".join(keywords)
+    issues = await _gh_search_one(owner_repo, or_query, max_issues)
 
     seen: dict[int, dict] = {}
-    for kw, issues in zip(keywords, results):
-        for issue in issues:
-            if issue["number"] not in seen:
-                issue["keyword"] = kw
-                seen[issue["number"]] = issue
+    for issue in issues:
+        issue_number = issue["number"]
+        if issue_number in seen:
+            continue
 
+        # Determine which keyword matched (title first, then body)
+        for kw in keywords:
+            kw_lower = kw.lower()
+            title = issue.get("title", "").lower()
+            body = issue.get("body", "").lower()
+            if kw_lower in title or kw_lower in body:
+                issue["keyword"] = kw
+                break
+        else:
+            # fallback if no keyword found
+            issue["keyword"] = keywords[0]
+
+        seen[issue_number] = issue
+
+    # Return sorted by descending issue number
     return sorted(seen.values(), key=lambda x: x["number"], reverse=True)
 
 
@@ -171,6 +189,7 @@ def _append_to_ledger(
 # Pending writer (unchanged logic)
 # ---------------------------------------------------------------------------
 
+
 def _write_pending(
     pending_dir: Path,
     slug: str,
@@ -196,6 +215,7 @@ def _write_pending(
 # ---------------------------------------------------------------------------
 # Candidate selection (now respects searched ledger)
 # ---------------------------------------------------------------------------
+
 
 def _get_untracked_slugs(
     target: Path,
@@ -239,9 +259,7 @@ def _get_untracked_slugs(
     tracked = set()
     if repos_dir.exists():
         tracked = {
-            d.name
-            for d in repos_dir.iterdir()
-            if d.is_dir() and any(d.glob("*.toml"))
+            d.name for d in repos_dir.iterdir() if d.is_dir() and any(d.glob("*.toml"))
         }
 
     # Exclude already-pending repos
@@ -273,6 +291,7 @@ def _get_untracked_slugs(
 # Main search loop with circuit breaker
 # ---------------------------------------------------------------------------
 
+
 async def _run_bulk_search(
     target: Path,
     limit: int | None = None,
@@ -288,7 +307,9 @@ async def _run_bulk_search(
     bulk_meta = resolve_bulk_search()
 
     pending_dir = target / tracker_meta["pending_dir"]
-    ledger_path = target / tracker_meta["repos_dir"].rsplit("/", 1)[0] / _LEDGER_FILENAME
+    ledger_path = (
+        target / tracker_meta["repos_dir"].rsplit("/", 1)[0] / _LEDGER_FILENAME
+    )
     # More robust: put ledger at tracker/ level
     ledger_path = target / Path(tracker_meta["repos_dir"]).parent / _LEDGER_FILENAME
 
@@ -336,13 +357,13 @@ async def _run_bulk_search(
                 return
 
             try:
-                issues = await _gh_search_issues(
-                    owner_repo, all_keywords, max_issues
-                )
+                issues = await _gh_search_issues(owner_repo, all_keywords, max_issues)
             except RateLimitHit as exc:
                 consecutive_errors += 1
                 errors += 1
-                print(f"{prefix} {owner_repo} — RATE LIMITED ({consecutive_errors}/{max_consecutive_errors})")
+                print(
+                    f"{prefix} {owner_repo} — RATE LIMITED ({consecutive_errors}/{max_consecutive_errors})"
+                )
                 if consecutive_errors >= max_consecutive_errors:
                     print(
                         f"\n⚠️  Hit {max_consecutive_errors} consecutive rate-limit errors. "
@@ -356,7 +377,9 @@ async def _run_bulk_search(
                 consecutive_errors += 1
                 print(f"{prefix} {owner_repo} — error")
                 if consecutive_errors >= max_consecutive_errors:
-                    print(f"\n⚠️  {max_consecutive_errors} consecutive errors. Stopping.\n")
+                    print(
+                        f"\n⚠️  {max_consecutive_errors} consecutive errors. Stopping.\n"
+                    )
                     stop_event.set()
                 return
 
@@ -398,6 +421,7 @@ async def _run_bulk_search(
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def bulk_search() -> None:
     """CLI entry point for bulk issue detection."""
@@ -478,7 +502,9 @@ def bulk_search() -> None:
         print(f"  Run again with --resume after the rate limit resets (~1 hour).")
         print(f"  Already-searched repos are recorded in tracker/searched.tsv\n")
 
-    print("Pending issues are in data/tracker/pending/ — use the tracker app to triage.")
+    print(
+        "Pending issues are in data/tracker/pending/ — use the tracker app to triage."
+    )
 
     # Exit 2 for rate limit (distinct from 1 for other errors)
     if stats["rate_limited"]:
