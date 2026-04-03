@@ -1,0 +1,5 @@
+issue_url = "https://github.com/modelcontextprotocol/python-sdk/issues/1785"
+title = "Discover OIDC-only authorization servers when PR metadata is absent"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:49Z"

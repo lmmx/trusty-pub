@@ -1,0 +1,5 @@
+issue_url = "https://github.com/lidatong/dataclasses-json/issues/413"
+title = "Use Poetry for module build and automate PyPi publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:30Z"

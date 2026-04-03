@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pymc-devs/pymc-extras/issues/475"
+title = "Consider adding a deprecation warning to pymc-experimental"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:22Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/stanfordnlp/dspy/issues/8147"
+title = "[Bug] Failed to use structured output format. Falling back to JSON mode."
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:56Z"

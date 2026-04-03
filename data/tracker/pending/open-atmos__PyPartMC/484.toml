@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-atmos/PyPartMC/issues/484"
+title = "pypartmc-2.0.0rc15 missing wheels on PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:02Z"

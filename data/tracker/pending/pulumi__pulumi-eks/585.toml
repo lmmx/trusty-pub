@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-eks/issues/585"
+title = "Python: Error manually defining a cluster's node group. \"The NodeGroup's nodeSecurityGroup and the cluster option nodeSecurityGroupTags are mutually exclusive.\""
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/twisted/twisted/issues/6334"
+title = "Consider distributing a CA bundle if figuring out platform certificates is too hard or takes too long"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:10Z"

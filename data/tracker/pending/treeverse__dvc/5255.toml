@@ -1,0 +1,5 @@
+issue_url = "https://github.com/treeverse/dvc/issues/5255"
+title = "add: Fails to add file to shared cache on windows drive mount, regression from 1.7.2"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:08Z"

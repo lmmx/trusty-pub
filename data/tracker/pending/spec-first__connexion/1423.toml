@@ -1,0 +1,5 @@
+issue_url = "https://github.com/spec-first/connexion/issues/1423"
+title = "Security hash maps not properly ORed when using OAuth scopes"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:53Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/nicolargo/glances/issues/2850"
+title = "Configure Github as a Pypi trusted publisher"
+state = "CLOSED"
+keyword = "trusted publisher"
+found_at = "2026-04-03T18:15:57Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-pulumiservice/issues/491"
+title = "Rename DeploymentSettingsArgs.operationContext.oidc.gcp.projectId to projectNumber"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:18Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pola-rs/polars/issues/14076"
+title = "GCP Workload Identity Federation not working with polars"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:15Z"

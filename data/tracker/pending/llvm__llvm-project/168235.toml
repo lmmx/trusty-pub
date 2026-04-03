@@ -1,0 +1,5 @@
+issue_url = "https://github.com/llvm/llvm-project/issues/168235"
+title = "Migrate clang python bindings PyPI package to LLVM monorepo"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:32Z"

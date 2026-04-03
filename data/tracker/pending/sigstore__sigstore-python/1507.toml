@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sigstore/sigstore-python/issues/1507"
+title = "sigstore-python generates invalid CSRs when identity claim isn't ASCII"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:49Z"

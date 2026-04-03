@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pymssql/pymssql/issues/465"
+title = "Error when connecting (Python 2.7 - Windows 10 Home 64-bit)"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:23Z"

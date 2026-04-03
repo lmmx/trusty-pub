@@ -1,0 +1,5 @@
+issue_url = "https://github.com/rucio/rucio/issues/8057"
+title = "Authentication & Authorisation: Refactor BaseClient to address Constructor Complexity and OIDC Flow Structure"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:40Z"

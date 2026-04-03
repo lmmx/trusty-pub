@@ -1,0 +1,5 @@
+issue_url = "https://github.com/projen/projen/issues/2675"
+title = "NodeProject is missing option to set `id-token` permission on GitHub Actions workflow"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:17Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pvlib/pvlib-python/issues/2564"
+title = "Add `aod` and `clearsky_index` to glossary"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:19Z"

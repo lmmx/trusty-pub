@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/build/issues/651"
+title = "--extra-index-url"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:23Z"

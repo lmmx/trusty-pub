@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-metar/python-metar/issues/200"
+title = "pypi release workflow failed"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:27Z"

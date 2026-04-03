@@ -1,0 +1,5 @@
+issue_url = "https://github.com/langchain-ai/langchain/issues/12483"
+title = "langchain Ctransformers caching and usage in Dockerfile volume"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:28Z"

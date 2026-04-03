@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-social-auth/social-core/issues/1306"
+title = "[OIDC] at_hash verification failure when using EdDSA access token"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:28Z"

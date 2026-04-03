@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-metadata/OpenMetadata/issues/16031"
+title = "[Oidc] Add Database Session Persistance to allow login across multiple server"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:02Z"

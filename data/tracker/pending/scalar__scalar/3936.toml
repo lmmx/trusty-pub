@@ -1,0 +1,5 @@
+issue_url = "https://github.com/scalar/scalar/issues/3936"
+title = "Authorizing with oauth2 results in error 'TypeError: e is undefined'"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:43Z"

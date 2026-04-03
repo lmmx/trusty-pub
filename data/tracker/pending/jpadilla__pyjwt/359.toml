@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jpadilla/pyjwt/issues/359"
+title = "RS256 Token Validation & Decoding using Public Key Not Working \"ValueError: Could not deserialize key data.\""
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:18Z"

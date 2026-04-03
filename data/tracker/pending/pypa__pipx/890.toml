@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/pipx/issues/890"
+title = "Newer versions of package may be ignored silently if the Python version used by pipx is incorrect"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:23Z"

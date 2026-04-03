@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jupyterhub/jupyterhub/issues/4780"
+title = "Extend the `User` model with fields used by `jupyter-server` identity?"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:20Z"

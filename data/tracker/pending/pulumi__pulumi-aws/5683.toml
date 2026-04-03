@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-aws/issues/5683"
+title = "AWS s3 get_bucket_policy_output raises an exception when bucket policies are empty"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

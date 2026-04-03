@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/flit/issues/677"
+title = "`flit publish` gets rejected with \"Non-user identities cannot create new projects\""
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:23Z"

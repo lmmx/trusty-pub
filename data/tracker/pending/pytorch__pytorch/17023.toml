@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pytorch/pytorch/issues/17023"
+title = "Download speed issues with the pytorch conda channel"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:30Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pallets/flask/issues/4798"
+title = "Split session across multiple chunks if the session size is too large for a single cookie"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:09Z"

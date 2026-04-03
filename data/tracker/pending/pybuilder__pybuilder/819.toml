@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pybuilder/pybuilder/issues/819"
+title = "Failures on raw Fedora Python (no venv)"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:20Z"

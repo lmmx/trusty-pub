@@ -1,0 +1,5 @@
+issue_url = "https://github.com/typeddjango/django-stubs/issues/2114"
+title = "Configure PyPI for release automation"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:10Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-social-auth/social-core/issues/699"
+title = "Azure B2C v2 authentication via generic OIDC back-end produces \"KeyError 'access_token'\" on application's redirect page"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:28Z"

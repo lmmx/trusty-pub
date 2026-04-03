@@ -1,0 +1,5 @@
+issue_url = "https://github.com/kubeflow/pipelines/issues/13139"
+title = "[bug] Deploying native manifest fails with pipelineversions webhook error"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:26Z"

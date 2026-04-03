@@ -1,0 +1,5 @@
+issue_url = "https://github.com/osvenskan/sysv_ipc/issues/6"
+title = "Can not install sysv_ipc from pypi.python.org"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:07Z"

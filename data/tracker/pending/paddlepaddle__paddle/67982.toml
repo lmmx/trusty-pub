@@ -1,0 +1,5 @@
+issue_url = "https://github.com/PaddlePaddle/Paddle/issues/67982"
+title = "CUDA version issue when using PaddlePaddle through NVIDIA container"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:08Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mozilla/mozilla-django-oidc/issues/382"
+title = "JWS token verification failed.... even with HS256 set and no other token provider in Keycloak."
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:51Z"

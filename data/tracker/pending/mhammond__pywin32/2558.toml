@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mhammond/pywin32/issues/2558"
+title = "No matching distribution found for pywin32==307"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:43Z"

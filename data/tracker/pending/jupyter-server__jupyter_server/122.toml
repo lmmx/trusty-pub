@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jupyter-server/jupyter_server/issues/122"
+title = "[DISCUSS] Add a Session Management infrastructure for extension developers"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:19Z"

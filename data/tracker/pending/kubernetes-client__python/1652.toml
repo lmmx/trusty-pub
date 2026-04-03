@@ -1,0 +1,5 @@
+issue_url = "https://github.com/kubernetes-client/python/issues/1652"
+title = "OIDC refresh token call with Okta fails with 401 when submitting client_id and secret over Authorization header and POST body"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:26Z"

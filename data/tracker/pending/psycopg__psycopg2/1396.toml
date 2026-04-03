@@ -1,0 +1,5 @@
+issue_url = "https://github.com/psycopg/psycopg2/issues/1396"
+title = "psycopg2-binary 2.9.2 bundles wrong libpq version on aarch64"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:17Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/matplotlib/matplotlib/issues/27371"
+title = "[CI]: PR Greetings is failing due to node.js error"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:38Z"

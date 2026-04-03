@@ -1,0 +1,5 @@
+issue_url = "https://github.com/modelcontextprotocol/python-sdk/issues/1623"
+title = "Review OAuth discovery URL priority order for path-based vs root-based OIDC"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:49Z"

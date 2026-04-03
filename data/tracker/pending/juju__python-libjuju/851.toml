@@ -1,0 +1,5 @@
+issue_url = "https://github.com/juju/python-libjuju/issues/851"
+title = "[Bug]: local variable referenced before assignment"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:19Z"

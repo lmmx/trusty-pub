@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-aws-native/issues/1182"
+title = "provider does not seem to honor pre-existing oidc dynamic credentials"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:18Z"

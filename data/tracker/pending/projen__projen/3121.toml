@@ -1,0 +1,5 @@
+issue_url = "https://github.com/projen/projen/issues/3121"
+title = "Projen release on Pypi with OIDC method"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:17Z"

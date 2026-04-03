@@ -1,0 +1,5 @@
+issue_url = "https://github.com/joke2k/django-environ/issues/535"
+title = "Officially support Django 5.0, 5.1 and Python 3.12 on PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:17Z"

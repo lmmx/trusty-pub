@@ -1,0 +1,5 @@
+issue_url = "https://github.com/streamlit/streamlit/issues/10543"
+title = "Set `[auth]` secrets config from environment variables or through `st.login`"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:57Z"

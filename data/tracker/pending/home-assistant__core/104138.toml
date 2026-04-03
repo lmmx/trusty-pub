@@ -1,0 +1,5 @@
+issue_url = "https://github.com/home-assistant/core/issues/104138"
+title = "Matrix integration incomplete: No login possible for servers that use SSO."
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:01Z"

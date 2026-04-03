@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-azure-native/issues/4064"
+title = "pulumi destroy fails when there is an Azure Service Bus Namespace Network Ruleset"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

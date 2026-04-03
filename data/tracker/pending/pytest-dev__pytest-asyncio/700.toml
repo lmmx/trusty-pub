@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pytest-dev/pytest-asyncio/issues/700"
+title = "Investigate replacing API token with Trusted Publisher configuration"
+state = "OPEN"
+keyword = "trusted publisher"
+found_at = "2026-04-03T18:16:25Z"

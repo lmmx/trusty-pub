@@ -1,0 +1,5 @@
+issue_url = "https://github.com/kubeflow/pipelines/issues/5906"
+title = "[bug] Deployed Kubeflow with OIDC Authentication but pipeline runs as single-mode user"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:26Z"

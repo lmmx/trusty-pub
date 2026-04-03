@@ -1,0 +1,5 @@
+issue_url = "https://github.com/snowflakedb/snowflake-connector-python/issues/230"
+title = "Pinning urllib3 to <1.25.0 breaks connector"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:52Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/grpc/grpc/issues/27532"
+title = "After Letsencrypt expiry, SSL validation fails, even though the certificate is fully valid and validates everywhere else."
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:14:57Z"

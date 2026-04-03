@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python/importlib_metadata/issues/516"
+title = "Installing 8.5.0 with `--no-binary=:all:` results in `LookupError`"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:29Z"

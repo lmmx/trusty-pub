@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-docker-build/issues/424"
+title = "Expired ECR authorization token causes state file change"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

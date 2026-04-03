@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sqlalchemy/sqlalchemy/issues/5658"
+title = "Cannot update from 1.3.7 to 1.3.8: LookupError ... is not among the defined enum values"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:55Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/snowflakedb/snowflake-sqlalchemy/issues/129"
+title = "Unpinned snowflake python connector causing broken imports"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:52Z"

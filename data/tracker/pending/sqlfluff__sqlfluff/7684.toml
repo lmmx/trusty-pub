@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sqlfluff/sqlfluff/issues/7684"
+title = "Further harden github workflows to minimize the attack surface for sqlfluff"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:55Z"

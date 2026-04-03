@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jupyter/notebook/issues/7173"
+title = "Set up the PyPI trusted publisher"
+state = "CLOSED"
+keyword = "trusted publisher"
+found_at = "2026-04-03T18:15:20Z"

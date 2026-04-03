@@ -1,0 +1,5 @@
+issue_url = "https://github.com/peterdemin/pip-compile-multi/issues/388"
+title = "Cannot compile simple requirements.in after fresh install"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:11Z"

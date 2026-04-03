@@ -1,0 +1,5 @@
+issue_url = "https://github.com/quantumlib/Cirq/issues/6405"
+title = "`Pre-release cirq to PyPi` CI fails due to out of date authentication method"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:31Z"

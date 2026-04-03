@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/setuptools-scm/issues/938"
+title = "                             LookupError: pyproject.toml does not contain a tool.setuptools_scm section"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:24Z"

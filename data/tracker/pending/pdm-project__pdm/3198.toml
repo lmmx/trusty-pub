@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pdm-project/pdm/issues/3198"
+title = "`[ProjectError]: tool.pdm.distribution must be `true` to be built.` which actually is in my `pyproject.toml`"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:10Z"

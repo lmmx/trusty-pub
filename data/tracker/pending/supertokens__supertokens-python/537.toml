@@ -1,0 +1,5 @@
+issue_url = "https://github.com/supertokens/supertokens-python/issues/537"
+title = "Lowercasing URLs in OIDC discovery endpoint causes compatibility issues with custom thirdparty SSO"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:58Z"

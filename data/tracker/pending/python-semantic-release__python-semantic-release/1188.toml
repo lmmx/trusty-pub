@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-semantic-release/python-semantic-release/issues/1188"
+title = "Repository in a broken state - \"No full releases found in this branch's history\""
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:28Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypiserver/pypiserver/issues/402"
+title = "BrokenPipeError after code 400"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:24Z"

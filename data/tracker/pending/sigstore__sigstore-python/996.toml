@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sigstore/sigstore-python/issues/996"
+title = "Tests: make our fixtures/pytest usage less magical"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:49Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/psycopg/psycopg2/issues/1360"
+title = "sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) SCRAM authentication requires libpq version 10 or above"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:17Z"

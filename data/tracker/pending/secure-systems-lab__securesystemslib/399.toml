@@ -1,0 +1,5 @@
+issue_url = "https://github.com/secure-systems-lab/securesystemslib/issues/399"
+title = "support short lived signing certificates (proof-of-concept)"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:46Z"

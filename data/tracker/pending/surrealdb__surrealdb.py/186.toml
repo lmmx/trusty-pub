@@ -1,0 +1,5 @@
+issue_url = "https://github.com/surrealdb/surrealdb.py/issues/186"
+title = "Implement Release Please Workflow with Automated Package Publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:58Z"

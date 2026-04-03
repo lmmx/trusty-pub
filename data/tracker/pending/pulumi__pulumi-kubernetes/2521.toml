@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-kubernetes/issues/2521"
+title = "preview fails when upgrading to version 4 even though server side apply is disabled"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mpdavis/python-jose/issues/398"
+title = "Security: DER key algorithm confusion, empty HMAC key, and timing side-channels"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:51Z"

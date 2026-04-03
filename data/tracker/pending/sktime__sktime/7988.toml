@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sktime/sktime/issues/7988"
+title = "[MNT] `tj-actions` has been removed due to compromise"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:51Z"

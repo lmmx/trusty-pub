@@ -1,0 +1,5 @@
+issue_url = "https://github.com/streamlit/streamlit/issues/13377"
+title = "Error on OIDC Integration when running within Docker"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:57Z"

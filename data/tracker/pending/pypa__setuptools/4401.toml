@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/setuptools/issues/4401"
+title = "[BUG] python3.12.3 ModuleNotFoundError: No module named 'distutils'"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:24Z"

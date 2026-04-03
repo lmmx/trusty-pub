@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mage-ai/mage-ai/issues/5748"
+title = "[BUG] aiohttp trust_env http proxy"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:35Z"

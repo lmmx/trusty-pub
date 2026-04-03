@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-social-auth/social-app-django/issues/374"
+title = "Multiple backend of the same type or DB driven settings"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:28Z"

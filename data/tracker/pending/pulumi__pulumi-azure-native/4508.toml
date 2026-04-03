@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-azure-native/issues/4508"
+title = "State tracking of provider changes (e.g., OIDC tokens) results in Updates often returning with changes"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:18Z"

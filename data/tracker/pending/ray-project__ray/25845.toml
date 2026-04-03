@@ -1,0 +1,5 @@
+issue_url = "https://github.com/ray-project/ray/issues/25845"
+title = "[Core] RBAC + auditability "
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:34Z"

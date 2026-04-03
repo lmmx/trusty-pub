@@ -1,0 +1,5 @@
+issue_url = "https://github.com/scalar/scalar/issues/8446"
+title = "Scalar Aspire proxy forwards incorrect Host header to external OIDC provider"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:43Z"

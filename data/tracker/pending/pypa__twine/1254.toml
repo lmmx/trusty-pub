@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/twine/issues/1254"
+title = "When publishing multiple packages, twine should upload entire packages, not sort by file type."
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:24Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/lexiforest/curl_cffi/issues/83"
+title = "Cookies are lost between GET and POST requests in a session"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:30Z"

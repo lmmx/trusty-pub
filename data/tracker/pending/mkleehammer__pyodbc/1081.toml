@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mkleehammer/pyodbc/issues/1081"
+title = "Segmentation fault when connecting to SQL Server with an access token"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:48Z"

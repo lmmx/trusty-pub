@@ -1,0 +1,5 @@
+issue_url = "https://github.com/rycus86/prometheus_flask_exporter/issues/170"
+title = "custom metrics return function memory location"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:40Z"

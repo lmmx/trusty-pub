@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-azure-native/issues/4173"
+title = "Allow passing oidcTokenFilePath in Provider constructor"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:18Z"

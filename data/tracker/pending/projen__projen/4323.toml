@@ -1,0 +1,5 @@
+issue_url = "https://github.com/projen/projen/issues/4323"
+title = "Failed to publish a cdk construct library to PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:17Z"

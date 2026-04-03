@@ -1,0 +1,5 @@
+issue_url = "https://github.com/invoke-ai/InvokeAI/issues/8038"
+title = "[bug]: Launcher failed 5.12 upgrade on torch dependency"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:07Z"

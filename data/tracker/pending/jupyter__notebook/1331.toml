@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jupyter/notebook/issues/1331"
+title = "python2 kernel death in Ubuntu on Windows"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:20Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-atmos/PyPartMC/issues/234"
+title = "replace API tokens with OIDC for PyPI uploads"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:02Z"

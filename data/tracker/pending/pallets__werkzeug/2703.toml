@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pallets/werkzeug/issues/2703"
+title = "Dropping OIDC_access_token header breaking authentication behind reverseproxy"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:09Z"

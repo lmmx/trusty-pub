@@ -1,0 +1,5 @@
+issue_url = "https://github.com/rucio/rucio/issues/8382"
+title = "Enabling TPC with OIDC for S3 RSEs"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:40Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/psf/black/issues/4926"
+title = "Split the Build and Publish workflow into more jobs"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:17Z"

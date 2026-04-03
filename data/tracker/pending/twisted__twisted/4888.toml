@@ -1,0 +1,5 @@
+issue_url = "https://github.com/twisted/twisted/issues/4888"
+title = "Hostname verification for HTTPS URIs in twisted.web.client.Agent."
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:10Z"

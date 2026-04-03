@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jgonggrijp/pip-review/issues/44"
+title = "Use subprocess.call([sys.executable, '-m', 'pip', ...]) to call pip"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:15Z"

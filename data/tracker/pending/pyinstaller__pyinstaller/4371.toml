@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pyinstaller/pyinstaller/issues/4371"
+title = "PyInstaller failing in Alpine linux  Can not find libc.musl-x86_64.so.1 in path ldd (needed by /usr/lib/libpython3.6m.so.1.0)"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:22Z"

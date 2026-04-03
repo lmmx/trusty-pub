@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pyca/cryptography/issues/8127"
+title = "S/MIME signature broken with CA chain in v39.0.0"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:20Z"

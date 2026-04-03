@@ -1,0 +1,5 @@
+issue_url = "https://github.com/nautobot/nautobot/issues/5483"
+title = "Vulnerable nested dependency from package that is no longer maintained"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:54Z"

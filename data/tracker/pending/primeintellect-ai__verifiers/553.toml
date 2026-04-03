@@ -1,0 +1,5 @@
+issue_url = "https://github.com/PrimeIntellect-ai/verifiers/issues/553"
+title = "You're on macOS (`macosx_15_0_arm64`), but `torch` (v2.8.0+cu128) only has wheels for the following platforms: `manylinux_2_28_x86_64`, `win_amd64`"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:16Z"

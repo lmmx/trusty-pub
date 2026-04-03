@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pyca/cryptography/issues/8494"
+title = "Enable OIDC publishing"
+state = "CLOSED"
+keyword = "OIDC publish"
+found_at = "2026-04-03T18:16:20Z"

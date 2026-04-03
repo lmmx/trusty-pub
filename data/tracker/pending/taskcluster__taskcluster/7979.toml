@@ -1,0 +1,5 @@
+issue_url = "https://github.com/taskcluster/taskcluster/issues/7979"
+title = "Add ARM templates deployments support into Azure provider"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:01Z"

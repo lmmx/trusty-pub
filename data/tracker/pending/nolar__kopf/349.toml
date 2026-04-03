@@ -1,0 +1,5 @@
+issue_url = "https://github.com/nolar/kopf/issues/349"
+title = "Authorization failure on sample operator example, maybe related to OIDC auth"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:58Z"

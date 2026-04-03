@@ -1,0 +1,5 @@
+issue_url = "https://github.com/supertokens/supertokens-python/issues/500"
+title = "Feature: Support  extensible custom third party provider instances"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:58Z"

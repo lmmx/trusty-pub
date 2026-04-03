@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pytorch/pytorch/issues/142016"
+title = "inductor-rocm workflows failing in \"configure aws credentials\" step (OIDC)"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:30Z"

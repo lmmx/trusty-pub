@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pytest-dev/pytest/issues/10871"
+title = "Use separate GitHub environment for deploy workflows"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:25Z"

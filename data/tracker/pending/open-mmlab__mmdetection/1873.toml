@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-mmlab/mmdetection/issues/1873"
+title = "Error when pip install mmcv:  Could not find a version that satisfies the requirement Cython (from versions: none)"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:02Z"

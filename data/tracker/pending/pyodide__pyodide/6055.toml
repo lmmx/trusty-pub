@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pyodide/pyodide/issues/6055"
+title = "Change to trusted publishing for npm Pyodide package"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:23Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/onnx/onnx/issues/6000"
+title = "Source build failed with cmake error"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:02Z"

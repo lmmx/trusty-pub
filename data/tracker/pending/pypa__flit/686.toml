@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/flit/issues/686"
+title = "flit publish fails, 403 Client Error: Username/Password authentication is no longer supported."
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:23Z"

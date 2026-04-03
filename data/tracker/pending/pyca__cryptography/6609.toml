@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pyca/cryptography/issues/6609"
+title = "Unable to load certificate with negative serial number"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:20Z"

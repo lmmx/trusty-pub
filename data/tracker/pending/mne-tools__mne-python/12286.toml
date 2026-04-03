@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mne-tools/mne-python/issues/12286"
+title = "Consider \"Publishing to PyPI with a Trusted Publisher\""
+state = "CLOSED"
+keyword = "trusted publisher"
+found_at = "2026-04-03T18:15:49Z"

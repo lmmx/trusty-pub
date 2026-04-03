@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-mmlab/mmcv/issues/2140"
+title = "ERROR: Could not find a version that satisfies the requirement mdformat-openmmlab (from versions: none)"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:02Z"

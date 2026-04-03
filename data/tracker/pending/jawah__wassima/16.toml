@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jawah/wassima/issues/16"
+title = "Support verified intermediary CA in addition to root CA"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:12Z"

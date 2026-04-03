@@ -1,0 +1,5 @@
+issue_url = "https://github.com/tfranzel/drf-spectacular/issues/1273"
+title = "django_oauth_toolkit.DjangoOAuthToolkitScheme with DRF permission_classes boolean AND and OR fails to see DOT permissions "
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:02Z"

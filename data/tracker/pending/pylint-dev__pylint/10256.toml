@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pylint-dev/pylint/issues/10256"
+title = "[maintenance] Migrate PyPI release automation to Trusted Publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:22Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jazzband/pip-tools/issues/1672"
+title = "pip-compile does not reuse hashes for unchanged versions if --upgrade"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:13Z"

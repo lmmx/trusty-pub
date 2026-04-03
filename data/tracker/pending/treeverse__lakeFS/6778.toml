@@ -1,0 +1,5 @@
+issue_url = "https://github.com/treeverse/lakeFS/issues/6778"
+title = "[Bug]: lakectl local commit something always triggered even if there are not local changes"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:08Z"

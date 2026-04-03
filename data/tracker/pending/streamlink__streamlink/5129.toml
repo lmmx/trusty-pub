@@ -1,0 +1,5 @@
+issue_url = "https://github.com/streamlink/streamlink/issues/5129"
+title = "ci: switch to token-based PyPI upload (again)"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:57Z"

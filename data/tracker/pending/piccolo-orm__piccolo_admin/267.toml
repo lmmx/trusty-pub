@@ -1,0 +1,5 @@
+issue_url = "https://github.com/piccolo-orm/piccolo_admin/issues/267"
+title = "allow completely disabling built-in auth"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:13Z"

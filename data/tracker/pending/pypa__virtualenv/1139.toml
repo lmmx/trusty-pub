@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/virtualenv/issues/1139"
+title = "Can't install any package via `pip` on windows 10, ssl module in Python is not available"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:24Z"

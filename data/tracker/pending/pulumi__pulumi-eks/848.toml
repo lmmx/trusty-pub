@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-eks/issues/848"
+title = "Clarify documentation on Cluster.node_group_options about which node groups are affected (only the default node group?)"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

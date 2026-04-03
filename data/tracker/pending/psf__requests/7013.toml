@@ -1,0 +1,5 @@
+issue_url = "https://github.com/psf/requests/issues/7013"
+title = "v2.32.5 wheel file hash doesn't match between PyPI and CI"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:17Z"

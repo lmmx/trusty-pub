@@ -1,0 +1,5 @@
+issue_url = "https://github.com/huggingface/sentence-transformers/issues/2352"
+title = "`trust_remote_code=true` for Jinaai 8k models"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:03Z"

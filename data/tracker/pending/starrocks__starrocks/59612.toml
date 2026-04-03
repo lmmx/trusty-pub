@@ -1,0 +1,5 @@
+issue_url = "https://github.com/StarRocks/starrocks/issues/59612"
+title = "Need for catalog level access control to allow operations on DB and tables"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:56Z"

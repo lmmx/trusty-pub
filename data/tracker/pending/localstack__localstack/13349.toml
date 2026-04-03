@@ -1,0 +1,5 @@
+issue_url = "https://github.com/localstack/localstack/issues/13349"
+title = "Unable to parse request while deploying CDk stack"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:32Z"

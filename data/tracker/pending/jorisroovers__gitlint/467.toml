@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jorisroovers/gitlint/issues/467"
+title = "Refactor GHA pipelines for improved security"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:17Z"

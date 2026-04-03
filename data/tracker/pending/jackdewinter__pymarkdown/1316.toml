@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jackdewinter/pymarkdown/issues/1316"
+title = "Automated publication of releases to PyPI"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:10Z"

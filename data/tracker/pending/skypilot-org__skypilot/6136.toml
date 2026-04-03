@@ -1,0 +1,5 @@
+issue_url = "https://github.com/skypilot-org/skypilot/issues/6136"
+title = "[AuthN] Support formatted auth headers such as `x-amzn-oidc-data`"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:51Z"

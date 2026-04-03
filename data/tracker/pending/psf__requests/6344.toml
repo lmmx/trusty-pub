@@ -1,0 +1,5 @@
+issue_url = "https://github.com/psf/requests/issues/6344"
+title = "Cookies returned in Set-Cookie header not added to RequestsCookieJar "
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:17Z"

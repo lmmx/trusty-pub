@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pymc-devs/pymc-extras/issues/435"
+title = "Mitigate the PyPI API token"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:22Z"

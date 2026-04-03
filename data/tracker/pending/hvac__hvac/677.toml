@@ -1,0 +1,5 @@
+issue_url = "https://github.com/hvac/hvac/issues/677"
+title = "allowed_redirect_uris should not be mandatory in jwt.create_role"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:03Z"

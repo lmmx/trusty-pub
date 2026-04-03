@@ -1,0 +1,5 @@
+issue_url = "https://github.com/oauthlib/oauthlib/issues/773"
+title = "Support additional response_types in WebApplicationClient"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:00Z"

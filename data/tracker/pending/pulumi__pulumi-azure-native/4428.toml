@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-azure-native/issues/4428"
+title = "Azure CLI commands fail despite ESC environment configuration - ARM_* variables not recognized by az CLI"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

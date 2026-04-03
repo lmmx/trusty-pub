@@ -1,0 +1,5 @@
+issue_url = "https://github.com/nautobot/nautobot/issues/2414"
+title = "External Auth OIDC NoReverseMatch exception"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:54Z"

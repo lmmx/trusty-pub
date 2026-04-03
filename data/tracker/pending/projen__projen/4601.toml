@@ -1,0 +1,5 @@
+issue_url = "https://github.com/projen/projen/issues/4601"
+title = "security: replace npx with pnpm, change default package manager, deprecate NodePackageManager.NPM"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:17Z"

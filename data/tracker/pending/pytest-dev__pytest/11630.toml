@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pytest-dev/pytest/issues/11630"
+title = "pytest7.4.3 macos14.0 - python3.12 failed with invalid escape sequence in first pytest due to pytest.ini filterwarnings"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:25Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/oauthlib/oauthlib/issues/944"
+title = "Add validate_device_authorization_code() to RequestValidator to give DeviceCodeGrant symmetry with Authorization Code Grant"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:00Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mozilla/mozilla-django-oidc/issues/578"
+title = "SessionRefresh called even for non OIDC backend"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:51Z"

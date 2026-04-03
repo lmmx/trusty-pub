@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jaraco/keyring/issues/219"
+title = "Can't fetch password from system"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:11Z"

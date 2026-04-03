@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-social-auth/social-core/issues/709"
+title = "oidc backend - preferred_username not used to provision users, they end up with a random hex username"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:28Z"

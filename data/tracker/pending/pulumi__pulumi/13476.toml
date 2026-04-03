@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi/issues/13476"
+title = "Azure OIDC failures with Azure Keyvault Secrets & Azure Blob Storage Backend"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:18Z"

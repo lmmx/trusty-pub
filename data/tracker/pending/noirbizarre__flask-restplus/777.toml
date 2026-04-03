@@ -1,0 +1,5 @@
+issue_url = "https://github.com/noirbizarre/flask-restplus/issues/777"
+title = "flask-restplus  is broken by Werkzeug 1.0.0"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:58Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jupyterlab/jupyterlab/issues/8490"
+title = "Counter and outputs of a cell are empty if running it before kernel is ready"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:20Z"

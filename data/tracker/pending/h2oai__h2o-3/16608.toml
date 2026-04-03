@@ -1,0 +1,5 @@
+issue_url = "https://github.com/h2oai/h2o-3/issues/16608"
+title = "Migrate the H2O-3 Nightly Pipeline to GH Actions"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:14:58Z"

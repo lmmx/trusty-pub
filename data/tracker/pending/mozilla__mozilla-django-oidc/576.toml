@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mozilla/mozilla-django-oidc/issues/576"
+title = "Error when LOGOUT_REDIRECT_URL is not set"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:51Z"

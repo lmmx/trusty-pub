@@ -1,0 +1,5 @@
+issue_url = "https://github.com/tensorflow/models/issues/9200"
+title = " tensorflow 2.3.0 requires numpy<1.19.0,>=1.16.0, but you'll have numpy 1.19.1 which is incompatible.  "
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:01Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-openapi/openapi-spec-validator/issues/437"
+title = "Validation error for schema when JWT is enabled [litestar]"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:27Z"

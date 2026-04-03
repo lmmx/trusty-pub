@@ -1,0 +1,5 @@
+issue_url = "https://github.com/kserve/kserve/issues/2080"
+title = "[Question]Requests failed with errors from Transformer Pod to Predictor Pod"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:26Z"

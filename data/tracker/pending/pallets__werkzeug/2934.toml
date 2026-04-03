@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pallets/werkzeug/issues/2934"
+title = "Release 3.0.3 breaking Python < 3.10 users"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:09Z"

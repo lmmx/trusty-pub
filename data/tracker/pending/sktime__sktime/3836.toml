@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sktime/sktime/issues/3836"
+title = "[GOV] security architecture for release and community assets - separation of duties, MFA "
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:51Z"

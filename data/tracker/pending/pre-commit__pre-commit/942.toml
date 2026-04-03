@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pre-commit/pre-commit/issues/942"
+title = "hardening pre-commit security by avoiding git installation"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:16Z"

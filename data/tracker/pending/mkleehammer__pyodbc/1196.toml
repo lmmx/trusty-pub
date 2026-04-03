@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mkleehammer/pyodbc/issues/1196"
+title = "pyodbc  - fetchone() crash - Only 4.0.38 issue (other versions work fine)"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:48Z"

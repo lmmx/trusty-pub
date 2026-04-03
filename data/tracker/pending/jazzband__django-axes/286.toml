@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jazzband/django-axes/issues/286"
+title = "Potential security issues with `get_ip()` changes in v4"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:12Z"

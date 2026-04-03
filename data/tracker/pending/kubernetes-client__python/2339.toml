@@ -1,0 +1,5 @@
+issue_url = "https://github.com/kubernetes-client/python/issues/2339"
+title = "ExecProvider broken for Nebius federated identity"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:26Z"

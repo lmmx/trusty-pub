@@ -1,0 +1,5 @@
+issue_url = "https://github.com/numpy/numpy/issues/12736"
+title = "Attribute Error after installing v1.16.0 because pip is not uninstalling"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:59Z"

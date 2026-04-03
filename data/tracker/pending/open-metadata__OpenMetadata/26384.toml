@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-metadata/OpenMetadata/issues/26384"
+title = "Integration with OIDC providers using a token validation algorithm that is not RS256 is not working as documented"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:02Z"

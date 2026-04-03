@@ -1,0 +1,5 @@
+issue_url = "https://github.com/locustio/locust/issues/2430"
+title = "Locust is getting stucked in `CLEANUP` state"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:32Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/langchain-ai/langchain-ibm/issues/83"
+title = "Bug: `asyncio` calls fail due to synchronous, connection-pooled HTTP clients in underlying libraries"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:28Z"

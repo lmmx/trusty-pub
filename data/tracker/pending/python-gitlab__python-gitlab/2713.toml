@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-gitlab/python-gitlab/issues/2713"
+title = "Versions 4.x not available on pypi"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:27Z"

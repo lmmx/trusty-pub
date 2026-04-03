@@ -1,0 +1,5 @@
+issue_url = "https://github.com/numpy/numpy/issues/27185"
+title = "`download-wheels` can only find 50 names in numpy/staging, we need 52"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:59Z"

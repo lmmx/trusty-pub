@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jpadilla/pyjwt/issues/659"
+title = "Malformed JWTs due to different signing algorithms in `headers` and `algorithm` parameters"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:18Z"

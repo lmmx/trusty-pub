@@ -1,0 +1,5 @@
+issue_url = "https://github.com/modelcontextprotocol/python-sdk/issues/976"
+title = "enhance auth server discovery with OAuth2 and OIDC metadata support"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:49Z"

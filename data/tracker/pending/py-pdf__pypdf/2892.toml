@@ -1,0 +1,5 @@
+issue_url = "https://github.com/py-pdf/pypdf/issues/2892"
+title = "ENH: Ensure PyPI marks URLs as \"verified\""
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:19Z"

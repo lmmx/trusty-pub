@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jantman/awslimitchecker/issues/457"
+title = "Refine support and trustedadvisor required IAM permissions"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:11Z"

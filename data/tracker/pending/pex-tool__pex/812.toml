@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pex-tool/pex/issues/812"
+title = "Pex should trust any host passed via `--index` or `--find-links`."
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:12Z"

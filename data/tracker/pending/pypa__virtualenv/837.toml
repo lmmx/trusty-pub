@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/virtualenv/issues/837"
+title = "Can not create a virtualenv with Python 3.5 on Windows 10"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:24Z"

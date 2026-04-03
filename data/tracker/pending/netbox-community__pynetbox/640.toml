@@ -1,0 +1,5 @@
+issue_url = "https://github.com/netbox-community/pynetbox/issues/640"
+title = "`nb.version` Returns an Empty String Due to OIDC Proxy Configuration"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:55Z"

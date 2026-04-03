@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sethmlarson/truststore/issues/142"
+title = "pip 24.1 use-feature truststore needs a list of trusted-host"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:47Z"

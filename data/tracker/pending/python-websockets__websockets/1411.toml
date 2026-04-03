@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-websockets/websockets/issues/1411"
+title = "Unclear whether trusted publishing of releases actually works"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:28Z"

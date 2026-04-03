@@ -1,0 +1,5 @@
+issue_url = "https://github.com/home-assistant/core/issues/151400"
+title = "OAuth discovery document returns relative endpoints, breaking ChatGPT Connector MCP integration"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:01Z"

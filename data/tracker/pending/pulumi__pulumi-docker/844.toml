@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-docker/issues/844"
+title = "docker:index:Image could not open dockerfile at relative path Dockerfile when using pulumi/actions@v4"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

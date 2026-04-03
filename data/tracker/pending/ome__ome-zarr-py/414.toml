@@ -1,0 +1,5 @@
+issue_url = "https://github.com/ome/ome-zarr-py/issues/414"
+title = "PyPI release fails on long_text_description"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:01Z"

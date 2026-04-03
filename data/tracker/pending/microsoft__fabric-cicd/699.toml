@@ -1,0 +1,5 @@
+issue_url = "https://github.com/microsoft/fabric-cicd/issues/699"
+title = "Warehouse is Deploying with wrong collation"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:44Z"

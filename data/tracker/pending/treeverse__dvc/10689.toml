@@ -1,0 +1,5 @@
+issue_url = "https://github.com/treeverse/dvc/issues/10689"
+title = "Support for refreshing access tokens for authentification of WebDAV remote"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:08Z"

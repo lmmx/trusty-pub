@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mlflow/mlflow/issues/10316"
+title = "[BUG][AUTH] Unable to declare unprotected routes since the version 2.8.0"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:49Z"

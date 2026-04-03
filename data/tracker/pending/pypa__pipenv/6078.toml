@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/pipenv/issues/6078"
+title = "locking omits multi-platform hashes when verify_ssl=true on custom index"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:24Z"

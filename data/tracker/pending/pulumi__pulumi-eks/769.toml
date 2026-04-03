@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-eks/issues/769"
+title = "Unexpectedly need to pass instanceProfile to managedNodeGroup"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/kubeflow/pipelines/issues/11742"
+title = "[backend] Cannot get MLMD objects from Metadata store: received initial metadata size exceeds limit"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:26Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/huggingface/hf_transfer/issues/78"
+title = "RUSTSEC-2026-0049: CRLs not considered authoritative by Distribution Point due to faulty matching logic"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:02Z"

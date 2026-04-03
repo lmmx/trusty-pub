@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jpadilla/pyjwt/issues/314"
+title = "Support exposure of hash algorithm digest to handle OIDC at_hash, potentially other spec extensions"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:18Z"

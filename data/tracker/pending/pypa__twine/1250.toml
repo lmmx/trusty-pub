@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/twine/issues/1250"
+title = "Optional threaded uploads"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:24Z"

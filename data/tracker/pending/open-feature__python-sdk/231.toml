@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-feature/python-sdk/issues/231"
+title = "Remove pypi token once the trusted publisher flow has been tested"
+state = "CLOSED"
+keyword = "trusted publisher"
+found_at = "2026-04-03T18:16:02Z"

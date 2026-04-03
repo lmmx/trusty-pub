@@ -1,0 +1,5 @@
+issue_url = "https://github.com/linkedin-developers/linkedin-api-python-client/issues/63"
+title = "OIDC Endpoint in violation of RFC6749"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:31Z"

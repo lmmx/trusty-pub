@@ -1,0 +1,5 @@
+issue_url = "https://github.com/treeverse/dvc/issues/4424"
+title = "Misleading \"update available\" message due to lack of synchronization between distribution channels"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:17:08Z"

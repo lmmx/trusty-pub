@@ -1,0 +1,5 @@
+issue_url = "https://github.com/opencv/opencv-python/issues/851"
+title = "ImportError: libGL.so.1: cannot open shared object file while pushing to Cloud Foundry"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:03Z"

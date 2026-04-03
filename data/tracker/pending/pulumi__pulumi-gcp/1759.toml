@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-gcp/issues/1759"
+title = "OIDC Access Token stored in state even if using env variable - results in expired credentials when destroying after expiry"
+state = "CLOSED"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:18Z"

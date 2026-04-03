@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi-tls/issues/133"
+title = "Invalid combination of arguments: \"url\": one of `content,url` must be specified"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

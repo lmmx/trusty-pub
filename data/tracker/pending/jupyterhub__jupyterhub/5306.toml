@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jupyterhub/jupyterhub/issues/5306"
+title = "Authenticator-managed role scopes are deleted when role removed from last user"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:15:20Z"

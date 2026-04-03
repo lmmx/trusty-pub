@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mlflow/mlflow/issues/21240"
+title = "[FR] Native OAuth 2.0 / OIDC and SAML 2.0 Authentication Plugin for MLflow"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:15:49Z"

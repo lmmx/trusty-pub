@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pymssql/pymssql/issues/854"
+title = "Unicode encoding problem in 2.2.8 on Linux"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:23Z"

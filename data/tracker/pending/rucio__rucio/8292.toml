@@ -1,0 +1,5 @@
+issue_url = "https://github.com/rucio/rucio/issues/8292"
+title = "Normalize OIDC identity strings"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:40Z"

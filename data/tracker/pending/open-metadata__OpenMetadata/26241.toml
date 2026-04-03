@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-metadata/OpenMetadata/issues/26241"
+title = "Custom OIDC not applied after docker up using env file"
+state = "OPEN"
+keyword = "OIDC"
+found_at = "2026-04-03T18:16:02Z"

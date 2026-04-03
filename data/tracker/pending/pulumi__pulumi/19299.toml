@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi/issues/19299"
+title = "Discrepancy between documentation and implementation in Pulumi TLS provider"
+state = "OPEN"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:16:18Z"

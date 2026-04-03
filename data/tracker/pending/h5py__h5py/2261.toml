@@ -1,0 +1,5 @@
+issue_url = "https://github.com/h5py/h5py/issues/2261"
+title = "Update zlib in Windows wheels"
+state = "CLOSED"
+keyword = "trusted publishing"
+found_at = "2026-04-03T18:14:58Z"
