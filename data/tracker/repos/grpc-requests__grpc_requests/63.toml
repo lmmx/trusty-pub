@@ -1,0 +1,5 @@
+issue_url = "https://github.com/grpc-requests/grpc_requests/issues/63"
+title = "Legacy uploading to Pypi is now deprecated"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:58:28Z"

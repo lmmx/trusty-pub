@@ -1,5 +1,0 @@
-issue_url = "https://github.com/kubeflow/sdk/issues/281"
-title = "Proposal: Adopt kube-authkit as Default Authentication Mechanism"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:26Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/kubernetes-client/python/issues/2034"
-title = "When using kube config loader with OIDC without custom idp certificate, certificate validity is always skipped"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:26Z"

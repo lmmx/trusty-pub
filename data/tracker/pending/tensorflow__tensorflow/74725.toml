@@ -1,5 +1,0 @@
-issue_url = "https://github.com/tensorflow/tensorflow/issues/74725"
-title = "ImportError: DLL load failed while importing _pywrap_tensorflow_internal: A dynamic link library (DLL) initialization routine failed."
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:01Z"

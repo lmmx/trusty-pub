@@ -1,5 +1,0 @@
-issue_url = "https://github.com/modelcontextprotocol/python-sdk/issues/1743"
-title = "Extract OAuth flow logic into reusable components for proxy use cases"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:49Z"

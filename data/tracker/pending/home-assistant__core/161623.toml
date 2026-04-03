@@ -1,5 +1,0 @@
-issue_url = "https://github.com/home-assistant/core/issues/161623"
-title = "AquaCell integration failing with UnknownServiceError: 'cognito-idp'"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:01Z"

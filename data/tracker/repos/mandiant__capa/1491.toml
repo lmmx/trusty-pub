@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mandiant/capa/issues/1491"
+title = "distribute via pypi trusted publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:25:39Z"

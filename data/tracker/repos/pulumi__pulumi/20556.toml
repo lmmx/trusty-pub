@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pulumi/pulumi/issues/20556"
+title = "Use trusted publishing for PyPI publishing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:28:22Z"

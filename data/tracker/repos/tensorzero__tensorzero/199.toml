@@ -1,0 +1,5 @@
+issue_url = "https://github.com/tensorzero/tensorzero/issues/199"
+title = "Set up a workflow for publishing the client using PyPI trusted publishers"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T22:08:17Z"

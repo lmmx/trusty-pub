@@ -1,5 +1,0 @@
-issue_url = "https://github.com/theupdateframework/python-tuf/issues/1966"
-title = "cd: re-enable release signing"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:03Z"

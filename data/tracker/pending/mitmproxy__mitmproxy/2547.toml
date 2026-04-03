@@ -1,5 +1,0 @@
-issue_url = "https://github.com/mitmproxy/mitmproxy/issues/2547"
-title = "SSLError: [SSL: CERTIFICATE_VERIFY_FAILED]  with python requests library"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:47Z"

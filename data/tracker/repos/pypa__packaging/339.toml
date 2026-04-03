@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/packaging/issues/339"
+title = "Automate releasing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:57:32Z"

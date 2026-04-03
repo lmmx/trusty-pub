@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pyca/cryptography/issues/5771"
-title = "Dependency on rust removes support for a number of platforms"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:20Z"

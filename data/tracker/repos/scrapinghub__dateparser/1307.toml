@@ -1,0 +1,5 @@
+issue_url = "https://github.com/scrapinghub/dateparser/issues/1307"
+title = "Switch to trusted publishing for package upload to PyPI in CI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:40:38Z"

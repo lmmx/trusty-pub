@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/setuptools/issues/2901"
-title = "[FR] Add a way to enforce static evaluation of attr:"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

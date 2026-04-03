@@ -1,5 +1,0 @@
-issue_url = "https://github.com/intility/fastapi-azure-auth/issues/106"
-title = "Scopes missing in /docs at each endpoint padlock"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:07Z"

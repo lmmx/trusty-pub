@@ -1,0 +1,5 @@
+issue_url = "https://github.com/moj-analytical-services/splink/issues/2492"
+title = "Use Trusted Publisher action for publishing to pypi"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T21:24:05Z"

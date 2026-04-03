@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pydantic/pydantic/issues/3585"
-title = "'create_model' method is missing 'Optional' type hint"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:21Z"

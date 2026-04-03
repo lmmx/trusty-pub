@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pymc-devs/pytensor/issues/1306"
+title = "Mitigate the PyPI API token"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:06:04Z"

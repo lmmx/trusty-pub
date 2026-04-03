@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/twine/issues/1246"
+title = "Automatically refresh short-lived PyPI token in long Trusted Publishing uploads"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:20:17Z"

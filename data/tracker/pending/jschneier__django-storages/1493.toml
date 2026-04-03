@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jschneier/django-storages/issues/1493"
-title = "S3 backend: AWS machine roles (and other refreshable temporary credentials) do not get refreshed"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:18Z"

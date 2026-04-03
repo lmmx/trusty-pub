@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/build/issues/646"
+title = "Switch to trusted publishing for releases?"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:39:19Z"

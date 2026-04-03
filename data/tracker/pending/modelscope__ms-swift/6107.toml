@@ -1,5 +1,0 @@
-issue_url = "https://github.com/modelscope/ms-swift/issues/6107"
-title = "megatron sft多机训练Qwen3-VL-235B-A22B-Instruct报nccl相关错误"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:49Z"

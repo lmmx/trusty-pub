@@ -1,0 +1,5 @@
+issue_url = "https://github.com/twisted/twisted/issues/11869"
+title = "New way to publish to PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:55:50Z"

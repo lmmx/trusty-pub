@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/setuptools/issues/3879"
-title = "[BUG] Messages use dubious link shortener services instead of canonical URLs"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

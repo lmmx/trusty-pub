@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/packaging/issues/737"
+title = "Publish `packaging` with a trusted publisher?"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T21:57:31Z"

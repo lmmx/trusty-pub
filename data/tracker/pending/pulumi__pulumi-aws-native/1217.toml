@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-aws-native/issues/1217"
-title = "Changing eks:Cluster causes Preview think everything needs updated/replaced"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

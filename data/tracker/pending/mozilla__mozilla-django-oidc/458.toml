@@ -1,5 +1,0 @@
-issue_url = "https://github.com/mozilla/mozilla-django-oidc/issues/458"
-title = "Respect oidc_login_next url in OIDCAuthenticationCallbackView even on failure"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:51Z"

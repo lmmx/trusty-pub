@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pytest-dev/pytest/issues/10870"
-title = "Use PyPI Trusted Publishers feature to publish releases"
-state = "CLOSED"
-keyword = "trusted publisher"
-found_at = "2026-04-03T18:16:25Z"

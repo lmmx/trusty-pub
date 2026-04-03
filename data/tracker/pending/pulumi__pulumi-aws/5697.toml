@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-aws/issues/5697"
-title = "Importing a resource with region parameter fail, requires provider"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

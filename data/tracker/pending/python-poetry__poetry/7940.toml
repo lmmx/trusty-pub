@@ -1,5 +1,0 @@
-issue_url = "https://github.com/python-poetry/poetry/issues/7940"
-title = "Add support for publishing to PyPI with a trusted publisher"
-state = "OPEN"
-keyword = "trusted publisher"
-found_at = "2026-04-03T18:16:28Z"

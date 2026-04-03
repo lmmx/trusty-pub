@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi/issues/14509"
-title = "Running `pulumi up` sends an incorrect subject identifier to Providers"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

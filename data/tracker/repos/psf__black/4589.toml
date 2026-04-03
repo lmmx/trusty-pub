@@ -1,0 +1,5 @@
+issue_url = "https://github.com/psf/black/issues/4589"
+title = "[task] Upgrade `.github/workflows/pypi_upload.yml` to use Trusted Publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:19:49Z"

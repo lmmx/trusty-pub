@@ -1,5 +1,0 @@
-issue_url = "https://github.com/mlflow/mlflow/issues/21883"
-title = "[BUG] `get_databricks_host_creds` creates a throwaway WorkspaceClient on every REST request, causing repeated OIDC discovery"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:49Z"

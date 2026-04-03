@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/setuptools/issues/4025"
+title = "[FR] Hash-pin GitHub workflow Actions"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:22:39Z"

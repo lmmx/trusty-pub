@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/twine/issues/999"
+title = "Support the \"Trusted Publishing\" flow directly in `twine`"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:20:23Z"

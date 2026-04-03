@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pyg-team/pytorch_geometric/issues/9727"
-title = "FutureWarning using torch.load with torch>2.4, torch.serialization.add_safe_globals does not work for torch_geometric.data.Data"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:22Z"

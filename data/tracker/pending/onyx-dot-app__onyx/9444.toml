@@ -1,5 +1,0 @@
-issue_url = "https://github.com/onyx-dot-app/onyx/issues/9444"
-title = "MCP per-user OAuth shows connected in admin, but runtime tool execution fails with “no credentials found” and oauth_user_token stays empty"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:02Z"

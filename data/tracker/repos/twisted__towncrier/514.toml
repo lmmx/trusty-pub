@@ -1,0 +1,5 @@
+issue_url = "https://github.com/twisted/towncrier/issues/514"
+title = "Publish using the new PyPI and do a release to test"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:56:01Z"

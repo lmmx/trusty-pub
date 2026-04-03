@@ -1,5 +1,0 @@
-issue_url = "https://github.com/kserve/kserve/issues/3876"
-title = "Can kserve support eks pod download s3 model from another aws account?"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:26Z"

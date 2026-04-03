@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pytest-dev/pytest/issues/3060"
-title = "Publish releases directly from Travis after applying a tag"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:25Z"

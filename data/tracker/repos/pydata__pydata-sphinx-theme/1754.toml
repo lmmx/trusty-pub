@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pydata/pydata-sphinx-theme/issues/1754"
+title = "Use `trusted publisher` for PyPI releases"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T21:57:26Z"

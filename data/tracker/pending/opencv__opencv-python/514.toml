@@ -1,5 +1,0 @@
-issue_url = "https://github.com/opencv/opencv-python/issues/514"
-title = "from .cv2 import * E   ImportError: DLL load failed: The specified module could not be found."
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:03Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/kubeflow/pipelines/issues/10115"
-title = "[sdk] Authenticate to kfp.Client and kfp_server_api.RunServiceApi (possibly with Azure Active Directory OIDC)"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:26Z"

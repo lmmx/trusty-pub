@@ -1,5 +1,0 @@
-issue_url = "https://github.com/rucio/rucio/issues/8049"
-title = "Replace deprecate package for oidc (like jwkest) with mordern ones"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:40Z"

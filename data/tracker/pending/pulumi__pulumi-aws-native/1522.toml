@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-aws-native/issues/1522"
-title = "Unable to get oidc_provider details if deploying eks cluster from scratch using eks.cluster function "
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:18Z"

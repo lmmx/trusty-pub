@@ -1,0 +1,5 @@
+issue_url = "https://github.com/reata/sqllineage/issues/389"
+title = "Switch to PyPI Trusted Publishers"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T18:20:42Z"

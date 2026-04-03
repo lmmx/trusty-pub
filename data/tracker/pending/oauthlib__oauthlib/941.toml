@@ -1,5 +1,0 @@
-issue_url = "https://github.com/oauthlib/oauthlib/issues/941"
-title = "Add support for RFC 8707 `resource` parameter"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:00Z"

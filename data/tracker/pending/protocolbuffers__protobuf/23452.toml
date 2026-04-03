@@ -1,5 +1,0 @@
-issue_url = "https://github.com/protocolbuffers/protobuf/issues/23452"
-title = "Outdated google.golang.org/protobuf in examples/go (uses v1.27.1) — may expose CVE-2024-24786 (DoS / panic)"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:17Z"

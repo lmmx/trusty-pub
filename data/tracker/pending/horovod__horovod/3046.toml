@@ -1,5 +1,0 @@
-issue_url = "https://github.com/horovod/horovod/issues/3046"
-title = "build image by dockerfile (following), then run 'pytorch_imagenet_resnet50.py',however I get 'RuntimeError: DataLoader worker (pid 18255) is killed by signal: Killed.'"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:02Z"

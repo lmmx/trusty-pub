@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/cibuildwheel/issues/1973"
-title = "PermissionError when creating symlink to certifi certificate bundle on Cirrus CI"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:23Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/typeddjango/django-stubs/issues/2350"
-title = "django_stubs_ext.monkeypatch() and django_browser_reload results in circular import failure"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:10Z"

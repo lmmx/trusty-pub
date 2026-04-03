@@ -1,5 +1,0 @@
-issue_url = "https://github.com/intel/intel-extension-for-pytorch/issues/412"
-title = "ERROR: Could not find a version that satisfies the requirement torch==2.0.1a0 (from versions: 1.11.0, 1.12.0, 1.12.1, 1.13.0, 1.13.1, 2.0.0, 2.0.1)"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:07Z"

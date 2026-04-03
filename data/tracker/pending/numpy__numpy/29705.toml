@@ -1,5 +1,0 @@
-issue_url = "https://github.com/numpy/numpy/issues/29705"
-title = "NumPy 2.3.3 wheels do not upload to staging."
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:59Z"

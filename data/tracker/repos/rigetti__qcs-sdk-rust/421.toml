@@ -1,0 +1,5 @@
+issue_url = "https://github.com/rigetti/qcs-sdk-rust/issues/421"
+title = "Publishing to PyPI fails because username/password is no longer valid auth."
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:00:41Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jazzband/pip-tools/issues/2147"
+title = "[TODO] Migrate the release process to Trusted Publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:18:45Z"

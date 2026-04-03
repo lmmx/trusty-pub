@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pycaret/pycaret/issues/3690"
-title = "[BUG]: Run compare_models but always return empty list"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:20Z"

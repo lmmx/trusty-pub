@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/twine/issues/1196"
-title = "Should support for sdists in `tar.bz2` format be kept?"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

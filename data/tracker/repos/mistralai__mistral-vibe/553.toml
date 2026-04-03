@@ -1,0 +1,5 @@
+issue_url = "https://github.com/mistralai/mistral-vibe/issues/553"
+title = "bug: The GitHub Workflows are not protected against supply chain attacks"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:17:30Z"

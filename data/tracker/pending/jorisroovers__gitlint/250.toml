@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jorisroovers/gitlint/issues/250"
-title = "Binary .local/bin/gitlint missing after update from 0.16.0 to 0.17.0"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:17Z"

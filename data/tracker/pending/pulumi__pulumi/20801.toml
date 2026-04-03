@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi/issues/20801"
-title = "OIDC token not renewed for destroy or preview actions"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:18Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pybuilder/pybuilder/issues/753"
-title = "Build fails with error \"[Errno 2] No such file or directory\""
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:20Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jazzband/pip-tools/issues/2020"
-title = "Backend subprocess exited when trying to invoke get_requires_for_build_wheel "
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:13Z"

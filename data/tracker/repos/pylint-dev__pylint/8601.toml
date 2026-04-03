@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pylint-dev/pylint/issues/8601"
+title = "Use trusted publisher and the official pypi job to publish releases"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T21:20:04Z"

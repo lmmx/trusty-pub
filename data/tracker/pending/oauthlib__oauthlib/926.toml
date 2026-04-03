@@ -1,5 +1,0 @@
-issue_url = "https://github.com/oauthlib/oauthlib/issues/926"
-title = "signed_token_generator does not include claims from request.claims."
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:00Z"

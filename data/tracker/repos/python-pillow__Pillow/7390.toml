@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-pillow/Pillow/issues/7390"
+title = "Automate build and release to PyPI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:59:46Z"

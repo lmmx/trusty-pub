@@ -1,5 +1,0 @@
-issue_url = "https://github.com/shap/shap/issues/3979"
-title = "CI: Enable Trusted Publishing workflow for PyPI and TestPyPI to fix broken build_wheels workflow"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:48Z"

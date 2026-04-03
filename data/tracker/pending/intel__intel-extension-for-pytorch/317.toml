@@ -1,5 +1,0 @@
-issue_url = "https://github.com/intel/intel-extension-for-pytorch/issues/317"
-title = "importing failed due to undefined symbol: _ZNK5torch8autograd4Node4nameEv"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:07Z"

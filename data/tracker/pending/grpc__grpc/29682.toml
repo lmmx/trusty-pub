@@ -1,5 +1,0 @@
-issue_url = "https://github.com/grpc/grpc/issues/29682"
-title = "Being able to open a secure channel in python without any client side certificates"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:14:57Z"

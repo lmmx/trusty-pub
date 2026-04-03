@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-azure/issues/1087"
-title = "Error building AzureRM Client: Authenticating using the Azure CLI is only supported as a User (not a Service Principal)"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/twisted/twisted/issues/5446"
-title = "cross-platform API for enumerating X509 certificates trusted by the platform for transport layer security"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:10Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/python-zk/kazoo/issues/726"
+title = "Switch publishing to using the new Trusted Publishers action"
+state = "OPEN"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T21:24:12Z"

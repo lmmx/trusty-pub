@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jpadilla/pyjwt/issues/295"
-title = "Support computation and validation of OIDC at_hash value"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:18Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/tox-dev/tox/issues/3006"
-title = "RuntimeError: config set has been marked final and cannot be extended"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:07Z"

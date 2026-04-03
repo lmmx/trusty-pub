@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/auditwheel/issues/493"
-title = "too recent symbols, unable to repair the wheel"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:23Z"

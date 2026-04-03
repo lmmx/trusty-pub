@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/pip-audit/issues/563"
-title = "Private repo dependencies no longer being skipped"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:23Z"

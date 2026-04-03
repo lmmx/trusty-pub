@@ -1,5 +1,0 @@
-issue_url = "https://github.com/tensorflow/tensorflow/issues/17369"
-title = "TF 1.6 cannot be installed on MacOS because of failure in installing grpcio"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:01Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/invoke-ai/InvokeAI/issues/1967"
-title = "[bug]: \"[Winerror 267] The directory name is invalid while executing command Running setup.py install for jsonmerge\""
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:07Z"

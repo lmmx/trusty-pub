@@ -1,5 +1,0 @@
-issue_url = "https://github.com/nyudenkov/pysentry/issues/28"
-title = "ci/cd: configure trusted publishers on pypi and crates"
-state = "CLOSED"
-keyword = "trusted publisher"
-found_at = "2026-04-03T18:16:00Z"

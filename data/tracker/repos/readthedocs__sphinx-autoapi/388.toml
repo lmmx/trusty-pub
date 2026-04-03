@@ -1,0 +1,5 @@
+issue_url = "https://github.com/readthedocs/sphinx-autoapi/issues/388"
+title = "Use Github Actions and trusted publishing for releases"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:40:32Z"

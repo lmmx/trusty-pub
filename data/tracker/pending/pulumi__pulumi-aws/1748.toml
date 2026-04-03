@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-aws/issues/1748"
-title = "Problem importing AWS OIDC Provider"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:18Z"

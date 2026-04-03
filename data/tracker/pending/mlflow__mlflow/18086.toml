@@ -1,5 +1,0 @@
-issue_url = "https://github.com/mlflow/mlflow/issues/18086"
-title = "[FR] Support rotating JWT tokens in MLflow client (token-file & pluggable auth provider)"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:49Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi/issues/22108"
-title = "`pulumi config refresh` doesn't attribute config values to ESC environments"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

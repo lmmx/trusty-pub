@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pandas-dev/pandas/issues/61669"
+title = "ENH: Switch to trusted publishing for package upload to PyPI in CI"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:28:11Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/wheel/issues/548"
+title = "Switch to trusted publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:20:55Z"

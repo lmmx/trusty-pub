@@ -1,5 +1,0 @@
-issue_url = "https://github.com/projen/projen/issues/4473"
-title = "Support Multiple Release Branches with NPM Trusted Publishing Enabled"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:17Z"

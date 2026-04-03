@@ -1,5 +1,0 @@
-issue_url = "https://github.com/tfranzel/drf-spectacular/issues/1470"
-title = "ListAPIView overrides explicit @extend_schema responses"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:02Z"

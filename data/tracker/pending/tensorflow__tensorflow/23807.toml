@@ -1,5 +1,0 @@
-issue_url = "https://github.com/tensorflow/tensorflow/issues/23807"
-title = "Convert pb model to tflite model failed in docker environment"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:01Z"

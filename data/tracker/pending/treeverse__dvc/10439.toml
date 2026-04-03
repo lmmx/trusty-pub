@@ -1,5 +1,0 @@
-issue_url = "https://github.com/treeverse/dvc/issues/10439"
-title = "Git credentials does not work on a dvc pull for an imported dvc-git repository"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:17:08Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/open-meteo/sdk/issues/244"
+title = "Setup trusted publishing on PyPI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:27:07Z"

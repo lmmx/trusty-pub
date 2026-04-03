@@ -1,5 +1,0 @@
-issue_url = "https://github.com/matthew-brett/delocate/issues/196"
-title = "[maintenance hint] Use `pypi-publish` action with secretless publishing from GHA"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:39Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/kubeflow/pipelines/issues/11729"
-title = "[backend] IRSA for Kubeflow 2.4 Fails with “Access Denied” When Checking S3 Bucket"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:26Z"

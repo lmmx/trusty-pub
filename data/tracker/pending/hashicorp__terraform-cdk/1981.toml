@@ -1,5 +1,0 @@
-issue_url = "https://github.com/hashicorp/terraform-cdk/issues/1981"
-title = "Cannot use typescript template literals with terraform interpolation"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:14:59Z"

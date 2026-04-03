@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/setuptools/issues/1916"
-title = "setuptools 42.0.0 breaks with allow-hosts set globally"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/twine/issues/362"
-title = "Pluggable credential manager framework proposal [PoC included]"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

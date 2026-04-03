@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypa/cibuildwheel/issues/1348"
-title = "Python 3.11 wheels not build"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:23Z"

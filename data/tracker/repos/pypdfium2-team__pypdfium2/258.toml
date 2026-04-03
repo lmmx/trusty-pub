@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypdfium2-team/pypdfium2/issues/258"
+title = "PyPI: enable account 2FA and switch to \"trusted publishing\" (OIDC)"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:08:46Z"

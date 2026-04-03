@@ -1,5 +1,0 @@
-issue_url = "https://github.com/meltano/sdk/issues/1718"
-title = "feat(templates): Add optional release workflow to generated projects"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:41Z"

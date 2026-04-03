@@ -1,0 +1,5 @@
+issue_url = "https://github.com/typeddjango/django-stubs/issues/1922"
+title = "Use a trusted (GitHub action) publisher when publishing to PyPi"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:55:43Z"

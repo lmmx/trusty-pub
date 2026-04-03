@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-aws/issues/4989"
-title = "Test Flake `TestAssumeRoleSessionTags`"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

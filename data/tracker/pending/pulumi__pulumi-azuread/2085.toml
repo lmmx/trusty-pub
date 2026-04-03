@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-azuread/issues/2085"
-title = "Support ARM_OIDC_TOKEN_FILE_PATH for Azure workload identity"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:18Z"

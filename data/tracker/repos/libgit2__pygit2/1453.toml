@@ -1,0 +1,5 @@
+issue_url = "https://github.com/libgit2/pygit2/issues/1453"
+title = "[packaging] Publish to PyPI using Trusted Publishing"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T21:18:53Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pypackaging-native/pkgconf-pypi/issues/9"
-title = "Add release CI with cibuildwheel"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:24Z"

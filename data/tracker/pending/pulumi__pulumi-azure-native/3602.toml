@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-azure-native/issues/3602"
-title = "WebAppSourceControl tries to look up a \"User\" when a \"Service Principal\" is logged in."
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

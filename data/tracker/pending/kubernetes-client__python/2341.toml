@@ -1,5 +1,0 @@
-issue_url = "https://github.com/kubernetes-client/python/issues/2341"
-title = "_refresh_oidc is broken if using a publicly signed cert"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:26Z"

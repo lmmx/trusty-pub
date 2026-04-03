@@ -1,5 +1,0 @@
-issue_url = "https://github.com/iMerica/dj-rest-auth/issues/650"
-title = "BUG: SocialLoginSerializer.validate() checks if email exists, however complete_social_login from allauth already created the user, always ending up in error state"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:04Z"

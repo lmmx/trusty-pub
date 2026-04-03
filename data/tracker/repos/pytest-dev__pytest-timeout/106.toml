@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pytest-dev/pytest-timeout/issues/106"
+title = "automate pypi releases"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T18:19:50Z"

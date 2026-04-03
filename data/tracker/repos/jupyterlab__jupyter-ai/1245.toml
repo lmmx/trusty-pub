@@ -1,0 +1,5 @@
+issue_url = "https://github.com/jupyterlab/jupyter-ai/issues/1245"
+title = "Move `jupyter-ai` on PyPI  to Project Jupyter organization, use trusted publishers"
+state = "OPEN"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T21:25:07Z"

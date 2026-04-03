@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jazzband/django-pipeline/issues/723"
-title = "AttributeError: 'None' object has no attribute 'replace' or ValueError: The file '...' could not be found with <django.contrib.staticfiles.storage.ManifestStaticFilesStorage."
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:12Z"

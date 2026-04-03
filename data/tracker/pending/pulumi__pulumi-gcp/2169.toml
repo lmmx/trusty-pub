@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-gcp/issues/2169"
-title = "OauthIDPConfig throws RPC error even though quota project is set"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

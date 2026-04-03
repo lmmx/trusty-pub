@@ -1,5 +1,0 @@
-issue_url = "https://github.com/rucio/rucio/issues/8413"
-title = "Automatic mapping of unknown users identified via OIDC"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:40Z"

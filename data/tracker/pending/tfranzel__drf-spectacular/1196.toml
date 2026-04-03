@@ -1,5 +1,0 @@
-issue_url = "https://github.com/tfranzel/drf-spectacular/issues/1196"
-title = "Authenticating to OIDC server is not redirecting back to the page , but keeps staying on the tab that opens when authorizing."
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:17:02Z"

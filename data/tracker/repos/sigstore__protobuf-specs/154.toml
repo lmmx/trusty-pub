@@ -1,0 +1,5 @@
+issue_url = "https://github.com/sigstore/protobuf-specs/issues/154"
+title = "Python: switch release workflow to trusted publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:08:03Z"

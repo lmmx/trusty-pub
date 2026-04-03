@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pyodide/pyodide/issues/6171"
+title = "Publish PyPI packages on CI with Trusted Publishing"
+state = "OPEN"
+keyword = ""
+tracked_at = "2026-04-03T21:38:39Z"

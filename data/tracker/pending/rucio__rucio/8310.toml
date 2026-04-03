@@ -1,5 +1,0 @@
-issue_url = "https://github.com/rucio/rucio/issues/8310"
-title = "Feature Request: Add PKCE Support to OIDC Authentication"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:40Z"

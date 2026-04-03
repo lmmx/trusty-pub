@@ -1,5 +1,0 @@
-issue_url = "https://github.com/numpy/numpy/issues/22318"
-title = "Releasing PowerPC (ppc64le) wheels?"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:59Z"

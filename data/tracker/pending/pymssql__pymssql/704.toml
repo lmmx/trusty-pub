@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pymssql/pymssql/issues/704"
-title = "Installing latest version of pymssql in Python 2 returns error"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:23Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pypa/pyproject-hooks/issues/186"
+title = "Setup trusted publishing"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:08:21Z"

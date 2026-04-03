@@ -1,5 +1,0 @@
-issue_url = "https://github.com/nautobot/nautobot/issues/6887"
-title = "Change the group_sync.py so that it works for SAML"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:54Z"

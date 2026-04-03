@@ -1,5 +1,0 @@
-issue_url = "https://github.com/kedro-org/kedro/issues/2333"
-title = "Plan to improve ci/cd + automated release setup of `kedro-plugins`"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:22Z"

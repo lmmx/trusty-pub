@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-eks/issues/1873"
-title = "pulumi_eks NodeGroupV2 auto_scaling_group_tags not follow tag \"Name\""
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

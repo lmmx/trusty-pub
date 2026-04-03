@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pandas-dev/pandas/issues/18530"
-title = "0.21.0 wheels broken for older (<1.13) numpy version"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:09Z"

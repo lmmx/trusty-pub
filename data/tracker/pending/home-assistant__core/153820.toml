@@ -1,5 +1,0 @@
-issue_url = "https://github.com/home-assistant/core/issues/153820"
-title = "OAuth failure with MCP connector for ChatGPT and Claude (Claude Desktop works, Claude Remote fails)"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:15:01Z"

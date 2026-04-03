@@ -1,0 +1,5 @@
+issue_url = "https://github.com/pylint-dev/pylint-pytest/issues/62"
+title = "Generic evergreen CI and maintenance ergonomics"
+state = "CLOSED"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T22:04:44Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pulumi/pulumi-pulumiservice/issues/567"
-title = "Migrate YAML Integration Tests to pulumitest Framework"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:18Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/jowilf/starlette-admin/issues/218"
-title = "Enhancement: Add option to authenticate via oauth2/OIDC instead of username/password"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:18Z"

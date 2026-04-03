@@ -1,5 +1,0 @@
-issue_url = "https://github.com/sagemath/cysignals/issues/240"
-title = "Add pre-built wheels for Linux aarch64 (manylinux + musllinux)"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:41Z"

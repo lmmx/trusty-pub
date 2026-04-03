@@ -1,5 +1,0 @@
-issue_url = "https://github.com/hashicorp/terraform-cdk/issues/663"
-title = "EKS can't get OIDC issuer"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:14:59Z"

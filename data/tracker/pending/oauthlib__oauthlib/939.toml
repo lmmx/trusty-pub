@@ -1,5 +1,0 @@
-issue_url = "https://github.com/oauthlib/oauthlib/issues/939"
-title = "`JWTToken.estimate_type` claims all JWT-shaped tokens, preventing `BearerToken` from handling JWT access tokens"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:00Z"

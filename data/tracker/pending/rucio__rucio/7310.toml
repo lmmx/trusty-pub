@@ -1,5 +1,0 @@
-issue_url = "https://github.com/rucio/rucio/issues/7310"
-title = "Rework OIDC user authentication"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:40Z"

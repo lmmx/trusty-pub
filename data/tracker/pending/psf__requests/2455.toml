@@ -1,5 +1,0 @@
-issue_url = "https://github.com/psf/requests/issues/2455"
-title = "CERTIFICATE_VERIFY_FAILED with 2.5.2, works with 2.5.1"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:17Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pdm-project/pdm/issues/3423"
-title = "opening new config file with pdm config -e opens in read-only"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:10Z"

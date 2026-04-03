@@ -1,5 +1,0 @@
-issue_url = "https://github.com/kubernetes-client/python/issues/2311"
-title = "OIDC Auth does not work on Windows Python Client"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T18:15:26Z"

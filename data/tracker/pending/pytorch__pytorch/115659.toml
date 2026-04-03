@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pytorch/pytorch/issues/115659"
-title = "Clean up AWS credentials from PyTorch CI and replace them with OIDC"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T18:16:30Z"

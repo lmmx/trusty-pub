@@ -1,5 +1,0 @@
-issue_url = "https://github.com/pdm-project/pdm/issues/1845"
-title = "Avoiding duplicate index config in pip and unearth/pdm"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T18:16:10Z"
