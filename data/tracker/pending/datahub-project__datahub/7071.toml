@@ -1,5 +1,0 @@
-issue_url = "https://github.com/datahub-project/datahub/issues/7071"
-title = "Signing out when Keycloak is the OIDC provider lets you click back button to get back to DataHub"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:45Z"

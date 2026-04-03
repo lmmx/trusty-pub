@@ -1,5 +1,0 @@
-issue_url = "https://github.com/conan-io/conan/issues/13068"
-title = "conan install error: ERROR: Build-require 'strawberryperl' cannot be found in lockfile"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:38Z"

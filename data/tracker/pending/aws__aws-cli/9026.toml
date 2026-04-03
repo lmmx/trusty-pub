@@ -1,5 +1,0 @@
-issue_url = "https://github.com/aws/aws-cli/issues/9026"
-title = "Cannot use FIPS s3 endpoints while using SSO."
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:14Z"

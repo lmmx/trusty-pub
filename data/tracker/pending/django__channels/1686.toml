@@ -1,5 +1,0 @@
-issue_url = "https://github.com/django/channels/issues/1686"
-title = "Session data in AuthMiddlewareStack"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:51Z"

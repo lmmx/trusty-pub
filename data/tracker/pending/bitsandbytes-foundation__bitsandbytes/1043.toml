@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bitsandbytes-foundation/bitsandbytes/issues/1043"
-title = "Distribute pip wheels for the architecture they are built for"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:20Z"

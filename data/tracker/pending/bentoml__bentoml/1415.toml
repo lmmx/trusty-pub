@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bentoml/BentoML/issues/1415"
-title = "Allow BentoML User to set custom access_token headers"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:19Z"

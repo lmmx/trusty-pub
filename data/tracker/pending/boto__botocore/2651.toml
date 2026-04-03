@@ -1,5 +1,0 @@
-issue_url = "https://github.com/boto/botocore/issues/2651"
-title = "sso-oidc exceptions don't translate \"error_description\" into ClientError message field"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:23Z"

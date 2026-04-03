@@ -1,5 +1,0 @@
-issue_url = "https://github.com/django-oauth/django-oauth-toolkit/issues/1287"
-title = "Error if multiples RP ask to logout the same user"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:51Z"

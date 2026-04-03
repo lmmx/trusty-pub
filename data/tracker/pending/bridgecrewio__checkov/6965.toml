@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bridgecrewio/checkov/issues/6965"
-title = "Checkov scans fail for OIDC claims analysis for GitHub on Check on our CI"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:24Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/django-oauth/django-oauth-toolkit/issues/1453"
-title = "fix test.mig_settings for OIDC migrations and swappable dependencies?"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:51Z"

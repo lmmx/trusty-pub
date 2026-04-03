@@ -1,5 +1,0 @@
-issue_url = "https://github.com/boto/boto3/issues/3768"
-title = "SSOOIDC Client register_client allows configuration scopes which enables unsupported refreshToken"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:23Z"

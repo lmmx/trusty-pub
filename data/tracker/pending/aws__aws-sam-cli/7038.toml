@@ -1,5 +1,0 @@
-issue_url = "https://github.com/aws/aws-sam-cli/issues/7038"
-title = "SAM build crashes using terraform "
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:14Z"

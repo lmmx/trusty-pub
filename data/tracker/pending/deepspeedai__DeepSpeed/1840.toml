@@ -1,5 +1,0 @@
-issue_url = "https://github.com/deepspeedai/DeepSpeed/issues/1840"
-title = "[BUG] DS_BUILD_OPS =1 does not work"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:48Z"

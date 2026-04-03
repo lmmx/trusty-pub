@@ -1,5 +1,0 @@
-issue_url = "https://github.com/confluentinc/confluent-kafka-python/issues/1713"
-title = "AdminClient is stuck at `CONNECT` when using `OAUTHBEARER` with `SASL_SSL` protocol"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:38Z"

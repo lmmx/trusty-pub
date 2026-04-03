@@ -1,5 +1,0 @@
-issue_url = "https://github.com/databricks/databricks-sql-python/issues/347"
-title = "Self-signed certificate in certificate chain error on Debian-based system with databricks-sql-connector >= 2.6.0"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:44Z"

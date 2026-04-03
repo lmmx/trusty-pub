@@ -1,5 +1,0 @@
-issue_url = "https://github.com/aws/jsii/issues/3433"
-title = "ENOENT: no such file or directory, open 'node_modules/@aws-sdk/client-secrets-manager/.jsii'"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:15Z"

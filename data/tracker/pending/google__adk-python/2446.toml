@@ -1,5 +1,0 @@
-issue_url = "https://github.com/google/adk-python/issues/2446"
-title = "Helper functions to get token from HTTPBearer, Session state key or credentials service"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:34:15Z"

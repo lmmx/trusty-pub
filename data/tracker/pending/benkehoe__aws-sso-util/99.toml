@@ -1,5 +1,0 @@
-issue_url = "https://github.com/benkehoe/aws-sso-util/issues/99"
-title = "Update vendored botocore, support refreshtoken"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:19Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/dbt-labs/dbt-adapters/issues/1234"
-title = "[Feature] Add support for Snowflake Workload Identity Federation"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:47Z"

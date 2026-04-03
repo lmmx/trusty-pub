@@ -1,5 +1,0 @@
-issue_url = "https://github.com/element-hq/synapse/issues/12782"
-title = "We might not be correctly clearing OIDC cookies when handling an OIDC callback"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:59Z"

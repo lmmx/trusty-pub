@@ -1,5 +1,0 @@
-issue_url = "https://github.com/element-hq/synapse/issues/19303"
-title = "Cannot login in OIDC on localhost + Webkit"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:59Z"

@@ -1,5 +1,0 @@
-issue_url = "https://github.com/dagster-io/dagster/issues/15354"
-title = "Hybrid deployment guide advises using persistent credentials for image build"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:42Z"

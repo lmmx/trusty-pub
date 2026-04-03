@@ -1,5 +1,0 @@
-issue_url = "https://github.com/daytonaio/daytona/issues/2191"
-title = "[Bug] Sandbox network requests fail with 504 Gateway Timeout due to proxy configuration issues"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:47Z"

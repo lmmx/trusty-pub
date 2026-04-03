@@ -1,5 +1,0 @@
-issue_url = "https://github.com/conda/rattler/issues/1909"
-title = "Print a helpful tip when trusted publishing is not properly configured"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:38Z"

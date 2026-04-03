@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bentoml/BentoML/issues/2037"
-title = "Inferring pip packages doesn't pick-up extra's"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:19Z"

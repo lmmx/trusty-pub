@@ -1,5 +1,0 @@
-issue_url = "https://github.com/coin-or/CyLP/issues/214"
-title = "Release 0.93.0 failed due to outdated pypa/gh-action-pypi-publish release"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:36Z"

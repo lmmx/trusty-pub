@@ -1,5 +1,0 @@
-issue_url = "https://github.com/element-hq/synapse/issues/9250"
-title = "Support unsigned id_tokens for OIDC providers"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:59Z"

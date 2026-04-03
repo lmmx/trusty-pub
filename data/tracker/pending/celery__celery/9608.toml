@@ -1,5 +1,0 @@
-issue_url = "https://github.com/celery/celery/issues/9608"
-title = "Using a custom task_id on a chain results in an incomplete as_tuple graph."
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:30Z"

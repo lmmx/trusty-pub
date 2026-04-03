@@ -1,5 +1,0 @@
-issue_url = "https://github.com/confluentinc/confluent-kafka-python/issues/1934"
-title = "Issue- Python kafka producer to send the data using the kerberos authentication."
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:38Z"

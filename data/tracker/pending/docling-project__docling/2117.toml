@@ -1,5 +1,0 @@
-issue_url = "https://github.com/docling-project/docling/issues/2117"
-title = "NotADirectoryError during TemporaryDirectory cleanup on Windows"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:53Z"

@@ -1,0 +1,5 @@
+issue_url = "https://github.com/cherrypy/cherrypy/issues/2049"
+title = "TestPyPI trusted publisher status"
+state = "CLOSED"
+keyword = "trusted publisher"
+tracked_at = "2026-04-03T17:54:35Z"

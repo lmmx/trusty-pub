@@ -1,5 +1,0 @@
-issue_url = "https://github.com/certbot/certbot/issues/2883"
-title = "setuptools pkg_resources pip wheel failed with error code 1"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:31Z"

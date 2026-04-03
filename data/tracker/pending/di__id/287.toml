@@ -1,5 +1,0 @@
-issue_url = "https://github.com/di/id/issues/287"
-title = "gcp-related tests broken on PyPy3.10 7.3.17"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:49Z"

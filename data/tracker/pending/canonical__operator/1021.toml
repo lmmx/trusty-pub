@@ -1,5 +1,0 @@
-issue_url = "https://github.com/canonical/operator/issues/1021"
-title = "Use PyPI's \"Trusted Publisher\" functionality to publish packages"
-state = "CLOSED"
-keyword = "trusted publisher"
-found_at = "2026-04-03T15:33:26Z"

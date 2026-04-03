@@ -1,5 +1,0 @@
-issue_url = "https://github.com/dbt-labs/dbt-adapters/issues/1036"
-title = "[Regression] latest PyPI release v1.9.3 hinders security updates"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:47Z"

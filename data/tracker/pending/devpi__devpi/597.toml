@@ -1,5 +1,0 @@
-issue_url = "https://github.com/devpi/devpi/issues/597"
-title = "ConnectionResetError(104, 'Connection reset by peer'))"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:49Z"

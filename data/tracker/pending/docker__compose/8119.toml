@@ -1,5 +1,0 @@
-issue_url = "https://github.com/docker/compose/issues/8119"
-title = "Insufficient error message while using `docker-compose`"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:53Z"

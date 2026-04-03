@@ -1,5 +1,0 @@
-issue_url = "https://github.com/cargo-lambda/cargo-lambda/issues/551"
-title = "Runtime.ExitError when building with SAM from Github Actions"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:26Z"

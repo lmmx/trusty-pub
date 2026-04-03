@@ -1,5 +1,0 @@
-issue_url = "https://github.com/certbot/certbot/issues/9181"
-title = "Update fails with: \"Could not choose appropriate plugin for updaters: Could not select or initialize the requested installer None.\""
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:31Z"

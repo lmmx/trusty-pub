@@ -1,5 +1,0 @@
-issue_url = "https://github.com/aws/aws-sam-cli/issues/4972"
-title = "Bug: Config file permissions_provider parameter conflict when using bootstrapping with OIDC"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:14Z"

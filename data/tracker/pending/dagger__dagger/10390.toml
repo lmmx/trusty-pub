@@ -1,5 +1,0 @@
-issue_url = "https://github.com/dagger/dagger/issues/10390"
-title = "`failed to stat` local path, `no such file or directory`"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:42Z"

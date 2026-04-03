@@ -1,5 +1,0 @@
-issue_url = "https://github.com/cloud-custodian/cloud-custodian/issues/6172"
-title = "aws.iam-role - filter based on trust policy"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:35Z"

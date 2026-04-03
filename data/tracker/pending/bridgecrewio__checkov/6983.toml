@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bridgecrewio/checkov/issues/6983"
-title = "CKV_AWS_358: Unknown solution to pass - possibly also a bug"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:24Z"

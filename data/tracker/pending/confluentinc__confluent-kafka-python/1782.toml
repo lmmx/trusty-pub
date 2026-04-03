@@ -1,5 +1,0 @@
-issue_url = "https://github.com/confluentinc/confluent-kafka-python/issues/1782"
-title = "Failed to retrieve OIDC token in serverless architecture"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:38Z"

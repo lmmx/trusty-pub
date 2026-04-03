@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bridgecrewio/checkov/issues/6986"
-title = "CKV_AWS_358 is (seemingly unintentionally) enforcing condition ordering in OIDC policies"
-state = "CLOSED"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:24Z"

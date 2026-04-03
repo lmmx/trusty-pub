@@ -1,5 +1,0 @@
-issue_url = "https://github.com/aws/aws-sdk-pandas/issues/151"
-title = "awswrangler import error on python:3.7 dockers"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:14Z"

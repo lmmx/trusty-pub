@@ -1,5 +1,0 @@
-issue_url = "https://github.com/crossbario/autobahn-python/issues/1842"
-title = "[CHORE] Add SLSA Level 2 & 3 provenance generation for 26.1.1"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:40Z"

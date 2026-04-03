@@ -1,5 +1,0 @@
-issue_url = "https://github.com/celery/celery/issues/9649"
-title = "ModuleNotFoundError kombu.transport.native_delayed_delivery"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:30Z"

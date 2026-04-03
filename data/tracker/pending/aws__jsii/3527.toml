@@ -1,5 +1,0 @@
-issue_url = "https://github.com/aws/jsii/issues/3527"
-title = "entire CDK: NPM bundle includes semantically incorrect JavaScript"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:15Z"

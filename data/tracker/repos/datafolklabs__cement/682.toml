@@ -1,0 +1,5 @@
+issue_url = "https://github.com/datafolklabs/cement/issues/682"
+title = "Automate PyPi Publishing on Github Release"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T17:55:30Z"

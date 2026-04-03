@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bentoml/BentoML/issues/4687"
-title = "bug:  module 'bentoml' has no attribute 'build'"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:19Z"

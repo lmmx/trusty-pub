@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bridgecrewio/checkov/issues/7005"
-title = "CKV_GCP_125 goes against Google published best-practices"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:24Z"

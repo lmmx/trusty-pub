@@ -1,5 +1,0 @@
-issue_url = "https://github.com/canonical/craft-parts/issues/1447"
-title = "snap build fails if go must download the version"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:26Z"

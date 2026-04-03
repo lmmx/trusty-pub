@@ -1,5 +1,0 @@
-issue_url = "https://github.com/dotnet/core/issues/4542"
-title = "Script tries to downagrade .NET Standard 2.1 Targeting Pack"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:54Z"

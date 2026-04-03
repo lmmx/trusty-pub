@@ -1,0 +1,5 @@
+issue_url = "https://github.com/element-hq/synapse/issues/19086"
+title = "Upload Python wheels directly to PyPI through the \"trusted publishing\" mechanism"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-03T17:56:09Z"

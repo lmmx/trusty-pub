@@ -1,5 +1,0 @@
-issue_url = "https://github.com/google/adk-python/issues/3845"
-title = "Security Critical: Client_secret is shared in OAuth2 flow with authenticated function tool"
-state = "OPEN"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:34:15Z"

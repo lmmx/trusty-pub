@@ -1,5 +1,0 @@
-issue_url = "https://github.com/bokeh/bokeh/issues/14757"
-title = "Publish npm packages in CI with trusted provders"
-state = "CLOSED"
-keyword = "trusted publishing"
-found_at = "2026-04-03T15:33:22Z"

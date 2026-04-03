@@ -1,5 +1,0 @@
-issue_url = "https://github.com/element-hq/synapse/issues/17896"
-title = "Update OIDC Authentik documentation to mention required `jwt_config` Synapse configuration"
-state = "OPEN"
-keyword = "OIDC"
-found_at = "2026-04-03T15:33:59Z"
