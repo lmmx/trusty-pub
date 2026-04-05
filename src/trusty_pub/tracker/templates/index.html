@@ -163,12 +163,12 @@
       }
     });
     // -- auto-search issues when selecting an untracked repo ----------------
-    document.getElementById("detail").addEventListener("htmx:afterSwap", function () {
+    document.getElementById("detail").addEventListener("htmx:afterSwap", function (e) {
+      if (e.detail.target !== this) return;          // ignore bubbled child swaps
       var tracked = this.querySelector(".tracked-section");
       if (!tracked) {
         var form = this.querySelector(".issue-search form");
         if (form) {
-          // Ensure htmx has bound the new content before triggering
           htmx.process(form);
           htmx.trigger(form, "submit");
         }
