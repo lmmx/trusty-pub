@@ -34,6 +34,14 @@
       <label><input type="checkbox" id="show-notp" checked> 🔴 Missing</label>
       <label><input type="checkbox" id="tracked-only"> Tracked only</label>
     </div>
+    <section id="track-section" class="track-section">
+      <form id="track-form">
+        <input type="text" id="track-url-input"
+               placeholder="Paste a GitHub issue URL to track…">
+        <button type="submit" class="track-btn">Track</button>
+      </form>
+      <div id="track-result" hidden></div>
+    </section>
     <div id="table"></div>
     <div id="detail"></div>
   </section>
@@ -45,6 +53,7 @@
 
   <script src="https://unpkg.com/gridjs/dist/gridjs.umd.js"></script>
   <script src="auth.js"></script>
+  <script src="track.js"></script>
   <script src="app.js"></script>
   <footer>
     <div class="credits">

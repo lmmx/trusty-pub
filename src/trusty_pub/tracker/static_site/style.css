@@ -178,3 +178,25 @@ footer {
   font-family: "Space Grotesk", sans-serif;
   font-size: .8rem; font-weight: 500; color: #24292f;
 }
+
+/* track section */
+.track-section {
+  margin-bottom: .75rem;
+}
+.track-section form {
+  display: flex; gap: .5rem;
+}
+.track-section input[type="text"] {
+  flex: 1; padding: .4rem .6rem; font-size: .85rem;
+  border: 1px solid #d0d7de; border-radius: 5px;
+  font-family: "Inconsolata", monospace;
+}
+.track-section input[type="text"]:focus {
+  outline: 2px solid #0969da; border-color: transparent;
+}
+#track-result {
+  margin-top: .5rem; font-size: .85rem;
+}
+#track-result .kw {
+  font-size: .75rem; color: #6b7280; font-style: italic;
+}
