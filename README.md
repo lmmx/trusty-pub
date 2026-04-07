@@ -29,9 +29,6 @@ Then we look for signs of Trusted Publishing:
 - The presence of username/password credentials for a package upload
   is a sign that Trusted Publishing is **not** being used.
 
-[fastmcp]: https://github.com/PrefectHQ/fastmcp/blob/b1505ba5d7cd90cbd04912f2e88cdd42c57b9e80/.github/workflows/publish.yml#L23
-[grepow]: https://github.com/lmmx/grepow
-
 ### Further iterations
 
 It quickly became clear that while it was polite not to hammer PyPI,
@@ -56,3 +53,6 @@ at [lmmx.github.io/trusty-pub](https://lmmx.github.io/trusty-pub/).
 
 As well as a search bar, there's a Resources tab with links to
 blogs, incident reports, et cet.
+
+[fastmcp]: https://github.com/PrefectHQ/fastmcp/blob/b1505ba5d7cd90cbd04912f2e88cdd42c57b9e80/.github/workflows/publish.yml#L23
+[grepow]: https://github.com/lmmx/grepow
