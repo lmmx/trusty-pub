@@ -147,3 +147,34 @@ footer {
 .credits { margin-bottom: .35rem; }
 .credits a { color: #888; text-decoration: underline; }
 .credits a:hover { color: #0969da; }
+
+/* auth */
+#auth {
+  position: absolute; top: 8px; right: 10px;
+}
+.gh-link {
+  position: absolute; top: 10px; left: auto; right: auto;
+  top: 40px; right: 10px;
+}
+.auth-btn {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: .8rem; font-weight: 500;
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .4rem .8rem; border-radius: 6px;
+  border: 1px solid #d0d7de; background: #f6f8fa;
+  color: #24292f; cursor: pointer;
+  transition: background .15s;
+}
+.auth-btn:hover { background: #eaeef2; }
+.auth-btn-small { font-size: .75rem; padding: .25rem .55rem; }
+.auth-user {
+  display: flex; align-items: center; gap: .45rem;
+}
+.auth-avatar {
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 1px solid #d0d7de;
+}
+.auth-name {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: .8rem; font-weight: 500; color: #24292f;
+}
