@@ -129,6 +129,9 @@ const auth = {
     }
 
     document.getElementById("logout-btn").onclick = () => this.logout();
+
+    const trackSection = document.getElementById("track-section");
+    if (trackSection) trackSection.hidden = !this.isLoggedIn();
   },
 
   async init() {
