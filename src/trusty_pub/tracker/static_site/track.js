@@ -98,7 +98,7 @@ async function trackIssueUrl(url) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          message: `Track ${owner}/${repo}#${number}`,
+          message: `Track issue ${number} in ${owner}/${repo}`,
           content: toBase64(toml),
           ...(sha && { sha }),
         }),
