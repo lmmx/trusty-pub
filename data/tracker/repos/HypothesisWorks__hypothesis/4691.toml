@@ -1,0 +1,5 @@
+issue_url = "https://github.com/HypothesisWorks/hypothesis/issues/4691"
+title = "Switch to Trusted Publishing for package upload to PyPI in CI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-04-07T10:24:25Z"
