@@ -74,6 +74,7 @@ class TrackerStore:
         self.packages_dir = target / self.meta["packages_dir"]
         self.pending_dir = target / self.meta["pending_dir"]
         self.keywords: list[str] = self.meta["keywords"]
+        self._shortlist: set[str] | None = None
         self._load_sources()
 
     # -- read-only source data ---------------------------------------------
@@ -103,6 +104,28 @@ class TrackerStore:
             .sort("rank")
         )
 
+    def load_shortlist(self, text: str) -> int:
+        """Parse a newline-delimited list of repos (owner/repo or owner__repo)
+        and store as slugs. Returns count of valid slugs loaded."""
+        slugs: set[str] = set()
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            # accept either owner/repo or owner__repo
+            candidate = line.replace("/", "__") if "/" in line else line
+            if _valid_slug(candidate):
+                slugs.add(candidate)
+        self._shortlist = slugs if slugs else None
+        return len(slugs)
+
+    def clear_shortlist(self) -> None:
+        self._shortlist = None
+
+    @property
+    def has_shortlist(self) -> bool:
+        return self._shortlist is not None
+
     def search_packages(
         self,
         query: str,
@@ -110,6 +133,7 @@ class TrackerStore:
         offset: int = 0,
         hide_tp: bool = True,
         tracked_only: bool = False,
+        shortlist_only: bool = False,
     ) -> list[dict]:
         tracked = self.tracked_slugs()
 
@@ -126,6 +150,9 @@ class TrackerStore:
             if not tracked_list:
                 return []
             filtered = filtered.filter(pl.col("slug").is_in(tracked_list))
+
+        if shortlist_only and self._shortlist:
+            filtered = filtered.filter(pl.col("slug").is_in(list(self._shortlist)))
 
         results = filtered.slice(offset, limit).to_dicts()
         for row in results:
@@ -276,13 +303,15 @@ class TrackerStore:
                     continue
 
             packages = self.get_repo_packages(slug)
-            repos.append({
-                "slug": slug,
-                "owner_repo": owner_repo,
-                "issues": issues,
-                "packages": packages,
-                "issue_count": len(issues),
-            })
+            repos.append(
+                {
+                    "slug": slug,
+                    "owner_repo": owner_repo,
+                    "issues": issues,
+                    "packages": packages,
+                    "issue_count": len(issues),
+                }
+            )
 
         return repos[offset : offset + limit]
 

@@ -298,3 +298,15 @@ button:hover { background: #f0f0f0; }
 .triage-bulk-actions {
   margin-top: 0.25rem;
 }
+
+.file-upload-btn {
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 0.85em;
+}
+.shortlist-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-left: 0.5em;
+}

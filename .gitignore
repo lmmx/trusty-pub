@@ -12,3 +12,7 @@ data/workflows/
 site/
 
 data/*.txt
+.env
+data/*report.tsv
+data/triage_results.tsv
+scripts/*_triage.py

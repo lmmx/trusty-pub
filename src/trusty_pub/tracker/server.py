@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Query, Request
+from fastapi import FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -64,6 +64,7 @@ def create_app(target: Path) -> FastAPI:
         q: str = Query(""),
         hide_tp: str = Query(""),
         tracked_only: str = Query(""),
+        shortlist_only: str = Query(""),
         offset: int = Query(0),
     ):
         results = store.search_packages(
@@ -72,6 +73,7 @@ def create_app(target: Path) -> FastAPI:
             offset=offset,
             hide_tp=hide_tp == "on",
             tracked_only=tracked_only == "on",
+            shortlist_only=shortlist_only == "on",
         )
         has_more = len(results) == _PAGE_SIZE
         next_offset = offset + _PAGE_SIZE
@@ -86,6 +88,27 @@ def create_app(target: Path) -> FastAPI:
                 "has_more": has_more,
                 "next_offset": next_offset,
             },
+        )
+
+    @app.post("/shortlist", response_class=HTMLResponse)
+    async def upload_shortlist(
+        request: Request,
+        file: UploadFile = File(...),
+    ):
+        content = (await file.read()).decode("utf-8", errors="replace")
+        count = store.load_shortlist(content)
+        # re-trigger search to reflect new filter
+        return HTMLResponse(
+            f'<span class="stat">{count} repos in shortlist</span>',
+            headers={"HX-Trigger": "shortlistChanged"},
+        )
+
+    @app.post("/shortlist/clear", response_class=HTMLResponse)
+    async def clear_shortlist(request: Request):
+        store.clear_shortlist()
+        return HTMLResponse(
+            '<span class="stat-dim">No shortlist loaded</span>',
+            headers={"HX-Trigger": "shortlistChanged"},
         )
 
     @app.get("/repo/{slug}", response_class=HTMLResponse)
@@ -165,9 +188,7 @@ def create_app(target: Path) -> FastAPI:
             issue["title"],
             issue["state"],
         )
-        return _repo_detail_response(
-            request, slug, flash=f"Tracked #{issue['number']}"
-        )
+        return _repo_detail_response(request, slug, flash=f"Tracked #{issue['number']}")
 
     @app.get("/status", response_class=HTMLResponse)
     async def status(request: Request):

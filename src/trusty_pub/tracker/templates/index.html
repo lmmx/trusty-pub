@@ -54,6 +54,24 @@
                    hx-include="#search-input, .search-filter">
             Tracked only
           </label>
+        
+          <label class="filter-toggle">
+            <input type="checkbox" name="shortlist_only" class="search-filter"
+                   id="shortlist-check"
+                   hx-get="/search" hx-trigger="change"
+                   hx-target="#results" hx-swap="innerHTML"
+                   hx-include="#search-input, .search-filter"
+                   disabled>
+            Shortlist only
+          </label>
+        
+          <span class="shortlist-controls">
+            <label class="file-upload-btn">
+              Load shortlist
+              <input type="file" accept=".txt" id="shortlist-file" hidden>
+            </label>
+            <span id="shortlist-status" class="stat-dim">No shortlist loaded</span>
+          </span>
         </div>
         <div id="results"></div>
       </section>
@@ -172,6 +190,34 @@
           htmx.process(form);
           htmx.trigger(form, "submit");
         }
+      }
+    });
+   
+    // -- shortlist file upload -------------------------------------------------
+    document.getElementById("shortlist-file").addEventListener("change", function () {
+      if (!this.files.length) return;
+      var formData = new FormData();
+      formData.append("file", this.files[0]);
+      fetch("/shortlist", { method: "POST", body: formData })
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+          document.getElementById("shortlist-status").innerHTML = html;
+          document.getElementById("shortlist-check").disabled = false;
+          // re-trigger search if checkbox is already checked
+          var cb = document.getElementById("shortlist-check");
+          if (cb.checked) {
+            htmx.trigger(cb, "change");
+          }
+        });
+      // reset so re-selecting the same file works
+      this.value = "";
+    });
+    
+    // listen for shortlistChanged to refresh search if filter is active
+    document.body.addEventListener("shortlistChanged", function () {
+      var cb = document.getElementById("shortlist-check");
+      if (cb.checked) {
+        htmx.trigger(cb, "change");
       }
     });
   })();
