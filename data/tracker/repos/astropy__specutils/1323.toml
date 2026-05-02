@@ -1,0 +1,5 @@
+issue_url = "https://github.com/astropy/specutils/issues/1323"
+title = "REL/SEC: enabling trusted publishing for PyPI"
+state = "OPEN"
+keyword = "trusted publishing"
+tracked_at = "2026-05-02T10:47:13Z"
